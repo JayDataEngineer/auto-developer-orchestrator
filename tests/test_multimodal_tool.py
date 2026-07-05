@@ -13,8 +13,8 @@ Both are locked here without touching Docker or spending tokens: a fake
 ``backend.read()``), a fake ``exec_client`` handles curl/ONNX/ffmpeg commands,
 and a fake model stands in for the multimodal LLM. The fake model's
 ``rejects_video`` flag models the real failure mode that justifies the video
-waterfall — the model rejects a raw ``video_url`` block but accepts per-frame
-``image_url`` blocks.
+waterfall — the model rejects a whole-clip ``video_url`` block but accepts
+per-frame native ``image`` blocks.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ import json
 
 import pytest
 
-from pux_harness.sandbox.tools import _multimodal_tool, _multimodal_mega_tool
+from pux_harness.sandbox.tools.multimodal import _multimodal_tool, _multimodal_mega_tool
 
 
 class _Resp:
@@ -33,9 +33,9 @@ class _Resp:
 class _FakeModel:
     """``raises`` short-circuits every invoke; ``content`` can be a str, a list
     of content blocks, or empty to simulate null output. ``rejects_video`` makes
-    invoke raise ONLY when the message carries a ``video_url`` block (so a clip
-    fails Tier 1 but per-frame image calls succeed — the realistic keyframe
-    trigger). Records call count."""
+    invoke raise ONLY when the message carries a whole-clip video block (so a
+    whole-clip Tier-1 call fails but per-frame ``image`` calls succeed — the
+    realistic keyframe trigger). Records call count."""
 
     def __init__(self, content="a red square", raises=None, name="mimo-v2.5",
                  rejects_video=False):
@@ -48,13 +48,18 @@ class _FakeModel:
     def invoke(self, msgs):
         self.calls += 1
         if self._rejects_video and self._has_video_block(msgs):
-            raise RuntimeError("model rejects video_url")
+            raise RuntimeError("model rejects whole-clip video")
         if self._raises:
             raise self._raises
         return _Resp(self._content)
 
     @staticmethod
     def _has_video_block(msgs):
+        # Keys on the ``video_url`` data-URI block — the ONLY serializable
+        # whole-clip video shape. langchain-openai RAISES on a native
+        # ``{"type": "video"}`` block (block_translators/openai.py:149), so
+        # _media.py emits ``video_url`` for whole clips + native ``image`` for
+        # keyframes (video_frame). This fake models the realistic rejection.
         for m in msgs:
             content = getattr(m, "content", None)
             if isinstance(content, list):
@@ -167,6 +172,61 @@ def test_simple_audio_model_raises_is_model_failed_not_unavailable():
     assert "audio 429" in res["primary_error"]
 
 
+def test_simple_audio_model_non_answer_is_model_non_answer():
+    # The live failure mode this guard exists for: the call returned 200, but the
+    # model's body confesses the audio never landed ('no audio was attached').
+    # That is NOT a success and NOT a generic model_failed — it's a distinct
+    # model_non_answer so the agent doesn't mistake the non-answer for the real
+    # judgment and hand it to the operator as the result.
+    backend = _FakeBackend()
+    exec_ = _FakeExec()
+    tool = _multimodal_tool(backend, exec_, _FakeModel(
+        content="I'm sorry, but no audio was attached to your message."))
+    res = _invoke(tool, {"media_path": "/sandbox/workspace/clip.mp3"})
+
+    assert res["success"] is False
+    assert res["media_type"] == "audio"
+    assert res["reason"] == "model_non_answer"
+    assert "no audio was attached" in res["primary_error"]
+    # No ONNX fallback ran (the simple tool never falls back).
+    assert [c for c in exec_.cmds if "describe_image.py" in c] == []
+
+
+def test_simple_audio_real_description_not_flagged():
+    # Precision corollary: a real audio description does NOT trip the guard. The
+    # phrase list is curated so a genuine transcript ('a speaker says…') is
+    # returned as the model's answer, not downgraded to a non-answer.
+    backend = _FakeBackend()
+    exec_ = _FakeExec()
+    tool = _multimodal_tool(backend, exec_, _FakeModel(
+        content="A speaker says 'hello' and welcomes the listener. "
+                "Brief background hum, no music."))
+    res = _invoke(tool, {"media_path": "/sandbox/workspace/clip.wav"})
+
+    assert res["success"] is True
+    assert res["source"] == "primary"
+    assert res["media_type"] == "audio"
+    assert "hello" in res["description"]
+
+
+def test_simple_image_non_answer_not_flagged_guard_is_audio_scoped():
+    # The guard is AUDIO-scoped by design (image/video 'I don't see…' overlaps
+    # too heavily with legitimate descriptions — the known failure mode was
+    # specifically audio). An image non-answer therefore passes through as the
+    # model's reply; this locks the scope boundary so it stays a conscious
+    # choice, not an oversight, if image detection is added later.
+    backend = _FakeBackend()
+    exec_ = _FakeExec()
+    tool = _multimodal_tool(backend, exec_, _FakeModel(
+        content="I don't see any image in the request."))
+    res = _invoke(tool, {"media_path": "/sandbox/workspace/qc_01.png"})
+
+    # NOT model_non_answer — the audio-only guard let this through.
+    assert res["success"] is True
+    assert res["source"] == "primary"
+    assert res["media_type"] == "image"
+
+
 def test_simple_no_model_returns_no_model_error():
     # Offline --check path: vision_model=None. The simple tool can't do anything
     # (it has no fallback), so it says so honestly + points at the alternatives.
@@ -252,6 +312,23 @@ def test_mega_audio_model_raises_is_honest_terminal_tier():
     assert "audio 429" in res["primary_error"]
 
 
+def test_mega_audio_model_non_answer_falls_through_to_unavailable():
+    # The non-answer guard raises _MediaNonAnswer; mega catches it as a generic
+    # primary failure (the WHY doesn't matter to mega — it falls back regardless)
+    # and lands at the same honest audio_unavailable_offline terminal tier, with
+    # the non-answer text carried as primary_error so the fallback is observable.
+    backend = _FakeBackend()
+    exec_ = _FakeExec()
+    tool = _multimodal_mega_tool(backend, exec_, _FakeModel(
+        content="I'm sorry, but no audio was attached to your message."))
+    res = _invoke(tool, {"media_path": "/sandbox/workspace/clip.mp3"})
+
+    assert res["success"] is False
+    assert res["media_type"] == "audio"
+    assert res["reason"] == "audio_unavailable_offline"
+    assert "no audio was attached" in res["primary_error"]
+
+
 def test_mega_video_primary_success_skips_keyframes():
     backend = _FakeBackend()
     exec_ = _FakeExec()
@@ -266,8 +343,8 @@ def test_mega_video_primary_success_skips_keyframes():
 
 
 def test_mega_video_model_rejects_raw_video_falls_back_to_keyframes():
-    # rejects_video: the whole-clip video_url call fails → keyframe extraction →
-    # each frame's image_url call succeeds. This is the realistic trigger.
+    # rejects_video: the whole-clip native video block fails Tier 1 → keyframe
+    # extraction → each frame's native image block succeeds. Realistic trigger.
     backend = _FakeBackend()
     exec_ = _FakeExec()
     tool = _multimodal_mega_tool(backend, exec_, _FakeModel(content="frame action",
@@ -279,7 +356,7 @@ def test_mega_video_model_rejects_raw_video_falls_back_to_keyframes():
     assert res["media_type"] == "video"
     assert res["frame_count"] == 3
     assert res["description"].count("[frame") == 3
-    # Every frame went through the model (image_url), not ONNX.
+    # Every frame went through the model (native image block), not ONNX.
     assert all(f["source"] == "primary" for f in res["frames"])
     assert [c for c in exec_.cmds if "describe_image.py" in c] == []
     assert any(c.startswith("ffprobe") for c in exec_.cmds)
@@ -322,7 +399,7 @@ def test_mega_validation_matches_simple_tool():
 # --- shared helper ----------------------------------------------------------
 
 def test_media_kind_detection_by_extension():
-    from pux_harness.sandbox.tools import _media_kind
+    from pux_harness.sandbox.tools._media import _media_kind
     cases = {
         "x.png": "image", "x.JPG": "image", "x.wav": "audio",
         "x.MP3": "audio", "x.mp4": "video", "x.WEBM": "video",
@@ -330,3 +407,38 @@ def test_media_kind_detection_by_extension():
     for name, expected in cases.items():
         assert _media_kind(name) == expected, name
     assert _media_kind("data.xyz") == "unknown"
+
+
+# --- native block shape (prepare-wiring-e2e-gap guard) ----------------------
+# The default `multimodal` tool used to ALWAYS crash on video: it emitted a
+# native {"type":"video"} block that langchain-openai can't serialize
+# (block_translators/openai.py:149 raises ValueError). The fake-model tests
+# above can't catch that — the fake never goes through serialization. This test
+# records the block SHAPE the model actually receives, locking the fix:
+# whole-clip video → `video_url` data-URI (the only serializable shape), NEVER
+# an unsupported native `video` block.
+
+def test_video_emits_video_url_block_not_unsupported_native():
+    seen: list[str] = []
+
+    class _Recorder:
+        model_name = "mimo-v2.5"
+
+        def invoke(self, msgs):
+            for m in msgs:
+                content = getattr(m, "content", None)
+                if isinstance(content, list):
+                    for b in content:
+                        if isinstance(b, dict) and b.get("type") in (
+                            "video", "video_url", "image", "audio",
+                        ):
+                            seen.append(b["type"])
+            return _Resp("a car drives by")
+
+    tool = _multimodal_tool(_FakeBackend(), _FakeExec(), _Recorder())
+    res = _invoke(tool, {"media_path": "/sandbox/workspace/clip.mp4"})
+    assert res["success"] is True
+    assert res["media_type"] == "video"
+    # Exactly one media block, and it's the serializable video_url shape —
+    # NOT a native {"type": "video"} block (which would crash serialization).
+    assert seen == ["video_url"]

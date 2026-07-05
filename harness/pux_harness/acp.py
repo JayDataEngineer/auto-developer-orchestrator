@@ -15,7 +15,7 @@ unknown org fails loud. The sandbox self-boots lazily on first tool use
 Phase 8g), so — like ``pux direct`` — ``pux acp`` needs no prior
 ``pux sandbox start``.
 
-Run: ``pux acp`` (or ``pux acp --org invest``). Stdin/stdout are the protocol —
+Run: ``pux acp --org invest``. Stdin/stdout are the protocol —
 this process must not print to stdout. Errors go to stderr.
 """
 from __future__ import annotations
@@ -59,7 +59,22 @@ def _make_factory(org: str) -> Callable[[AgentSessionContext], CompiledStateGrap
     return factory
 
 
+# --- Public API (called from the unified CLI) ---------------------------------
+
+
+def run_acp(org: str = DEFAULT_ORG) -> None:
+    """Run the deepagents org graph as an ACP stdio server (editor = TUI)."""
+    known = discover_orgs()
+    if org not in known:
+        sys.stderr.write(f"pux acp: unknown org {org!r}; discovered: {known}\n")
+        raise SystemExit(2)
+
+    acp_agent = AgentServerACP(agent=_make_factory(org))
+    asyncio.run(run_acp_agent(acp_agent))
+
+
 def main() -> None:
+    """Legacy CLI entry point (argparse). Replaced by ``pux_harness.cli.main``."""
     ap = argparse.ArgumentParser(
         prog="pux acp",
         description="Run the deepagents org graph as an ACP stdio server (editor = TUI).",
@@ -70,17 +85,7 @@ def main() -> None:
         help=f"org to serve (default: $PUX_ORG or {DEFAULT_ORG!r})",
     )
     args = ap.parse_args()
-
-    known = discover_orgs()
-    if args.org not in known:
-        # No fallback to a default here — an *explicitly named* unknown org is
-        # an operator error, surface it. (Defaulting to `general` when nothing
-        # was specified is a default, not a fallback, and happens above.)
-        sys.stderr.write(f"pux acp: unknown org {args.org!r}; discovered: {known}\n")
-        raise SystemExit(2)
-
-    acp_agent = AgentServerACP(agent=_make_factory(args.org))
-    asyncio.run(run_acp_agent(acp_agent))
+    run_acp(args.org)
 
 
 if __name__ == "__main__":

@@ -51,6 +51,12 @@ API — POST unless noted:
     /storage            {"action":"get|set|clear",...}   → manage localStorage
     /upload             {"selector":"...","file_path":"..."} → upload file to <input type="file">
     /a11y               {}                               → accessibility tree (role + name per node)
+    /drag               {"strategy":"auto|html5|physics", from_*/to_*|dx/dy} → drag-and-drop (Phase 19)
+    /hover              {"index|selector"|"x,y"}         → hover (reveal menus/tooltips)
+    /press              {"keys":"Enter|Control+a|ArrowDown", "index|selector"?} → key / hotkey press
+    /click_at           {"x,y"|"index|selector", button?, double?, right?} → coordinate / variant click
+    /scroll_into_view   {"index|selector"}               → scroll element into the viewport
+    /iframe             {"action":"list|enter|exit", selector?} → iframe traversal
     /save_session       {"path":"..."}                   → save cookies + localStorage to file
     /restore_session    {"path":"..."}                   → restore from saved session file
     /reset              {}                               → kill and recreate browser
@@ -285,6 +291,203 @@ SELECT_DROPDOWN_JS = r"""
 """
 
 
+# ── Drag / mouse / keyboard interaction (Phase 19 — SOTA browser agent) ──────
+# These IIFEs mirror OCCLUSION_CHECK_JS / CDP_TYPE_JS: raw CDP Runtime.evaluate
+# runs them unwrapped, so each is a single arrow-fn expression returning a JSON
+# string. Selenium's native drag_and_drop() does NOT emit the HTML5
+# dragstart/dragover/drop sequence (W3C WebDriver gap — Selenium issue #3604),
+# so SIMULATE_DND_JS synthesizes that chain; PHYS_DRAG_JS covers custom
+# draggables/sliders that listen to mousedown/mousemove/mouseup.
+
+# Element center + draggable flag from a CSS selector.
+ELEMENT_CENTER_JS = r"""
+((selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return JSON.stringify({ok:false, error:"element not found: " + selector});
+    const r = el.getBoundingClientRect();
+    return JSON.stringify({
+        ok:true,
+        x: r.left + r.width / 2,
+        y: r.top + r.height / 2,
+        left: r.left, top: r.top, width: r.width, height: r.height,
+        draggable: el.draggable === true || el.getAttribute("draggable") === "true",
+        tag: el.tagName.toLowerCase()
+    });
+})
+"""
+
+# HTML5 drag-and-drop via synthetic DragEvent dispatch (works for SortableJS,
+# react-dnd, dnd-kit, native draggable). Libraries track drag state internally
+# and react to the event sequence rather than DataTransfer contents, so the
+# chain fires even though the events are untrusted.
+SIMULATE_DND_JS = r"""
+((srcSel, dstSel) => {
+    const src = document.querySelector(srcSel);
+    const dst = document.querySelector(dstSel);
+    if (!src) return JSON.stringify({ok:false, error:"source not found: " + srcSel});
+    if (!dst) return JSON.stringify({ok:false, error:"target not found: " + dstSel});
+    let dt = null;
+    try { dt = new DataTransfer(); } catch (e) {
+        try { dt = { data: {}, setData(k,v){this.data[k]=v;}, getData(k){return this.data[k]||"";} }; } catch (e2) {}
+    }
+    const sr = src.getBoundingClientRect();
+    const dr = dst.getBoundingClientRect();
+    const sx = sr.left + sr.width / 2, sy = sr.top + sr.height / 2;
+    const dx = dr.left + dr.width / 2, dy = dr.top + dr.height / 2;
+    const fired = [];
+    const fire = (el, type, x, y) => {
+        let e;
+        try {
+            e = new DragEvent(type, {bubbles:true, cancelable:true, dataTransfer:dt, clientX:x, clientY:y});
+        } catch (err) {
+            e = document.createEvent("DragEvent");
+            try { e.initDragEvent(type, true, true, window, 0, x, y, x, y, false, false, false, false, 0, dt); }
+            catch (e3) { return; }
+        }
+        el.dispatchEvent(e);
+        fired.push(type);
+    };
+    fire(src, "dragstart", sx, sy);
+    fire(dst, "dragenter", dx, dy);
+    fire(dst, "dragover", dx, dy);
+    fire(dst, "drop", dx, dy);
+    fire(src, "dragend", dx, dy);
+    return JSON.stringify({ok:true, fired:fired, source:srcSel, target:dstSel});
+})
+"""
+
+# Mouse-physics drag for custom draggables / sliders / canvas that listen to
+# mousedown→mousemove(N)→mouseup. Steps interpolates a straight path; callers
+# wanting human-like curves can pre-compute waypoints. Untrusted MouseEvents —
+# most custom widgets respond; anti-bot-hardened sites may not.
+PHYS_DRAG_JS = r"""
+((x1, y1, x2, y2, steps, button) => {
+    button = (typeof button === "number") ? button : 0;
+    steps = Math.max(2, (steps | 0) || 25);
+    x1 = Number(x1) || 0; y1 = Number(y1) || 0; x2 = Number(x2) || 0; y2 = Number(y2) || 0;
+    const fired = [];
+    const fire = (type, x, y) => {
+        const el = document.elementFromPoint(x, y) || document.body;
+        const e = new MouseEvent(type, {
+            bubbles:true, cancelable:true, view:window,
+            clientX:x, clientY:y, button:button,
+            buttons: type === "mouseup" ? 0 : (button === 2 ? 2 : 1),
+            relatedTarget:null
+        });
+        el.dispatchEvent(e);
+        fired.push(type + "(" + Math.round(x) + "," + Math.round(y) + ")");
+    };
+    fire("mouseover", x1, y1);
+    fire("mousemove", x1, y1);
+    fire("mousedown", x1, y1);
+    for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        fire("mousemove", x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
+    }
+    fire("mouseup", x2, y2);
+    return JSON.stringify({ok:true, fired:fired, from:[x1,y1], to:[x2,y2], steps:steps});
+})
+"""
+
+# Hover (mouseover/mousemove/mouseenter) over a selector OR raw x,y.
+HOVER_JS = r"""
+((selector, x, y) => {
+    let el = null;
+    if (selector) {
+        el = document.querySelector(selector);
+        if (!el) return JSON.stringify({ok:false, error:"element not found: " + selector});
+        const r = el.getBoundingClientRect();
+        x = r.left + r.width / 2; y = r.top + r.height / 2;
+    } else {
+        el = document.elementFromPoint(x, y) || document.body;
+    }
+    const mk = (type) => new MouseEvent(type, {bubbles:true, cancelable:true, view:window, clientX:x, clientY:y});
+    el.dispatchEvent(mk("mouseover"));
+    el.dispatchEvent(mk("mousemove"));
+    el.dispatchEvent(mk("mouseenter"));
+    el.dispatchEvent(mk("mousemove"));
+    return JSON.stringify({ok:true, hovered:true, x:Math.round(x), y:Math.round(y), tag:el.tagName.toLowerCase()});
+})
+"""
+
+# Key / hotkey press via synthetic KeyboardEvent. keys is "+"-joined, e.g.
+# "Enter", "Escape", "Control+a", "ArrowDown", "Shift+ArrowDown". Dispatches
+# keydown/keypress/keyup with modifier flags on the target (or activeElement).
+PRESS_JS = r"""
+((keys, selector) => {
+    const MOD = {ctrl:"Control", control:"Control", alt:"Alt", shift:"Shift", cmd:"Meta", meta:"Meta", command:"Meta", win:"Meta"};
+    const parts = String(keys).split("+").map(s => s.trim()).filter(Boolean);
+    if (!parts.length) return JSON.stringify({ok:false, error:"no keys given"});
+    const mods = {ctrlKey:false, shiftKey:false, altKey:false, metaKey:false};
+    const FLAG = {Control:"ctrlKey", Alt:"altKey", Shift:"shiftKey", Meta:"metaKey"};
+    let main = null;
+    for (const p of parts) {
+        const lk = p.toLowerCase();
+        if (MOD[lk]) mods[FLAG[MOD[lk]]] = true;
+        else main = p;
+    }
+    if (!main) main = parts[parts.length - 1];
+    let target = selector ? document.querySelector(selector) : (document.activeElement || document.body);
+    if (!target) return JSON.stringify({ok:false, error:"target not found: " + selector});
+    try { target.focus(); } catch (e) {}
+    const codeFor = (k) => {
+        const codes = {Enter:["Enter","Enter",13], Escape:["Escape","Escape",27], Tab:["Tab","Tab",9],
+            Backspace:["Backspace","Backspace",8], Delete:["Delete","Delete",46], " ":[" ","Space",32],
+            ArrowUp:["ArrowUp","ArrowUp",38], ArrowDown:["ArrowDown","ArrowDown",40],
+            ArrowLeft:["ArrowLeft","ArrowLeft",37], ArrowRight:["ArrowRight","ArrowRight",39],
+            Home:["Home","Home",36], End:["End","End",35], PageUp:["PageUp","PageUp",33], PageDown:["PageDown","PageDown",34]};
+        if (codes[k]) return {key:codes[k][0], code:codes[k][1], keyCode:codes[k][2]};
+        if (k.length === 1) return {key:k, code:"Key" + k.toUpperCase(), keyCode:k.toUpperCase().charCodeAt(0)};
+        return {key:k, code:k, keyCode:0};
+    };
+    const info = codeFor(main);
+    const fired = [];
+    for (const type of ["keydown", "keypress", "keyup"]) {
+        target.dispatchEvent(new KeyboardEvent(type, {
+            bubbles:true, cancelable:true, view:window,
+            key:info.key, code:info.code, keyCode:info.keyCode, which:info.keyCode,
+            ctrlKey:mods.ctrlKey, shiftKey:mods.shiftKey, altKey:mods.altKey, metaKey:mods.metaKey
+        }));
+        fired.push(type + ":" + info.key);
+    }
+    return JSON.stringify({ok:true, fired:fired, keys:keys});
+})
+"""
+
+# Coordinate click with right-click / double-click variants.
+CLICK_AT_JS = r"""
+((x, y, button, isDouble, isRight) => {
+    x = Number(x) || 0; y = Number(y) || 0;
+    const btn = isRight ? 2 : ((typeof button === "number") ? button : 0);
+    const el = document.elementFromPoint(x, y) || document.body;
+    const mk = (type, b, buttons) => el.dispatchEvent(new MouseEvent(type, {
+        bubbles:true, cancelable:true, view:window, clientX:x, clientY:y,
+        button:b, buttons:buttons, relatedTarget:null
+    }));
+    mk("mouseover", btn, 0); mk("mousemove", btn, 0); mk("mousedown", btn, btn + 1); mk("mouseup", btn, 0);
+    if (isRight) {
+        el.dispatchEvent(new MouseEvent("contextmenu", {bubbles:true, cancelable:true, view:window, clientX:x, clientY:y, button:2}));
+        return JSON.stringify({ok:true, action:"contextmenu", x:Math.round(x), y:Math.round(y), tag:el.tagName.toLowerCase()});
+    }
+    mk("click", btn, 0);
+    if (isDouble) { mk("mousedown", btn, btn+1); mk("mouseup", btn, 0); mk("dblclick", btn, 0); }
+    return JSON.stringify({ok:true, action: isDouble ? "dblclick" : "click", x:Math.round(x), y:Math.round(y), tag:el.tagName.toLowerCase()});
+})
+"""
+
+# scrollIntoView a selector; reports the post-scroll center + in_view flag.
+SCROLL_INTO_VIEW_JS = r"""
+((selector) => {
+    const el = document.querySelector(selector);
+    if (!el) return JSON.stringify({ok:false, error:"element not found: " + selector});
+    el.scrollIntoView({block:"center", inline:"center"});
+    const r = el.getBoundingClientRect();
+    return JSON.stringify({ok:true, x:Math.round(r.left + r.width/2), y:Math.round(r.top + r.height/2),
+        in_view: r.top >= 0 && r.left >= 0 && r.bottom <= window.innerHeight && r.right <= window.innerWidth});
+})
+"""
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Browser State
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -478,6 +681,13 @@ def find_element_by_index(state, index):
         if el.get("index") == index:
             return el.get("selector")
     return None
+
+
+def js_str(s):
+    """Embed ``s`` as a single-quoted JS string literal for execute_script.
+    Escapes backslash then single-quote — the only two chars that can break
+    out of a single-quoted JS string."""
+    return "'" + str(s).replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1238,6 +1448,172 @@ class Handler(BaseHTTPRequestHandler):
                           "storage_items": len(payload.get("localStorage", {}))})
             except Exception as e:
                 self._err(f"restore_session failed: {e}")
+
+        # ── Drag-and-drop (Phase 19) ───────────────────────────────────────
+        elif path == "/drag":
+            if sb is None: return self._err("browser not available")
+            strategy = body.get("strategy", "auto")
+            steps = int(body.get("steps", 25) or 25)
+
+            # Resolve SOURCE: optional selector (from_index/from_selector) and/or coords.
+            src_sel = ""
+            if body.get("from_selector") or body.get("from_index"):
+                src_sel, err = self._resolve_selector(
+                    {"selector": body.get("from_selector", ""), "index": body.get("from_index", 0)})
+                if err: return self._err("source: " + err, 400)
+            src_x = body.get("from_x"); src_y = body.get("from_y")
+            if src_sel and (src_x is None or src_y is None):
+                r = safe(lambda: json.loads(sb.execute_script(
+                    f"return {ELEMENT_CENTER_JS}({js_str(src_sel)})") or "{}"), {})
+                if not r.get("ok"): return self._err("source: " + r.get("error", "not found"))
+                src_x, src_y = r["x"], r["y"]
+                # Auto-pick HTML5 when source is genuinely draggable and not an offset drag.
+                if strategy == "auto" and r.get("draggable") and body.get("dx") is None and body.get("dy") is None:
+                    strategy = "html5"
+            if (src_x is None or src_y is None) and not src_sel:
+                return self._err("drag needs a source: from_index/from_selector OR from_x/from_y", 400)
+
+            # Resolve TARGET: offset (dx/dy) > element (to_*) > coords (to_x/to_y).
+            tgt_sel = ""
+            tgt_x = body.get("to_x"); tgt_y = body.get("to_y")
+            if body.get("dx") is not None or body.get("dy") is not None:
+                if src_x is None or src_y is None: return self._err("offset drag needs a resolved source position", 400)
+                tgt_x = src_x + (body.get("dx") or 0); tgt_y = src_y + (body.get("dy") or 0)
+                if strategy == "auto": strategy = "physics"
+            elif body.get("to_selector") or body.get("to_index"):
+                tgt_sel, err = self._resolve_selector(
+                    {"selector": body.get("to_selector", ""), "index": body.get("to_index", 0)})
+                if err: return self._err("target: " + err, 400)
+                r = safe(lambda: json.loads(sb.execute_script(
+                    f"return {ELEMENT_CENTER_JS}({js_str(tgt_sel)})") or "{}"), {})
+                if not r.get("ok"): return self._err("target: " + r.get("error", "not found"))
+                tgt_x, tgt_y = r["x"], r["y"]
+                if strategy == "auto": strategy = "html5"
+            elif tgt_x is not None and tgt_y is not None:
+                if strategy == "auto": strategy = "physics"
+            else:
+                return self._err("drag needs a target: to_index/to_selector, to_x/to_y, or dx/dy", 400)
+
+            self.state.snapshot_before()
+            method = strategy
+            if method == "html5":
+                if not (src_sel and tgt_sel):
+                    method = "physics"  # coords-only: HTML5 needs element handles
+                else:
+                    res = safe(lambda: json.loads(sb.execute_script(
+                        f"return {SIMULATE_DND_JS}({js_str(src_sel)}, {js_str(tgt_sel)})") or "{}"), {})
+                    if not res.get("ok"): return self._err("html5 drag failed: " + res.get("error", ""))
+            if method == "physics":
+                res = safe(lambda: json.loads(sb.execute_script(
+                    f"return {PHYS_DRAG_JS}({src_x}, {src_y}, {tgt_x}, {tgt_y}, {steps}, 0)") or "{}"), {})
+                if not res.get("ok"): return self._err("physics drag failed: " + res.get("error", ""))
+            sb.sleep(0.8)
+            capture = self._capture_with_fingerprint(sb, self.state)
+            capture["drag_method"] = method
+            capture["from"] = [src_x, src_y]
+            capture["to"] = [tgt_x, tgt_y]
+            self._ok(capture)
+
+        elif path == "/hover":
+            if sb is None: return self._err("browser not available")
+            selector = ""
+            if body.get("selector") or body.get("index"):
+                selector, err = self._resolve_selector(body)
+                if err: return self._err(err, 400)
+            x = body.get("x"); y = body.get("y")
+            if not selector and (x is None or y is None):
+                return self._err("hover needs index/selector OR x,y", 400)
+            self.state.snapshot_before()
+            sel_arg = js_str(selector) if selector else "null"
+            xx = x if x is not None else 0
+            yy = y if y is not None else 0
+            res = safe(lambda: json.loads(sb.execute_script(
+                f"return {HOVER_JS}({sel_arg}, {xx}, {yy})") or "{}"), {})
+            if not res.get("ok"): return self._err("hover failed: " + res.get("error", ""))
+            sb.sleep(0.5)
+            self._ok(self._capture_with_fingerprint(sb, self.state))
+
+        elif path == "/press":
+            if sb is None: return self._err("browser not available")
+            keys = body.get("keys", "")
+            if not keys: return self._err("missing keys", 400)
+            selector = ""
+            if body.get("selector") or body.get("index"):
+                selector, err = self._resolve_selector(body)
+                if err: return self._err(err, 400)
+            self.state.snapshot_before()
+            sel_arg = js_str(selector) if selector else "null"
+            res = safe(lambda: json.loads(sb.execute_script(
+                f"return {PRESS_JS}({js_str(keys)}, {sel_arg})") or "{}"), {})
+            if not res.get("ok"): return self._err("press failed: " + res.get("error", ""))
+            sb.sleep(0.5)
+            capture = self._capture_with_fingerprint(sb, self.state)
+            capture["pressed"] = keys
+            self._ok(capture)
+
+        elif path == "/click_at":
+            if sb is None: return self._err("browser not available")
+            x = body.get("x"); y = body.get("y")
+            if x is None or y is None:
+                if body.get("selector") or body.get("index"):
+                    selector, err = self._resolve_selector(body)
+                    if err: return self._err(err, 400)
+                    r = safe(lambda: json.loads(sb.execute_script(
+                        f"return {ELEMENT_CENTER_JS}({js_str(selector)})") or "{}"), {})
+                    if not r.get("ok"): return self._err("click_at: " + r.get("error", "not found"))
+                    x, y = r["x"], r["y"]
+                else:
+                    return self._err("click_at needs x,y OR index/selector", 400)
+            button = int(body.get("button", 0) or 0)
+            is_double = "true" if body.get("double") else "false"
+            is_right = "true" if body.get("right") else "false"
+            before_handles, _ = self._capture_tabs_info(sb)
+            self.state.snapshot_before()
+            res = safe(lambda: json.loads(sb.execute_script(
+                f"return {CLICK_AT_JS}({x}, {y}, {button}, {is_double}, {is_right})") or "{}"), {})
+            if not res.get("ok"): return self._err("click_at failed: " + res.get("error", ""))
+            sb.sleep(0.8)
+            tab_info = self._detect_and_handle_new_tab(sb, before_handles)
+            capture = self._capture_with_fingerprint(sb, self.state)
+            capture.update(tab_info)
+            self._ok(capture)
+
+        elif path == "/scroll_into_view":
+            if sb is None: return self._err("browser not available")
+            selector, err = self._resolve_selector(body)
+            if err: return self._err(err, 400)
+            self.state.snapshot_before()
+            res = safe(lambda: json.loads(sb.execute_script(
+                f"return {SCROLL_INTO_VIEW_JS}({js_str(selector)})") or "{}"), {})
+            if not res.get("ok"): return self._err("scroll_into_view failed: " + res.get("error", ""))
+            sb.sleep(0.4)
+            self._ok(self._capture_with_fingerprint(sb, self.state))
+
+        elif path == "/iframe":
+            if sb is None: return self._err("browser not available")
+            action = body.get("action", "list")
+            if action == "list":
+                frames = safe(lambda: json.loads(sb.execute_script(
+                    "return JSON.stringify(Array.from(document.querySelectorAll('iframe')).map((f,i)=>({"
+                    "index:i, name:f.name||'', id:f.id||'', src:(f.src||'').substring(0,120), "
+                    "title:(f.title||f.getAttribute('aria-label')||'').substring(0,80)})))") or "[]"), [])
+                self._ok({"frames": frames, "total": len(frames)})
+            elif action == "enter":
+                selector, err = self._resolve_selector(body)
+                if err: return self._err(err, 400)
+                try:
+                    sb.switch_to_frame(selector)
+                    self._ok(self._capture_with_fingerprint(sb, self.state))
+                except Exception as e:
+                    return self._err(f"iframe enter failed: {e}")
+            elif action == "exit":
+                try:
+                    sb.switch_to_default_content()
+                    self._ok(self._capture_with_fingerprint(sb, self.state))
+                except Exception as e:
+                    return self._err(f"iframe exit failed: {e}")
+            else:
+                return self._err(f"unknown iframe action: {action}", 400)
 
         else:
             self._err(f"Unknown endpoint: {path}", 404)

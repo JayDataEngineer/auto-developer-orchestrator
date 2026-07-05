@@ -1,20 +1,23 @@
-"""``pux`` CLI — a thin client of the Agent Protocol server (``pux serve``).
+"""Unified ``pux`` CLI — replaces ``bin/pux``, ``main.py``, ``cli.py``, ``acp.py``.
 
-Replaces the deleted TS harness (``bin/pux.mjs``). The server is the canonical
-executor; this is a client. If the server isn't running, commands fail loudly
-with a hint to start it — no silent in-process fallback (the Agent Protocol
-architecture: server serves, client drives).
-
-  pux agents                       list orgs (agents)
-  pux dispatch --org X "task"      ephemeral blocking run; prints output + thread_id
-  pux resume [--org X]             list recent threads
-  pux show <thread_id>             thread state (last message)
-  pux history <thread_id>          revision history
-  pux run <thread_id> "task"       background run on an existing thread -> run_id
-  pux wait <run_id>                block for a background run's output
-
-The in-process runner (``python -m pux_harness.main --org X``) stays available
-for dev/no-server use.
+Usage:
+  pux serve                    start the Agent Protocol server (uvicorn)
+  pux direct                   in-process deepagents runner (no server)
+  pux acp [--org X]            ACP stdio server for editor integration
+  pux sandbox <cmd>            Docker sandbox lifecycle (start/stop/status/ensure)
+  pux agents                   list orgs (agents)
+  pux dispatch [--org X] ...   ephemeral blocking run
+  pux resume [--org X]         list recent threads
+  pux show <thread_id>         thread state (last message)
+  pux history <thread_id>      revision history
+  pux run <thread_id> ...      background run on an existing thread
+  pux wait <run_id>            block for a background run's output
+  pux list                     list discovered orgs
+  pux check [--org X]          docker-exec + specialist smoke test (no model)
+  pux check-contract           validate the declarative org contract
+  pux check-policy [--org X]   resolve + report an org's policy
+  pux jobs run --org X         run prep jobs inside the sandbox
+  pux jobs status --org X      show declared prep jobs
 """
 from __future__ import annotations
 
@@ -25,6 +28,8 @@ import sys
 from typing import Any
 
 import httpx
+
+# --- Agent Protocol client helpers (shared by client subcommands) -------------
 
 PUX_API_URL = os.environ.get("PUX_API_URL", "http://127.0.0.1:9988").rstrip("/")
 TIMEOUT = httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=30.0)
@@ -66,6 +71,9 @@ def _print_block(label: str, body: str) -> None:
     print(body.rstrip() if isinstance(body, str) else body)
 
 
+# --- Client subcommands (Agent Protocol REST) ---------------------------------
+
+
 def cmd_agents() -> None:
     agents = _post("/agents/search")
     print(f"{len(agents)} agents (orgs):")
@@ -74,10 +82,6 @@ def cmd_agents() -> None:
 
 
 def cmd_dispatch(org: str, task: str, recursion_limit: int, rubric: str | None = None) -> None:
-    # With a --rubric override, send the input as a messages+rubric dict so the
-    # server's _normalize_input passes it through and the override wins over the
-    # org's shipped default rubric. Without --rubric, send a bare task string;
-    # the server injects the org's default rubric if the org opted into the gate.
     if rubric:
         payload: Any = {
             "messages": [{"role": "user", "content": task}],
@@ -172,59 +176,147 @@ def cmd_jobs_status(org: str) -> None:
         print(f"  {j['name']:<22} {j['script']:<40} {timeout:<8} {j.get('description', '')}")
 
 
+# --- Unified CLI dispatcher ---------------------------------------------------
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
-        prog="pux", description="Pux Agent Protocol client (drives `pux serve`)."
+        prog="pux",
+        description="Pux — deepagents-based agent orchestrator.",
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("agents", help="list orgs (agents)").set_defaults(func=lambda a: cmd_agents())
+    # Server-mode commands
+    sub.add_parser("serve", help="start the Agent Protocol server (uvicorn)")
+
+    p_acp = sub.add_parser("acp", help="ACP stdio server for editor integration")
+    p_acp.add_argument("--org", default=os.environ.get("PUX_ORG", "general"))
+
+    # In-process runner
+    p_dir = sub.add_parser("direct", help="in-process deepagents runner (no server)")
+    p_dir.add_argument("--org", default="general")
+    p_dir.add_argument("--task", required=True)
+    p_dir.add_argument("--rubric", default=None)
+    p_dir.add_argument("--recursion-limit", type=int, default=60)
+
+    # Sandbox lifecycle
+    p_sb = sub.add_parser("sandbox", help="Docker sandbox lifecycle")
+    p_sb.add_argument("action", choices=["start", "stop", "status", "ensure"], metavar="CMD")
+
+    # Client-mode commands
+    sub.add_parser("agents", help="list orgs (agents)")
 
     p_disp = sub.add_parser("dispatch", help="ephemeral blocking run on an org")
     p_disp.add_argument("--org", default="general")
     p_disp.add_argument("--recursion-limit", type=int, default=60)
-    p_disp.add_argument("--rubric", default=None,
-                        help="override the org's shipped rubric (arms the "
-                             "RubricMiddleware verify-gate for an opted-in org)")
+    p_disp.add_argument("--rubric", default=None)
     p_disp.add_argument("task")
-    p_disp.set_defaults(func=lambda a: cmd_dispatch(a.org, a.task, a.recursion_limit, a.rubric))
 
     p_res = sub.add_parser("resume", help="list recent threads")
     p_res.add_argument("--org", default=None)
-    p_res.set_defaults(func=lambda a: cmd_resume(a.org))
 
     p_show = sub.add_parser("show", help="show a thread's last message")
     p_show.add_argument("thread_id")
-    p_show.set_defaults(func=lambda a: cmd_show(a.thread_id))
 
     p_hist = sub.add_parser("history", help="show a thread's revision history")
     p_hist.add_argument("thread_id")
-    p_hist.set_defaults(func=lambda a: cmd_history(a.thread_id))
 
     p_run = sub.add_parser("run", help="background run on an existing thread")
     p_run.add_argument("--recursion-limit", type=int, default=60)
     p_run.add_argument("thread_id")
     p_run.add_argument("task")
-    p_run.set_defaults(func=lambda a: cmd_run(a.thread_id, a.task, a.recursion_limit))
 
     p_wait = sub.add_parser("wait", help="block for a background run's output")
     p_wait.add_argument("run_id")
-    p_wait.set_defaults(func=lambda a: cmd_wait(a.run_id))
 
-    p_jobs = sub.add_parser("jobs", help="run prep jobs or show status")
+    # Diagnostic / offline commands
+    sub.add_parser("list", help="list discovered orgs and their agents")
+
+    p_check = sub.add_parser("check", help="docker-exec + specialist smoke test (no model)")
+    p_check.add_argument("--org", default="general")
+
+    sub.add_parser("check-contract", help="validate the declarative org contract")
+
+    p_cp = sub.add_parser("check-policy", help="resolve + report an org's policy")
+    p_cp.add_argument("--org", default="general")
+
+    # Jobs subcommands
+    p_jobs = sub.add_parser("jobs", help="run or show prep jobs")
     jobs_sub = p_jobs.add_subparsers(dest="jobs_cmd", required=True)
 
     p_jr = jobs_sub.add_parser("run", help="run prep jobs in the sandbox")
-    p_jr.add_argument("--org", required=True, help="org to run jobs for")
-    p_jr.add_argument("--job", default=None, help="run only this named job")
-    p_jr.set_defaults(func=lambda a: cmd_jobs_run(a.org, a.job))
+    p_jr.add_argument("--org", required=True)
+    p_jr.add_argument("--job", default=None)
 
     p_js = jobs_sub.add_parser("status", help="show declared prep jobs")
-    p_js.add_argument("--org", required=True, help="org to show jobs for")
-    p_js.set_defaults(func=lambda a: cmd_jobs_status(a.org))
+    p_js.add_argument("--org", required=True)
 
     args = ap.parse_args()
-    args.func(args)
+
+    # --- Server mode ---
+    if args.cmd == "serve":
+        from pux_harness.server import main as _serve
+
+        _serve()
+
+    # --- ACP stdio ---
+    elif args.cmd == "acp":
+        from pux_harness.acp import run_acp
+
+        run_acp(args.org)
+
+    # --- In-process runner ---
+    elif args.cmd == "direct":
+        from pux_harness.main import run_direct
+
+        run_direct(args.org, args.task, args.rubric, args.recursion_limit)
+
+    # --- Sandbox ---
+    elif args.cmd == "sandbox":
+        from pux_harness.main import run_sandbox
+
+        run_sandbox(args.action)
+
+    # --- Client mode (requires running server) ---
+    elif args.cmd == "agents":
+        cmd_agents()
+    elif args.cmd == "dispatch":
+        cmd_dispatch(args.org, args.task, args.recursion_limit, args.rubric)
+    elif args.cmd == "resume":
+        cmd_resume(args.org)
+    elif args.cmd == "show":
+        cmd_show(args.thread_id)
+    elif args.cmd == "history":
+        cmd_history(args.thread_id)
+    elif args.cmd == "run":
+        cmd_run(args.thread_id, args.task, args.recursion_limit)
+    elif args.cmd == "wait":
+        cmd_wait(args.run_id)
+
+    # --- Diagnostic / offline ---
+    elif args.cmd == "list":
+        from pux_harness.main import run_list_orgs
+
+        run_list_orgs()
+    elif args.cmd == "check":
+        from pux_harness.main import run_check_smoke
+
+        run_check_smoke(args.org)
+    elif args.cmd == "check-contract":
+        from pux_harness.main import run_check_contract
+
+        run_check_contract()
+    elif args.cmd == "check-policy":
+        from pux_harness.main import run_check_policy
+
+        run_check_policy(args.org)
+
+    # --- Jobs ---
+    elif args.cmd == "jobs":
+        if args.jobs_cmd == "run":
+            cmd_jobs_run(args.org, args.job)
+        elif args.jobs_cmd == "status":
+            cmd_jobs_status(args.org)
 
 
 if __name__ == "__main__":

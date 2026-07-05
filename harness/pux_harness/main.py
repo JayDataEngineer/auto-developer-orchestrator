@@ -1,8 +1,8 @@
 """In-process deepagents runner — drive any org against the harness directly.
 
-  uv run python -m pux_harness.main --list                       # discovered orgs + agents
-  uv run python -m pux_harness.main --check                      # docker-exec + native specialist smoke (no tokens)
-  uv run python -m pux_harness.main --org general --task "..."   # one-shot run
+  uv run pux list                  # discovered orgs + agents
+  uv run pux check                 # docker-exec + native specialist smoke (no tokens)
+  uv run pux direct --org general --task "..."   # one-shot run
 
 Proves per-org: deepagents drives the pux sandbox through ``PuxSandboxBackend``
 (native ``ls/read_file/write_file/edit_file/glob/grep/execute`` via docker
@@ -30,7 +30,11 @@ from pux_harness.agent.contract import (
 from pux_harness.sandbox.docker_exec import get_exec_client
 from pux_harness.agent.graph import build_graph, shared_backend, shared_exec
 from pux_harness.agent.profile import default_rubric
-from pux_harness.sandbox.tools import build_native_specialists
+from pux_harness.sandbox.tools import (
+    LEGACY_TOOL_NAMES,
+    NATIVE_FS_TOOLS,
+    build_native_specialists,
+)
 from pux_harness.agent.orgs import (
     discover_orgs,
     org_agent_slugs,
@@ -125,17 +129,17 @@ async def _run(org: str, task: str, recursion_limit: int, rubric: str | None = N
     # `messages` — subagent calls run in a nested thread the main trace can't
     # see. So this proves the CTO didn't leak a legacy tool, but the real
     # native-flip proof for the subagent is `backend.execute_log` below.
-    native = {"ls", "read_file", "write_file", "edit_file", "glob", "grep", "execute"}
-    legacy = {"pux_sandbox_bash", "pux_sandbox_file_read", "pux_sandbox_file_write",
-              "pux_sandbox_file_edit", "pux_sandbox_file_glob", "pux_sandbox_file_grep"}
+    # ``native`` + ``legacy`` come from the single tool REGISTRY now (derived
+    # ``NATIVE_FS_TOOLS`` + the ``LEGACY_TOOL_NAMES`` denylist) — no second
+    # hand-maintained copy of either surface here.
     used: set[str] = set()
     for m in messages:
         for tc in (getattr(m, "tool_calls", None) or []):
             used.add(tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", ""))
-    leaked = used & legacy
+    leaked = used & LEGACY_TOOL_NAMES
     print(f"\n=== SURFACE CHECK (main agent only) ===")
     print(f"  tools used: {sorted(used)}")
-    print(f"  native fs used: {sorted(used & native) or 'NONE'}")
+    print(f"  native fs used: {sorted(used & NATIVE_FS_TOOLS) or 'NONE'}")
     print(f"  legacy pux_sandbox fs/shell leaked: {sorted(leaked) or 'NONE'}")
 
     # Native-flip proof across the WHOLE tree: every native fs/shell call (the
@@ -371,7 +375,74 @@ def _check_contract() -> int:
     return 1 if (error_orgs or harness_errors or skill_errors) else 0
 
 
+# --- Public API (called from the unified CLI) ---------------------------------
+
+
+def run_direct(
+    org: str = "general",
+    task: str = "",
+    rubric: str | None = None,
+    recursion_limit: int = 60,
+) -> None:
+    """In-process deepagents run for an org + task."""
+    if org not in discover_orgs():
+        raise SystemExit(f"unknown org {org!r}; discovered: {discover_orgs()}")
+    if not task:
+        raise SystemExit(
+            f"--task is required for --org {org}. "
+            "See tests/integration/default_tasks.py for per-org forcing tasks."
+        )
+    asyncio.run(_run(org, task, recursion_limit, rubric=rubric))
+
+
+def run_list_orgs() -> None:
+    """List discovered orgs and their agents."""
+    orgs = discover_orgs()
+    print(f"{len(orgs)} orgs:")
+    for org in orgs:
+        print(f"  {org}: {', '.join(org_agent_slugs(org)) or '(no agents)'}")
+
+
+def run_sandbox(cmd: str) -> None:
+    """Docker sandbox lifecycle."""
+    raise SystemExit(_sandbox(cmd))
+
+
+def run_check_smoke(org: str = "general") -> None:
+    """docker-exec backend + native specialist smoke test (no model call)."""
+    exec_client = get_exec_client()
+    backend = PuxSandboxBackend(exec_client)
+    specialists = build_native_specialists(exec_client, org=org)
+    print(f"backend(docker exec) OK: {len(specialists)} native pux_sandbox_* specialists + "
+          f"native fs (ls/read_file/write_file/edit_file/glob/grep/execute)")
+    ex = backend.execute("echo pux-ok")
+    print(f"  backend.execute [docker exec]: exit={ex.exit_code} output={ex.output!r}")
+    ls = backend.ls("/sandbox/workspace")
+    print(f"  backend.ls: {len(ls.entries or [])} entries, error={ls.error}")
+
+
+def run_check_contract() -> None:
+    """Validate the declarative org contract; exit 1 on error."""
+    raise SystemExit(_check_contract())
+
+
+def run_check_policy(org: str = "general") -> None:
+    """Resolve + report this org's policy; exit 1 if required creds missing."""
+    raise SystemExit(_check_policy(org))
+
+
+def run_jobs(org: str, job: str | None = None) -> None:
+    """Run prep jobs for this org inside the sandbox."""
+    raise SystemExit(_jobs_run(org, job))
+
+
+def run_jobs_status(org: str) -> None:
+    """Show declared prep jobs for this org."""
+    raise SystemExit(_jobs_status(org))
+
+
 def main() -> None:
+    """Legacy CLI entry point (argparse). Replaced by ``pux_harness.cli.main``."""
     ap = argparse.ArgumentParser(description="deepagents Pux harness")
     ap.add_argument("--org", default="general", help="org to run (default: general)")
     ap.add_argument("--task", help="task string (required when running an agent)")
@@ -399,48 +470,30 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.sandbox is not None:
-        raise SystemExit(_sandbox(args.sandbox))
+        run_sandbox(args.sandbox)
 
     if args.jobs_run:
-        raise SystemExit(_jobs_run(args.org, args.job))
+        run_jobs(args.org, args.job)
 
     if args.jobs_status:
-        raise SystemExit(_jobs_status(args.org))
+        run_jobs_status(args.org)
 
     if args.check_contract:
-        raise SystemExit(_check_contract())
+        run_check_contract()
 
     if args.list:
-        orgs = discover_orgs()
-        print(f"{len(orgs)} orgs:")
-        for org in orgs:
-            print(f"  {org}: {', '.join(org_agent_slugs(org)) or '(no agents)'}")
+        run_list_orgs()
         return
-
-    if args.org not in discover_orgs():
-        raise SystemExit(f"unknown org {args.org!r}; discovered: {discover_orgs()}")
 
     if args.check_policy:
-        raise SystemExit(_check_policy(args.org))
-
-    if args.check:
-        exec_client = get_exec_client()
-        backend = PuxSandboxBackend(exec_client)
-        specialists = build_native_specialists(exec_client, org=args.org)
-        print(f"backend(docker exec) OK: {len(specialists)} native pux_sandbox_* specialists + "
-              f"native fs (ls/read_file/write_file/edit_file/glob/grep/execute)")
-        ex = backend.execute("echo pux-ok")
-        print(f"  backend.execute [docker exec]: exit={ex.exit_code} output={ex.output!r}")
-        ls = backend.ls("/sandbox/workspace")
-        print(f"  backend.ls: {len(ls.entries or [])} entries, error={ls.error}")
+        run_check_policy(args.org)
         return
 
-    if not args.task:
-        raise SystemExit(
-            f"--task is required for --org {args.org}. "
-            f"See tests/integration/default_tasks.py for per-org forcing tasks."
-        )
-    asyncio.run(_run(args.org, args.task, args.recursion_limit, rubric=args.rubric))
+    if args.check:
+        run_check_smoke(args.org)
+        return
+
+    run_direct(args.org, args.task, args.rubric, args.recursion_limit)
 
 
 if __name__ == "__main__":

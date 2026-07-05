@@ -24,9 +24,7 @@ from pux_harness.agent.profile import (
     load_profile,
     load_rubric_gate,
 )
-from pux_harness.context.event_middleware import EventCaptureMiddleware
-from pux_harness.context.event_tools import build_event_tools
-from pux_harness.context.offload import ContextOffloadMiddleware, build_ctx_tools
+from pux_harness.context.layer import build_context_layer
 from pux_harness.context.sandbox_routing import RoutingMiddleware
 from pux_harness.context.session_guide import SessionGuideMiddleware
 from pux_harness.memory import MEMORY_SOURCES, build_memory_backend
@@ -105,18 +103,17 @@ def build_graph(
         shared_exec(), vision_model=get_model(role="multimodal", org=org), org=org,
         backend=shared_backend(),
     )
-    # Phase 7: ctx_recall/ctx_search ride on the MAIN agent only (they're not in
-    # any subagent ``tools:`` whitelist, so excluding them from the subagent-
-    # resolution ``tools`` keeps specialist whitelists clean). The offload
-    # middleware shares the process-wide store with these tools via shared_store().
-    # Main-agent-only: deepagents' SubAgentMiddleware doesn't forward a raw
-    # spec's `middleware` key (verified in the Phase 7 E2E), so attaching it to
-    # specialists is a silent no-op — see context_offload.py module docstring.
-    ctx_tools = build_ctx_tools()
-    evt_tools = build_event_tools()
+    # The unified context layer: one ContextMiddleware (capture + offload in a
+    # single wrap_tool_call pass) + the ctx_recall/ctx_search retrieval tools,
+    # both bound to the process-wide EventStore. ``build_context_layer`` is the
+    # SAME seam orgs._build_sub uses, so capture + offload + retrieval reach the
+    # main agent AND every subagent (verified against deepagents 0.6.12:
+    # SubAgentMiddleware forwards a spec's ``middleware`` key — the old
+    # "main-agent-only" Phase-7 claim was wrong and is retracted).
+    ctx_middleware, ctx_tools = build_context_layer()
 
     prompt = build_system_prompt(org)
-    main_tools: list = [*specialists, *ctx_tools, *evt_tools]
+    main_tools: list = [*specialists, *ctx_tools]
     cfg = load_profile(org)
     if cfg is not None:
         if cfg.base_system_prompt:
@@ -135,8 +132,7 @@ def build_graph(
     # from REAL evidence via ``build_grader_tools`` (run tests / read the diff /
     # grep), never from the agent's summary.
     middleware: list = [
-        ContextOffloadMiddleware(),
-        EventCaptureMiddleware(),
+        *ctx_middleware,
         RoutingMiddleware(),
         SessionGuideMiddleware(),
     ]

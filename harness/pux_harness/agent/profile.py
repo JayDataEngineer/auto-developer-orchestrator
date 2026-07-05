@@ -61,7 +61,14 @@ def _profile_path(org: str) -> Path:
     # Resolve via the orgs module at CALL time (not an import-time binding) so
     # the contract tests' monkeypatch of ``orgs._orgs_dir`` reaches this module
     # too — same single-source-of-truth discipline contract.py relies on.
-    return _orgs_mod._orgs_dir() / org / "profile.yaml"
+    # Specialists-aware (orgs/<org> then orgs/specialists/<org>) but NON-raising:
+    # callers (``_read_profile_yaml``) handle a missing file as ``None``, so an
+    # unknown org yields a non-existent path rather than ``FileNotFoundError``.
+    base = _orgs_mod._orgs_dir()
+    top = base / org
+    if top.is_dir():
+        return top / "profile.yaml"
+    return base / "specialists" / org / "profile.yaml"
 
 
 @dataclass(frozen=True)

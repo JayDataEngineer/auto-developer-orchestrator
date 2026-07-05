@@ -682,9 +682,11 @@ def test_dev_bot_specialists_resolve_on_worker_role(monkeypatch):
     for slug in ("code_worker", "web_agent"):
         assert by_name[slug]["model"] is not None, f"{slug} model unresolved"
     # code_worker carries only python (+ native fs always auto-injected at
-    # graph build, not in the whitelist); web_agent carries the browser surface.
-    cw_tools = [t.name for t in by_name["code_worker"]["tools"]]
-    assert cw_tools == ["pux_sandbox_python"], cw_tools
+    # graph build, not in the whitelist) PLUS the Phase-19 ctx retrieval pair
+    # (ctx_recall/ctx_search reach every subagent); web_agent carries the
+    # browser surface (+ the same ctx pair).
+    cw_tools = {t.name for t in by_name["code_worker"]["tools"]}
+    assert cw_tools == {"pux_sandbox_python", "ctx_recall", "ctx_search"}, cw_tools
     web_tools = [t.name for t in by_name["web_agent"]["tools"]]
     assert "pux_sandbox_browser_navigate" in web_tools
     assert "pux_sandbox_describe_image" in web_tools

@@ -18,10 +18,11 @@ Two validation tiers:
   5. Optional ``policy.yaml`` parses and uses known sections.
 
 * **Tool-resolution** (rule 4 — always on, no server): every entry in an
-  agent's frontmatter ``tools`` list resolves to a native fs tool OR a name in
-  the static specialist surface (``SPECIALIST_TOOL_NAMES`` from ``native_tools``).
-  Both surfaces are Python constants, so this runs offline in pytest and in
-  ``--check-contract`` with no container or Go server.
+  agent's frontmatter ``tools`` list resolves through ``classify_slug`` (from
+  the tool ``REGISTRY``) to a native fs tool OR a ``pux_sandbox_*`` specialist.
+  The classifier is pure Python, so this runs offline in pytest and in
+  ``--check-contract`` with no container or Go server — and the runtime
+  resolver (``orgs._resolve_tools``) shares it, so the two paths agree.
 
 * **Harness-level** (rule 6) and **global** (rules 7-8):
   6. No hardcoded org->agent manifest in the harness source.
@@ -36,8 +37,8 @@ Two validation tiers:
   Agents are now one frontmatter+body ``<slug>.md`` per org (org-local first,
   then ``orgs/_shared/agents/``).
 
-Rule 4 resolves against the *static* native surface: the specialist names are
-a Python frozenset (the single source of truth shared with ``graph.py``), so a
+Rule 4 resolves through ``classify_slug`` (the single source of truth shared
+with ``orgs._resolve_tools`` and ``graph.py`` via the ``REGISTRY``), so a
 stale ``tools:`` reference fails loud here without any process to probe.
 """
 from __future__ import annotations
@@ -52,11 +53,17 @@ import yaml
 from pux_harness.sandbox import policy as policy_mod
 from pux_harness.agent import profile as profile_mod
 from pux_harness.agent import model as model_mod
-from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
+from pux_harness.sandbox.tools import (
+    NATIVE_FS_TOOLS,
+    Category,
+    classify_slug,
+    prefixed,
+)
 from pux_harness.agent.orgs import (
     PROJECT_ROOT,
     _agent_search_dirs,
     _load_agent_spec,
+    _org_path,
     _orgs_dir,
     _parse_list,
     _split_frontmatter,
@@ -83,12 +90,10 @@ KNOWN_POLICY_SECTIONS: frozenset[str] = frozenset({
     "jobs",
 })
 
-# Native fs/shell tools deepagents exposes via the backend (Phase 3). Accepted
-# bare in an agent ``tools:`` whitelist because they come from the backend, not
-# the specialist registry.
-NATIVE_FS_TOOLS: frozenset[str] = frozenset({
-    "ls", "read_file", "write_file", "edit_file", "glob", "grep", "execute",
-})
+# ``NATIVE_FS_TOOLS`` is imported from ``pux_harness.sandbox.tools`` (derived
+# from the single ``REGISTRY``) — see the import above. Re-exported through
+# this module's namespace so the contract tests can keep importing it from
+# ``contract`` (``from pux_harness.agent.contract import NATIVE_FS_TOOLS``).
 
 # Agent-Skills spec: a skill dir name (and its ``SKILL.md`` ``name``) must be
 # kebab-case — lowercase letters/digits joined by single hyphens.
@@ -133,13 +138,15 @@ def _load_agent_subagent(slug: str, org: str) -> dict[str, Any] | None:
 def check_org(name: str) -> list[Violation]:
     """Validate one org's bundle — fully offline (no server, no tokens).
 
-    Rules 1,2,3,5 are structural. Rule 4 (tool-resolution) resolves every
-    agent ``SUBAGENT["tools"]`` entry against ``NATIVE_FS_TOOLS`` ∪
-    ``SPECIALIST_TOOL_NAMES`` — both Python constants — so it runs in pytest
-    and ``--check-contract`` with nothing live.
+    Rules 1,2,3,5 are structural. Rule 4 (tool-resolution) classifies every
+    agent ``SUBAGENT["tools"]`` entry via ``classify_slug`` (native ∪
+    specialist surface derived from the ``REGISTRY``) — pure Python, so it
+    runs in pytest and ``--check-contract`` with nothing live.
     """
     v: list[Violation] = []
-    org_dir = _orgs_dir() / name
+    # Specialists-aware: orgs/<name> (e.g. ``general``) then
+    # orgs/specialists/<name> (orgs moved under specialists/ in the reorg).
+    org_dir = _org_path(name)
     agents_md = org_dir / "AGENTS.md"
 
     # Rule 1.
@@ -221,19 +228,22 @@ def check_org(name: str) -> list[Violation]:
                 f"{name}/{slug}: agent .md frontmatter missing required "
                 f"keys: {missing}"))
 
-    # Rule 4: tool whitelist resolves against the static native surface
-    # (fs tools ∪ the specialist registry). No server probe — both halves are
-    # Python constants, so this runs identically in pytest and --check-contract.
+    # Rule 4: tool whitelist resolves through the shared classifier
+    # (``classify_slug`` from the tool registry). A native slug is accepted
+    # (FilesystemMiddleware injects the fs/shell tools for every subagent), a
+    # specialist slug resolves to a ``pux_sandbox_*`` tool, anything else is
+    # unknown. The SAME classifier drives the runtime ``_resolve_tools`` in
+    # ``orgs.py``, so the offline check and the runtime can no longer disagree
+    # (the old paths diverged on native slugs). No server probe — pure Python,
+    # runs identically in pytest and ``--check-contract``.
     for slug, sub in agent_subagents.items():
         for raw in _parse_list(sub.get("tools", [])):
             tool = raw.rsplit("/", 1)[-1]
-            if tool in NATIVE_FS_TOOLS:
-                continue
-            key = "pux_sandbox_" + tool
-            if key not in SPECIALIST_TOOL_NAMES:
+            if classify_slug(tool) is None:
                 v.append(Violation("error", "tool-resolves",
                                    f"{name}/{slug}: tool {raw!r} -> "
-                                   f"{key!r} not a native fs tool or a "
+                                   f"{prefixed(tool, Category.SPECIALIST)!r} "
+                                   f"not a native fs tool or a "
                                    f"pux_sandbox_* specialist"))
 
     # Rule 5: policy.yaml parses + valid schema + known sections.

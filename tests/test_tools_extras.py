@@ -12,18 +12,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pux_harness.sandbox.tools import (
-    _guess_mime,
-    _list_skills_tool,
-    _load_skill_tool,
-    _media_kind,
-    _model_name,
-    _parse_skill,
-    _python_tool,
-    _result,
-    _skills_dirs,
-    _tail,
-)
+from pux_harness.sandbox.tools._media import _guess_mime, _media_kind, _model_name
+from pux_harness.sandbox.tools.skills import _list_skills_tool, _load_skill_tool, _parse_skill
+from pux_harness.sandbox.tools.python import _python_tool
+from pux_harness.sandbox.tools._shared import _result, _skills_dirs, _tail
 
 
 # --- _tail --------------------------------------------------------------------
@@ -144,7 +136,7 @@ def test_list_skills_tool_with_fake_skill(tmp_path, monkeypatch):
     (skill_dir / "SKILL.md").write_text("---\nname: test\ndescription: desc\n---\nBody")
 
     monkeypatch.setattr(
-        "pux_harness.sandbox.tools._skills_dirs",
+        "pux_harness.sandbox.tools.skills._skills_dirs",
         lambda org=None: [tmp_path / "skills"],
     )
     tool = _list_skills_tool()
@@ -178,7 +170,7 @@ def test_load_skill_tool_success(tmp_path, monkeypatch):
     (skill_dir / "SKILL.md").write_text("---\nname: my-skill\ndescription: A skill\n---\nDo this.")
 
     monkeypatch.setattr(
-        "pux_harness.sandbox.tools._skills_dirs",
+        "pux_harness.sandbox.tools.skills._skills_dirs",
         lambda org=None: [tmp_path / "skills"],
     )
     tool = _load_skill_tool()

@@ -1,10 +1,15 @@
-"""Phase 7 — proactive context-offload gate.
+"""Phase 7/19 — proactive context-offload (unified ``ContextMiddleware``).
 
-Proves the ``ContextOffloadMiddleware.wrap_tool_call`` (sync + async) stashes
+Proves the unified ``ContextMiddleware.wrap_tool_call`` (sync + async) stashes
 oversized tool results and replaces them with a preview + ``ctx:<id>`` handle,
 small results pass through untouched, ``ctx_recall``/``ctx_search`` retrieve
 them, and the store rejects path-escape handles. All against a tmp-path store
-(no real ``.pux/ctx``, no Docker, no model tokens).
+(no real ``.pux/events.sqlite``, no Docker, no model tokens).
+
+Phase 19 unified the old separate ``ContextOffloadMiddleware`` + ``CtxStore``
+into ``ContextMiddleware`` (one pass: capture + offload) + ``EventStore`` (one
+sqlite store for events AND blobs). These tests were ported from the
+Phase-7 surface; the behaviors are unchanged — only the module paths moved.
 """
 from __future__ import annotations
 
@@ -15,12 +20,9 @@ from typing import Any
 import pytest
 from langchain_core.messages import ToolMessage
 
-from pux_harness.context.offload import (
-    ContextOffloadMiddleware,
-    build_ctx_tools,
-    _offload,
-)
-from pux_harness.context.store import CtxStore
+from pux_harness.context.events import EventStore
+from pux_harness.context.middleware import ContextMiddleware, _offload
+from pux_harness.context.tools import build_context_tools
 
 BIG = "x" * 20_000  # well over the 8000-char default threshold
 SMALL = "only a few hundred chars " * 5
@@ -40,7 +42,7 @@ def _tm(content: Any, tcid: str = "call_1", name: str = "execute") -> ToolMessag
 
 
 def test_offload_replaces_oversized_with_stub_and_handle(tmp_path):
-    store = CtxStore(tmp_path)
+    store = EventStore(tmp_path / "events.db")
     out = _offload(_tm(BIG), store, "execute", threshold=8000, preview=500)
     assert isinstance(out, ToolMessage)
     assert out.tool_call_id == "call_1"  # id preserved so the AIMessage still matches
@@ -50,26 +52,25 @@ def test_offload_replaces_oversized_with_stub_and_handle(tmp_path):
     assert "Preview (first 500 chars)" in out.content
     # the full bytes live in the store, keyed by the handle in the stub
     handle = _extract_handle(out.content)
-    assert store.recall(handle) == BIG
+    assert store.recall_blob(handle) == BIG
 
 
 def test_offload_passes_small_result_through_unchanged(tmp_path):
-    store = CtxStore(tmp_path)
+    store = EventStore(tmp_path / "events.db")
     original = _tm(SMALL)
     out = _offload(original, store, "execute", threshold=8000, preview=500)
     assert out is original  # same object, nothing stashed
-    assert not list((tmp_path).glob("*.txt"))
 
 
 def test_offload_threshold_zero_disables(tmp_path):
-    store = CtxStore(tmp_path)
-    m = ContextOffloadMiddleware(store, threshold=0)
+    store = EventStore(tmp_path / "events.db")
+    m = ContextMiddleware(store, threshold=0)
     out = m.wrap_tool_call(_req(), lambda r: _tm(SMALL))
     assert out.content == SMALL  # not stashed even though it's a ToolMessage
 
 
 def test_offload_leaves_non_text_and_non_toolmessage_alone(tmp_path):
-    store = CtxStore(tmp_path)
+    store = EventStore(tmp_path / "events.db")
     # multimodal content (list of blocks) — must pass through, offloading would lose it
     multimodal = _tm([{"type": "text", "text": BIG}])
     assert _offload(multimodal, store, "x", threshold=10, preview=5) is multimodal
@@ -82,19 +83,19 @@ def test_offload_leaves_non_text_and_non_toolmessage_alone(tmp_path):
 
 
 def test_middleware_wrap_tool_call_stashes(tmp_path):
-    store = CtxStore(tmp_path)
-    m = ContextOffloadMiddleware(store, threshold=8000, preview=400)
+    store = EventStore(tmp_path / "events.db")
+    m = ContextMiddleware(store, threshold=8000, preview=400)
     out = m.wrap_tool_call(_req(name="grep"), lambda r: _tm(BIG, name="grep"))
     assert isinstance(out, ToolMessage)
     handle = _extract_handle(out.content)
-    assert store.recall(handle) == BIG
+    assert store.recall_blob(handle) == BIG
 
 
 def test_middleware_awrap_tool_call_stashes(tmp_path):
     """The server/runner use ainvoke → the ASYNC hook is the one that fires in
     production. Prove it offloads identically to the sync path."""
-    store = CtxStore(tmp_path)
-    m = ContextOffloadMiddleware(store, threshold=8000, preview=400)
+    store = EventStore(tmp_path / "events.db")
+    m = ContextMiddleware(store, threshold=8000, preview=400)
 
     async def handler(_r):  # type: ignore[no-untyped-def]
         return _tm(BIG, name="execute")
@@ -102,12 +103,12 @@ def test_middleware_awrap_tool_call_stashes(tmp_path):
     out = asyncio.run(m.awrap_tool_call(_req(), handler))
     assert isinstance(out, ToolMessage)
     handle = _extract_handle(out.content)
-    assert store.recall(handle) == BIG
+    assert store.recall_blob(handle) == BIG
 
 
 def test_middleware_passes_small_through(tmp_path):
-    store = CtxStore(tmp_path)
-    m = ContextOffloadMiddleware(store)
+    store = EventStore(tmp_path / "events.db")
+    m = ContextMiddleware(store)
     original = _tm(SMALL)
     out = m.wrap_tool_call(_req(), lambda r: original)
     assert out is original
@@ -117,9 +118,9 @@ def test_middleware_passes_small_through(tmp_path):
 
 
 def test_ctx_recall_returns_full_then_not_found(tmp_path):
-    store = CtxStore(tmp_path)
-    recall, _ = build_ctx_tools(store)
-    stash = store.stash(BIG, tool="execute")
+    store = EventStore(tmp_path / "events.db")
+    recall, _ = build_context_tools(store)
+    stash = store.stash_blob(BIG, tool="execute")
     assert recall.invoke({"handle": stash.handle}) == BIG
     # bare id also accepted
     assert recall.invoke({"handle": stash.id}) == BIG
@@ -128,10 +129,10 @@ def test_ctx_recall_returns_full_then_not_found(tmp_path):
 
 
 def test_ctx_search_finds_stashed_blob(tmp_path):
-    store = CtxStore(tmp_path)
-    store.stash("the alpha deployment failed at step 3", tool="execute")
-    store.stash("unrelated log line", tool="execute")
-    _, search = build_ctx_tools(store)
+    store = EventStore(tmp_path / "events.db")
+    store.stash_blob("the alpha deployment failed at step 3", tool="execute")
+    store.stash_blob("unrelated log line", tool="execute")
+    _, search = build_context_tools(store)
     out = search.invoke({"query": "alpha deployment"})
     assert "1 hit" in out
     assert "alpha deployment failed" in out
@@ -148,18 +149,18 @@ def test_ctx_search_finds_stashed_blob(tmp_path):
     "",
 ])
 def test_recall_rejects_path_escape(tmp_path, bad: str):
-    store = CtxStore(tmp_path)
+    store = EventStore(tmp_path / "events.db")
     (tmp_path / "etc").mkdir()
     (tmp_path / "secret.txt").write_text("SECRET")  # outside any stash
     # nothing stashed under a valid id, and no escape resolves to secret.txt
-    assert store.recall(bad) is None
+    assert store.recall_blob(bad) is None
 
 
 def test_search_caps_results(tmp_path):
-    store = CtxStore(tmp_path)
+    store = EventStore(tmp_path / "events.db")
     for _ in range(7):
-        store.stash("needleneedle here", tool="execute")
-    _, search = build_ctx_tools(store)
+        store.stash_blob("needleneedle here", tool="execute")
+    _, search = build_context_tools(store)
     out = search.invoke({"query": "needle", "limit": 3})
     assert "3 hit" in out
 
@@ -172,8 +173,8 @@ def test_retrieval_tools_are_exempt_from_offload(tmp_path):
     output must NOT be re-stashed — otherwise recalling a big result traps the
     agent in a recall->offload->recall loop. Surfaced by the Phase 7 E2E
     (ctx_recall(12K) returned 10K which got offloaded again); now exempt."""
-    store = CtxStore(tmp_path)
-    m = ContextOffloadMiddleware(store, threshold=10, preview=5)  # tiny threshold
+    store = EventStore(tmp_path / "events.db")
+    m = ContextMiddleware(store, threshold=10, preview=5)  # tiny threshold
     for name in ("ctx_recall", "ctx_search"):
         out = m.wrap_tool_call(_req(name=name), lambda r: _tm(BIG, name=name))
         assert out.content == BIG, f"{name} output must pass through un-stashed"
@@ -183,12 +184,12 @@ def test_non_retrieval_tool_with_same_size_does_offload(tmp_path):
     """Contrast: a same-sized result from any other tool (e.g. execute) IS
     stashed — confirms the exemption above is scoped to retrieval tools only,
     not a general small-threshold bypass."""
-    store = CtxStore(tmp_path)
-    m = ContextOffloadMiddleware(store, threshold=10, preview=5)
+    store = EventStore(tmp_path / "events.db")
+    m = ContextMiddleware(store, threshold=10, preview=5)
     out = m.wrap_tool_call(_req(name="execute"), lambda r: _tm(BIG, name="execute"))
     assert isinstance(out, ToolMessage)
     assert "ctx-offload" in out.content
-    assert store.recall(_extract_handle(out.content)) == BIG
+    assert store.recall_blob(_extract_handle(out.content)) == BIG
 
 
 # --- helper ------------------------------------------------------------------

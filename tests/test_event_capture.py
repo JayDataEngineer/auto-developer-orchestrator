@@ -1,22 +1,30 @@
-"""Phase 8 — event capture pipeline.
+"""Phase 8/19 — event capture pipeline (unified ``ContextMiddleware``).
 
-Proves the ``EventStore`` (SQLite), ``EventCaptureMiddleware`` (sync + async),
-and ``event_recent`` / ``event_query`` tools work correctly against a tmp-path
-database (no real ``.pux/events.sqlite``, no Docker, no model tokens).
+Proves the ``EventStore`` (SQLite), the unified ``ContextMiddleware`` (sync +
+async — does capture AND offload in one pass), and the ``ctx_search``
+retrieval tool work correctly against a tmp-path database (no real
+``.pux/events.sqlite``, no Docker, no model tokens).
+
+Phase 19 folded the old separate ``EventCaptureMiddleware`` into
+``ContextMiddleware`` and replaced the ``event_recent``/``event_query`` tool
+pair with the unified ``ctx_search`` (the resume snapshot now owns the
+chronological view; ``ctx_search`` covers query recall over blobs AND events).
+The ``event_recent`` tool tests were dropped (the tool is intentionally gone —
+its coverage moved to ``test_context_gaps.py`` snapshot tests); the
+``event_query`` tests were ported to ``ctx_search``.
 """
 from __future__ import annotations
 
 import asyncio
-import time
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from langchain_core.messages import ToolMessage
 
-from pux_harness.context.event_middleware import EventCaptureMiddleware
-from pux_harness.context.event_tools import build_event_tools
 from pux_harness.context.events import EventStore, P1, P2, P3, P4
+from pux_harness.context.middleware import ContextMiddleware
+from pux_harness.context.tools import build_context_tools
 
 
 def _req(name: str = "execute", tcid: str = "call_1", args: dict | None = None) -> SimpleNamespace:
@@ -141,12 +149,12 @@ def test_query_with_thread_filter(tmp_path):
     assert hits[0].thread_id == "t1"
 
 
-# --- EventCaptureMiddleware ---------------------------------------------------
+# --- ContextMiddleware (capture path) ----------------------------------------
 
 
 def test_middleware_captures_tool_call(tmp_path):
     store = EventStore(tmp_path / "events.db")
-    m = EventCaptureMiddleware(store)
+    m = ContextMiddleware(store)
 
     result = m.wrap_tool_call(
         _req(name="grep", args={"pattern": "TODO"}),
@@ -163,7 +171,7 @@ def test_middleware_captures_tool_call(tmp_path):
 
 def test_middleware_captures_error(tmp_path):
     store = EventStore(tmp_path / "events.db")
-    m = EventCaptureMiddleware(store)
+    m = ContextMiddleware(store)
 
     with pytest.raises(ValueError, match="boom"):
         m.wrap_tool_call(
@@ -181,7 +189,7 @@ def test_middleware_captures_error(tmp_path):
 def test_middleware_captures_error_result(tmp_path):
     """ToolMessage with status='error' should be captured as success=False."""
     store = EventStore(tmp_path / "events.db")
-    m = EventCaptureMiddleware(store)
+    m = ContextMiddleware(store)
 
     m.wrap_tool_call(
         _req(name="execute"),
@@ -195,7 +203,7 @@ def test_middleware_captures_error_result(tmp_path):
 
 def test_middleware_disabled(tmp_path):
     store = EventStore(tmp_path / "events.db")
-    m = EventCaptureMiddleware(store, enabled=False)
+    m = ContextMiddleware(store, enabled=False)
 
     m.wrap_tool_call(
         _req(name="grep"),
@@ -207,7 +215,7 @@ def test_middleware_disabled(tmp_path):
 
 def test_middleware_async_captures(tmp_path):
     store = EventStore(tmp_path / "events.db")
-    m = EventCaptureMiddleware(store)
+    m = ContextMiddleware(store)
 
     async def handler(_r):  # type: ignore[no-untyped-def]
         return _tm("async result", name="execute")
@@ -222,7 +230,7 @@ def test_middleware_async_captures(tmp_path):
 
 def test_middleware_async_captures_error(tmp_path):
     store = EventStore(tmp_path / "events.db")
-    m = EventCaptureMiddleware(store)
+    m = ContextMiddleware(store)
 
     async def handler(_r):  # type: ignore[no-untyped-def]
         raise RuntimeError("async boom")
@@ -236,13 +244,15 @@ def test_middleware_async_captures_error(tmp_path):
 
 
 def test_middleware_skips_detail_for_retrieval_tools(tmp_path):
-    """event_recent/event_query/ctx_recall/ctx_search should not log output_preview."""
+    """ctx_recall/ctx_search should not log output_preview (their job is to
+    inject content, so re-stashing or preview-logging their output would trap
+    the agent)."""
     store = EventStore(tmp_path / "events.db")
-    m = EventCaptureMiddleware(store)
+    m = ContextMiddleware(store)
 
     m.wrap_tool_call(
-        _req(name="event_recent"),
-        lambda r: _tm("lots of events..."),
+        _req(name="ctx_recall"),
+        lambda r: _tm("lots of offloaded content..."),
     )
 
     events = store.recent(event_type="tool_call")
@@ -250,60 +260,31 @@ def test_middleware_skips_detail_for_retrieval_tools(tmp_path):
     assert events[0].data["output_preview"] == ""  # skipped
 
 
-# --- Agent tools --------------------------------------------------------------
+# --- ctx_search retrieval tool (unified blobs + events) ----------------------
 
 
-def test_event_recent_tool(tmp_path):
-    store = EventStore(tmp_path / "events.db")
-    store.capture("task_started", {"task": "fix bug"})
-    store.capture("error", {"error": "timeout"})
-    store.flush()
-
-    recent_tool, _ = build_event_tools(store)
-    out = recent_tool.invoke({"event_type": "", "limit": 10})
-    assert "task_started" in out
-    assert "error" in out
-
-
-def test_event_recent_tool_filtered(tmp_path):
-    store = EventStore(tmp_path / "events.db")
-    store.capture("task_started", {"task": "fix bug"})
-    store.capture("error", {"error": "timeout"})
-    store.flush()
-
-    recent_tool, _ = build_event_tools(store)
-    out = recent_tool.invoke({"event_type": "error", "limit": 10})
-    assert "error" in out
-    assert "task_started" not in out
-
-
-def test_event_query_tool(tmp_path):
+def test_ctx_search_finds_event(tmp_path):
+    """ctx_search unifies blobs + events — an event's output_preview is
+    searchable, surfaced as an [event] hit tagged with its type."""
     store = EventStore(tmp_path / "events.db")
     store.capture("tool_call", {"output_preview": "authentication failed"})
     store.capture("tool_call", {"output_preview": "grep completed"})
     store.flush()
 
-    _, query_tool = build_event_tools(store)
-    out = query_tool.invoke({"query": "authentication"})
+    _, search = build_context_tools(store)
+    out = search.invoke({"query": "authentication"})
     assert "1 hit" in out
-    assert "tool_call" in out
+    assert "tool_call" in out  # the event type is surfaced in the [event] line
 
 
-def test_event_query_tool_no_match(tmp_path):
+def test_ctx_search_no_match(tmp_path):
     store = EventStore(tmp_path / "events.db")
     store.capture("tool_call", {"output_preview": "nothing relevant"})
     store.flush()
 
-    _, query_tool = build_event_tools(store)
-    out = query_tool.invoke({"query": "zzznonexistent"})
-    assert "no events matched" in out
-
-
-def test_event_recent_empty(tmp_path):
-    store = EventStore(tmp_path / "events.db")
-    recent_tool, _ = build_event_tools(store)
-    out = recent_tool.invoke({"event_type": "", "limit": 10})
-    assert "no events recorded yet" in out
+    _, search = build_context_tools(store)
+    out = search.invoke({"query": "zzznonexistent"})
+    assert "no stashed result" in out  # unified empty-message phrasing
 
 
 # --- v2: dedup ----------------------------------------------------------------

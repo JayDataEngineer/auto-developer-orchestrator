@@ -1,12 +1,19 @@
-"""Proactive context-offload layer (Phase 7) + event capture pipeline
-(Phase 8).
+"""Unified context-saving layer (Phase 19 unification).
 
-Phase 7 — the offload middleware that stashes large tool results behind
-``ctx:<id>`` handles (``offload``) and the host-side stash it writes to
-(``store``).
+One store, one middleware, one search surface, every agent.
 
-Phase 8 — structured event capture (``events``), the middleware that records
-tool calls / errors / decisions (``event_middleware``), and agent-callable
-query tools (``event_tools``).  Events power the structured snapshot builder
-(Phase 9), FTS5 retrieval, and cross-session rehydration (Phase 11).
+- ``events`` — the ``EventStore`` (``.pux/events.sqlite``): structured events
+  (tool calls, errors, decisions, …) AND offloaded blobs (full oversized tool
+  results behind ``ctx:<id>`` handles), both FTS5/BM25 searchable.
+- ``middleware`` — ``ContextMiddleware``: in ONE ``wrap_tool_call`` pass it
+  captures each tool call as an event AND offloads oversized results to a blob.
+- ``tools`` — the ``ctx_recall`` (full blob by handle) + ``ctx_search`` (BM25
+  over events+blobs) retrieval surface.
+- ``layer`` — ``build_context_layer()``: the single seam that returns the
+  middleware + retrieval tools; imported by BOTH ``agent.graph`` (main agent)
+  and ``agent.orgs._build_sub`` (every subagent), so capture + offload +
+  retrieval reach the whole agent tree.
+
+Downstream (snapshot.py, session_guide.py) read the same store for the
+structured compaction snapshot + cross-session rehydration.
 """

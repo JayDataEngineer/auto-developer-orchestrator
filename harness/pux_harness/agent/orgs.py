@@ -26,9 +26,12 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.tools import BaseTool
 
 from pux_harness.agent.model import get_model
+from pux_harness.context.layer import build_context_layer
+from pux_harness.sandbox.tools import Category, classify_slug, prefixed
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -209,18 +212,24 @@ def build_system_prompt(org: str) -> str:
 def _resolve_tools(raw: Any, tool_map: dict[str, BaseTool]) -> list[BaseTool]:
     """Map an agent's ``tools`` list to specialist StructuredTools.
 
-    Each entry is a bare slug (``"python"``); we prepend ``pux_sandbox_`` and
-    look up the tool map. Unknown tools fail loud (no silent skip) — a stale
-    reference is a real bug. Native fs tools (``execute``/``read_file``/…) are
-    NOT resolved here — they come from the backend's ``FilesystemMiddleware``
-    for every subagent regardless of its ``tools:`` whitelist, so they never
-    belong in the specialist whitelist.
+    Classification is shared with the offline contract (``classify_slug`` from
+    the tool ``REGISTRY``). A native slug (``execute``/``read_file``/…) is
+    SKIPPED — the backend's ``FilesystemMiddleware`` injects the fs/shell tools
+    into every subagent regardless of its whitelist, so they have no entry in
+    the specialist ``tool_map`` (previously the runtime would have raised
+    KeyError on one while the contract accepted it). A specialist slug resolves
+    to its ``pux_sandbox_*`` StructuredTool; anything else fails loud — a stale
+    reference is a real bug. Sharing the classifier with the contract means the
+    runtime and offline paths can no longer disagree.
     """
     resolved: list[BaseTool] = []
     for entry in _parse_list(raw):
-        tool_name = entry.rsplit("/", 1)[-1]
-        key = "pux_sandbox_" + tool_name
-        if key not in tool_map:
+        slug = entry.rsplit("/", 1)[-1]
+        kind = classify_slug(slug)
+        if kind is Category.NATIVE:
+            continue
+        key = prefixed(slug, Category.SPECIALIST)
+        if kind is not Category.SPECIALIST or key not in tool_map:
             raise KeyError(
                 f"agent references unknown tool {entry!r} "
                 f"(resolved {key!r}, not in the specialist tool map)"
@@ -282,7 +291,7 @@ def _load_agent_spec(slug: str, org: str) -> dict[str, Any] | None:
 
 def _build_sub(
     slug: str, spec: dict[str, Any], tool_map: dict[str, BaseTool], system_prompt: str,
-    org: str,
+    org: str, *, ctx_mw: list[AgentMiddleware],
 ) -> dict[str, Any]:
     """Build a deepagents SubAgent dict from a spec mapping (the module's
     ``SUBAGENT`` dict). ``system_prompt`` is passed in explicitly.
@@ -293,6 +302,17 @@ def _build_sub(
     through models.yaml + the org profile + env, decoupled from the base/CTO
     model so an org can set base!=worker. (Worker defaults to the same id as
     base, so today's orgs are byte-identical; the seam is what's new.)
+
+    Phase 19 — ``ctx_mw`` is the unified context-layer middleware (capture +
+    offload, one ``ContextMiddleware``) attached to EVERY subagent.
+    ``SubAgentMiddleware`` forwards a spec's ``middleware`` key into the
+    compiled subagent (verified against deepagents 0.6.12: ``graph.py:656`` +
+    ``middleware/subagents.py:494`` both ``.extend(spec.get("middleware", []))``
+    into ``create_agent``), so this makes the layer intercept THIS subagent's
+    own tool calls. The old Phase-7 docstring claim that the ``middleware`` key
+    is silently dropped was WRONG and is retracted. The retrieval tools
+    (``ctx_recall``/``ctx_search``) are appended to the whitelist separately in
+    ``load_subagents`` (after profile filtering) — see there.
     """
     sub: dict[str, Any] = {
         "name": spec.get("name", slug),
@@ -307,6 +327,7 @@ def _build_sub(
         sub["model"] = get_model(role="worker", org=org)
     if "skills" in spec:
         sub["skills"] = _resolve_skills(spec["skills"], slug)
+    sub["middleware"] = list(ctx_mw)
     return sub
 
 
@@ -320,11 +341,23 @@ def load_subagents(
     For each slug in ``org.yaml``, load ``orgs/<org>/agents/<slug>.md`` (or
     ``orgs/_shared/agents/<slug>.md``) and build from its frontmatter + body.
 
-    No ``middleware`` key: deepagents' ``SubAgentMiddleware`` does not forward a
-    raw spec's ``middleware`` key into the compiled specialist (verified in the
-    Phase 7 E2E), so setting it would be a silent no-op. Context-offload runs on
-    the main agent only; see ``context_offload.py`` for the rationale + how to
-    add subagent offload properly later (CompiledSubAgent pre-compilation).
+    Phase 19 — the unified context layer (capture + offload + retrieval) now
+    reaches EVERY subagent, not just the main agent:
+
+    - ``middleware``: built ONCE via ``build_context_layer()`` and attached to
+      each spec (``_build_sub`` sets ``sub["middleware"]``). deepagents'
+      ``SubAgentMiddleware`` forwards that key into the compiled subagent
+      (verified against 0.6.12), so ``ContextMiddleware`` intercepts each
+      subagent's own tool calls. The old Phase-7 "main-agent-only" claim is
+      retracted. Both the main agent (``graph.build_graph``) and every
+      subagent bind the SAME process-wide ``EventStore`` (the default store
+      in ``build_context_layer``), so a blob offloaded by any agent is
+      recallable by any other.
+    - retrieval tools (``ctx_recall``/``ctx_search``): appended to each
+      specialist's resolved whitelist, AFTER profile filtering (so an org's
+      ``excluded_tools`` can never strip retrieval). A spec with no ``tools``
+      inherits the main agent's tools — which already include them via
+      ``graph.build_graph`` — so we don't synthesize a list in that case.
 
     ``profile`` (optional ``HarnessProfileConfig`` from ``orgs/<org>/
     profile.yaml``; Phase 16.3b) applies the org-wide overrides to EACH
@@ -338,6 +371,11 @@ def load_subagents(
     if org not in discover_orgs():
         raise KeyError(f"unknown org {org!r}; discovered orgs: {discover_orgs()}")
     tool_map: dict[str, BaseTool] = {t.name: t for t in all_tools}
+    # Build the context layer once for the whole org — every subagent shares
+    # the same middleware instance + the same retrieval tools, all bound to the
+    # process-wide EventStore (so an offload by any subagent is recallable by
+    # any other, and by the main agent).
+    ctx_mw, ctx_tools = build_context_layer()
     apply_profile_to_tools = None
     if profile is not None:
         # Lazy: profile.py imports ``_orgs_dir`` from THIS module at load time.
@@ -350,7 +388,9 @@ def load_subagents(
             searched = [str(p / f"{slug}.md") for p in _agent_search_dirs(org)]
             raise FileNotFoundError(
                 f"no agent {slug!r} for org {org!r} — searched {searched}")
-        sub = _build_sub(slug, spec, tool_map, spec["system_prompt"], org)
+        sub = _build_sub(
+            slug, spec, tool_map, spec["system_prompt"], org, ctx_mw=ctx_mw,
+        )
         if profile is not None:
             if profile.system_prompt_suffix:
                 sub["system_prompt"] = (
@@ -358,5 +398,15 @@ def load_subagents(
                 )
             if sub.get("tools"):
                 sub["tools"] = apply_profile_to_tools(sub["tools"], profile)
+        # Retrieval surface, appended AFTER profile filtering so an org-wide
+        # ``excluded_tools`` can't strip it. Guarded by ``sub.get("tools")``: a
+        # spec with no whitelist inherits the main agent's tools (already
+        # including these via graph.build_graph), and synthesizing a list here
+        # would silently break that inheritance.
+        if sub.get("tools"):
+            have = {t.name for t in sub["tools"]}
+            sub["tools"] = [
+                *sub["tools"], *(t for t in ctx_tools if t.name not in have)
+            ]
         subs.append(sub)
     return subs

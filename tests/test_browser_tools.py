@@ -18,6 +18,13 @@ from typing import Any
 import pytest
 
 from pux_harness.sandbox import tools
+# ``_sb_post`` lives in the ``browser`` SUBMODULE and ``_result`` in ``_shared``;
+# both moved out of the package namespace when the monolithic tools.py was split
+# into a package. The browser factories resolve ``_sb_post`` through the
+# ``browser`` module's globals at call time, so that — not the package — is the
+# namespace the monkeypatch must target for the stub to take effect.
+from pux_harness.sandbox.tools import browser
+from pux_harness.sandbox.tools._shared import _result
 
 
 class _Capture:
@@ -28,13 +35,13 @@ class _Capture:
 
     def __call__(self, exec_client, endpoint, body_obj, *args, **kwargs):
         self.calls.append((endpoint, body_obj))
-        return tools._result({"success": True, "endpoint": endpoint})
+        return _result({"success": True, "endpoint": endpoint})
 
 
 @pytest.fixture
 def cap(monkeypatch) -> _Capture:
     c = _Capture()
-    monkeypatch.setattr(tools, "_sb_post", c)
+    monkeypatch.setattr(browser, "_sb_post", c)
     return c
 
 
@@ -51,7 +58,7 @@ def _browser_tools() -> dict:
 
 
 def test_all_browser_factories_registered():
-    """Every Phase-16 browser slug is registered with its prefixed name."""
+    """Every browser slug (Phase 16 + Phase 19) is registered with its prefixed name."""
     specs = _browser_tools()
     expected = {
         "browser_navigate", "browser_click", "browser_type", "browser_screenshot",
@@ -61,11 +68,124 @@ def test_all_browser_factories_registered():
         "browser_upload", "browser_tabs", "browser_new_tab", "browser_switch_tab",
         "browser_close_tab", "browser_dropdown_options", "browser_select_dropdown",
         "browser_save_session", "browser_restore_session",
+        # Phase 19 — SOTA mouse/keyboard/DnD
+        "browser_drag", "browser_hover", "browser_press", "browser_click_at",
+        "browser_scroll_into_view", "browser_a11y", "browser_iframe",
     }
-    assert expected <= set(specs), f"missing: {expected - set(specs)}"
+    assert set(specs) == expected, (
+        f"missing: {expected - set(specs)}; extra: {set(specs) - expected}")
     # And every one has a non-empty description (the autopilot richness lives here).
     for slug, t in specs.items():
         assert t.description and t.description.strip(), f"{slug} has empty description"
+
+
+# --- Phase 19 tools: body-shape contract ------------------------------------
+
+
+def test_browser_drag_index_to_index_uses_auto(cap):
+    t = _browser_tools()["browser_drag"]
+    t.invoke({"from_index": 2, "to_index": 5})
+    assert cap.calls[0][0] == "/drag"
+    body = cap.calls[0][1]
+    assert body["from_index"] == 2 and body["to_index"] == 5
+    assert body["strategy"] == "auto"  # default
+    assert body["steps"] == 25         # default
+
+
+def test_browser_drag_offset_mode_forces_physics_body(cap):
+    t = _browser_tools()["browser_drag"]
+    t.invoke({"from_index": 1, "dx": 120, "dy": 0, "strategy": "physics", "steps": 40})
+    body = cap.calls[0][1]
+    assert body == {"from_index": 1, "dx": 120, "dy": 0, "strategy": "physics", "steps": 40}
+
+
+def test_browser_drag_requires_source_and_target(cap):
+    t = _browser_tools()["browser_drag"]
+    out = t.invoke({"to_index": 3})  # no source
+    assert cap.calls == []
+    assert "source" in out
+    out = t.invoke({"from_index": 3})  # no target
+    assert cap.calls == []
+    assert "target" in out
+
+
+def test_browser_hover_accepts_index(cap):
+    _browser_tools()["browser_hover"].invoke({"index": 4})
+    assert cap.calls[0] == ("/hover", {"index": 4})
+
+
+def test_browser_hover_accepts_coords(cap):
+    _browser_tools()["browser_hover"].invoke({"x": 100, "y": 200})
+    assert cap.calls[0] == ("/hover", {"x": 100, "y": 200})
+
+
+def test_browser_hover_requires_target(cap):
+    out = _browser_tools()["browser_hover"].invoke({})
+    assert cap.calls == []
+    assert "index/selector OR x,y" in out
+
+
+def test_browser_press_posts_keys(cap):
+    _browser_tools()["browser_press"].invoke({"keys": "Control+a"})
+    assert cap.calls[0] == ("/press", {"keys": "Control+a"})
+
+
+def test_browser_press_with_target(cap):
+    _browser_tools()["browser_press"].invoke({"keys": "ArrowDown", "index": 7})
+    assert cap.calls[0] == ("/press", {"keys": "ArrowDown", "index": 7})
+
+
+def test_browser_press_requires_keys(cap):
+    out = _browser_tools()["browser_press"].invoke({"keys": ""})
+    assert cap.calls == []
+    assert "keys is required" in out
+
+
+def test_browser_click_at_coords(cap):
+    _browser_tools()["browser_click_at"].invoke({"x": 50, "y": 60})
+    body = cap.calls[0][1]
+    assert cap.calls[0][0] == "/click_at"
+    assert body["x"] == 50 and body["y"] == 60
+    assert body["button"] == 0 and body["double"] is False and body["right"] is False
+
+
+def test_browser_click_at_right_and_double_flags(cap):
+    _browser_tools()["browser_click_at"].invoke({"index": 3, "right": True})
+    _browser_tools()["browser_click_at"].invoke({"selector": "#x", "double": True})
+    assert cap.calls[0][1]["right"] is True and cap.calls[0][1]["index"] == 3
+    assert cap.calls[1][1]["double"] is True and cap.calls[1][1]["selector"] == "#x"
+
+
+def test_browser_click_at_requires_target(cap):
+    out = _browser_tools()["browser_click_at"].invoke({})
+    assert cap.calls == []
+    assert "x,y OR index/selector" in out
+
+
+def test_browser_scroll_into_view_accepts_index(cap):
+    _browser_tools()["browser_scroll_into_view"].invoke({"index": 9})
+    assert cap.calls[0] == ("/scroll_into_view", {"index": 9})
+
+
+def test_browser_scroll_into_view_requires_target(cap):
+    out = _browser_tools()["browser_scroll_into_view"].invoke({})
+    assert cap.calls == []
+    assert "index or selector is required" in out
+
+
+def test_browser_a11y_posts_empty(cap):
+    _browser_tools()["browser_a11y"].invoke({})
+    assert cap.calls == [("/a11y", {})]
+
+
+def test_browser_iframe_default_list(cap):
+    _browser_tools()["browser_iframe"].invoke({})
+    assert cap.calls == [("/iframe", {"action": "list"})]
+
+
+def test_browser_iframe_enter_with_selector(cap):
+    _browser_tools()["browser_iframe"].invoke({"action": "enter", "selector": "iframe.pay"})
+    assert cap.calls == [("/iframe", {"action": "enter", "selector": "iframe.pay"})]
 
 
 def test_browser_search_posts_query(cap):

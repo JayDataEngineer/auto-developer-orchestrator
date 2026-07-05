@@ -76,8 +76,8 @@ def test_build_graph_wires_everything(monkeypatch):
     monkeypatch.setattr(graph_mod, "shared_backend", lambda: mock_backend)
     monkeypatch.setattr(graph_mod, "build_native_specialists",
                         lambda exec_client, vision_model=None, org=None, backend=None: mock_specialists)
-    monkeypatch.setattr(graph_mod, "build_ctx_tools", lambda: mock_ctx_tools)
-    monkeypatch.setattr(graph_mod, "build_event_tools", lambda: [])
+    monkeypatch.setattr(graph_mod, "build_context_layer",
+                        lambda: ([], mock_ctx_tools))
     monkeypatch.setattr(graph_mod, "build_system_prompt", lambda org: mock_prompt)
     monkeypatch.setattr(graph_mod, "load_profile", lambda org: None)
     monkeypatch.setattr(graph_mod, "load_subagents",
@@ -112,8 +112,7 @@ def test_build_graph_applies_profile_suffix(monkeypatch):
     monkeypatch.setattr(graph_mod, "shared_backend", lambda: MagicMock())
     monkeypatch.setattr(graph_mod, "build_native_specialists",
                         lambda exec_client, vision_model=None, org=None, backend=None: [])
-    monkeypatch.setattr(graph_mod, "build_ctx_tools", lambda: [])
-    monkeypatch.setattr(graph_mod, "build_event_tools", lambda: [])
+    monkeypatch.setattr(graph_mod, "build_context_layer", lambda: ([], []))
     monkeypatch.setattr(graph_mod, "build_system_prompt", lambda org: "Base prompt")
     monkeypatch.setattr(graph_mod, "load_subagents", lambda org, sp, profile=None: [])
 
@@ -145,8 +144,7 @@ def test_build_graph_replaces_base_prompt(monkeypatch):
     monkeypatch.setattr(graph_mod, "shared_backend", lambda: MagicMock())
     monkeypatch.setattr(graph_mod, "build_native_specialists",
                         lambda exec_client, vision_model=None, org=None, backend=None: [])
-    monkeypatch.setattr(graph_mod, "build_ctx_tools", lambda: [])
-    monkeypatch.setattr(graph_mod, "build_event_tools", lambda: [])
+    monkeypatch.setattr(graph_mod, "build_context_layer", lambda: ([], []))
     monkeypatch.setattr(graph_mod, "build_system_prompt", lambda org: "Default")
     monkeypatch.setattr(graph_mod, "load_subagents", lambda org, sp, profile=None: [])
 

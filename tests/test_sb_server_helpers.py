@@ -154,6 +154,49 @@ def test_select_dropdown_js_is_iife():
     assert js.startswith("((")
 
 
+# --- Phase 19 interaction JS constants are IIFEs ------------------------------
+# Same CDP Runtime.evaluate constraint as the constants above: each must be a
+# single arrow-fn expression so it can be embedded as `return CONST(args)` and
+# re-evaluated without leaking declarations across calls.
+
+def _assert_iife(name):
+    js = getattr(mod, name).strip()
+    assert js.startswith("(("), f"{name} must be an IIFE arrow fn, got: {js[:40]!r}"
+    assert js.endswith(")"), f"{name} must close the expression, got: {js[-40:]!r}"
+
+
+def test_phase19_interaction_js_constants_are_iifes():
+    for name in (
+        "ELEMENT_CENTER_JS", "SIMULATE_DND_JS", "PHYS_DRAG_JS",
+        "HOVER_JS", "PRESS_JS", "CLICK_AT_JS", "SCROLL_INTO_VIEW_JS",
+    ):
+        _assert_iife(name)
+
+
+def test_simulate_dnd_js_fires_html5_sequence():
+    """The HTML5 workaround MUST dispatch the full native drag event chain —
+    that's the whole point (Selenium's ActionChains skips it). Static check
+    guards against an accidental trim of the sequence."""
+    js = mod.SIMULATE_DND_JS
+    for evt in ("dragstart", "dragenter", "dragover", "drop", "dragend"):
+        assert evt in js, f"SIMULATE_DND_JS missing {evt!r}"
+
+
+def test_phys_drag_js_fires_mouse_sequence():
+    """Physics drag MUST emit mousedown → N×mousemove → mouseup."""
+    js = mod.PHYS_DRAG_JS
+    for evt in ("mousedown", "mousemove", "mouseup"):
+        assert evt in js, f"PHYS_DRAG_JS missing {evt!r}"
+
+
+def test_js_str_quotes_and_escapes():
+    """js_str() produces a single-quoted JS literal and escapes the two chars
+    that can break out of it (backslash, single-quote)."""
+    assert mod.js_str("button#ok") == "'button#ok'"
+    assert mod.js_str("a[b='c']") == "'a[b=\\'c\\']'"
+    assert mod.js_str("C:\\path") == "'C:\\\\path'"
+
+
 # --- _cookie_to_dict ----------------------------------------------------------
 
 

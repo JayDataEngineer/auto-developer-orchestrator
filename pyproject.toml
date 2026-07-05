@@ -2,9 +2,26 @@
 name = "auto-developer-orchestrator"
 version = "0.1.0"
 requires-python = ">=3.12,<3.14"
+# The umbrella depends on its sole member so a plain `uv sync` at the repo root
+# installs the harness runtime (deepagents, fastapi, uvicorn, …) + the `pux`
+# console script. Without this, `uv sync` syncs ONLY the root (dev tooling) and
+# prunes the member — a footgun. `--all-packages` is no longer required.
+dependencies = ["pux-harness"]
 
+# uv workspace — the dual pyproject is INTENTIONAL, not drift:
+#  - root = the umbrella: workspace membership, dev tooling (pytest/ruff/mypy),
+#    and the requires-python contract.
+#  - harness/ = the sole member: runtime deps, the `pux` console script, and the
+#    hatchling build.
+# One `uv sync` at the repo root materializes ONE .venv for the whole workspace;
+# harness/ has no venv/.python-version of its own (those were pre-workspace
+# orphans, deleted).
 [tool.uv.workspace]
 members = ["harness"]
+
+# Resolve the member dep to the in-tree workspace package, not PyPI.
+[tool.uv.sources]
+pux-harness = { workspace = true }
 
 [dependency-groups]
 dev = ["pytest", "ruff", "mypy"]

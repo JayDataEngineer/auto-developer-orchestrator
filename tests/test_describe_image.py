@@ -19,7 +19,7 @@ import json
 
 import pytest
 
-from pux_harness.sandbox.tools import _describe_image_tool
+from pux_harness.sandbox.tools.describe_image import _describe_image_tool
 
 
 class _Resp:

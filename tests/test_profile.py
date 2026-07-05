@@ -47,6 +47,18 @@ _SPECIALISTS = [
     _mk_tool("pux_sandbox_browser_navigate", "navigate to a url"),
 ]
 
+# The middleware ``build_graph`` ALWAYS mounts, in order, regardless of profile:
+# the unified context layer's middleware (capture+offload in one
+# ContextMiddleware — graph.py calls ``build_context_layer()``) PLUS
+# RoutingMiddleware + SessionGuideMiddleware. The ``captured_build`` fixture
+# stubs ``build_context_layer`` to empty + the two named middleware to marker
+# strings, so a captured ``middleware`` list with no rubric gate is exactly
+# this. Asserted in the no-gate / disabled-gate tests; updating the baseline
+# lives here, once. (The capture+offload behavior itself is proven in
+# test_context_offload.py — here it's stubbed away to keep the profile test
+# focused on the wiring shape.)
+_BASELINE_MIDDLEWARE = ["ROUTE", "GUIDE"]
+
 
 @pytest.fixture
 def fake_tree(tmp_path: Path, monkeypatch):
@@ -104,8 +116,14 @@ def captured_build(monkeypatch):
     monkeypatch.setattr(graph, "shared_backend", lambda: "BACKEND")
     monkeypatch.setattr(graph, "build_native_specialists",
                         lambda *a, **k: list(_SPECIALISTS))
-    monkeypatch.setattr(graph, "build_ctx_tools", lambda: [])
-    monkeypatch.setattr(graph, "ContextOffloadMiddleware", lambda: "OFFLOAD")
+    # The unified context layer (graph.py: ``ctx_mw, ctx_tools =
+    # build_context_layer()`` — one ContextMiddleware doing capture+offload in
+    # a single pass, plus the ctx_recall/ctx_search retrieval tools). Stubbed to
+    # empty so the no-gate baseline middleware is just ROUTE+GUIDE; the
+    # capture/offload behavior is proven separately in test_context_offload.py.
+    monkeypatch.setattr(graph, "build_context_layer", lambda: ([], []))
+    monkeypatch.setattr(graph, "RoutingMiddleware", lambda: "ROUTE")
+    monkeypatch.setattr(graph, "SessionGuideMiddleware", lambda: "GUIDE")
     monkeypatch.setattr(
         graph, "create_deep_agent",
         lambda **kw: cap.update(kw) or "GRAPH",
@@ -227,8 +245,12 @@ def test_build_graph_requests_base_and_multimodal_roles(fake_tree, monkeypatch):
     monkeypatch.setattr(graph, "shared_backend", lambda: "BACKEND")
     monkeypatch.setattr(graph, "build_native_specialists",
                         lambda *a, **k: list(_SPECIALISTS))
-    monkeypatch.setattr(graph, "build_ctx_tools", lambda: [])
-    monkeypatch.setattr(graph, "ContextOffloadMiddleware", lambda: "OFFLOAD")
+    # Stub build_graph's remaining deps so it runs to completion; this test
+    # only asserts which roles ``get_model`` was asked for, not the middleware
+    # shape (that's the captured_build fixture's job elsewhere).
+    monkeypatch.setattr(graph, "build_context_layer", lambda: ([], []))
+    monkeypatch.setattr(graph, "RoutingMiddleware", lambda: "ROUTING")
+    monkeypatch.setattr(graph, "SessionGuideMiddleware", lambda: "SESSION")
     monkeypatch.setattr(graph, "create_deep_agent", lambda **kw: "GRAPH")
     monkeypatch.setattr(graph, "load_profile", lambda org: None)
 
@@ -269,9 +291,9 @@ def test_rubric_gate_appends_middleware(fake_tree, captured_build, monkeypatch):
     graph.build_graph("p", checkpointer=None)
 
     mw = captured_build["middleware"]
-    assert "OFFLOAD" in mw          # ContextOffloadMiddleware still mounted
+    assert "ROUTE" in mw            # baseline context middleware still mounted
     assert "RUBRIC_MW" in mw        # RubricMiddleware appended
-    assert mw.index("OFFLOAD") < mw.index("RUBRIC_MW")  # offload first
+    assert mw.index("ROUTE") < mw.index("RUBRIC_MW")  # baseline before rubric
     assert rubric_kwargs["max_iterations"] == 3
     # The grader's 3 evidence tools (execute / read_file / grep).
     assert len(rubric_kwargs["tools"]) == 3
@@ -294,7 +316,7 @@ def test_no_rubric_gate_no_rubric_middleware(fake_tree, captured_build, monkeypa
     graph.build_graph("p", checkpointer=None)
 
     assert constructed == []
-    assert captured_build["middleware"] == ["OFFLOAD"]
+    assert captured_build["middleware"] == _BASELINE_MIDDLEWARE
 
 
 def test_rubric_gate_disabled_mounts_no_middleware(fake_tree, captured_build, monkeypatch):
@@ -314,7 +336,7 @@ def test_rubric_gate_disabled_mounts_no_middleware(fake_tree, captured_build, mo
     graph.build_graph("p", checkpointer=None)
 
     assert constructed == []
-    assert captured_build["middleware"] == ["OFFLOAD"]
+    assert captured_build["middleware"] == _BASELINE_MIDDLEWARE
 
 
 # --- Phase 17.B.1: RubricGate + default_rubric (helper level) --------------
@@ -477,15 +499,24 @@ def test_validate_profile_round_trips(fake_tree):
 
 
 def test_load_subagents_default_profile_none_preserves_behavior(fake_tree):
-    """load_subagents(org, tools) with no profile arg is byte-identical to
-    today (every existing call site)."""
+    """load_subagents(org, tools) with no profile arg preserves the specialist
+    whitelist resolution (the regression contract) — the browserish subagent
+    gets exactly its two declared ``browser_*`` tools. Phase 19 additionally
+    threads the unified context layer into every subagent, so the retrieval
+    tools ``ctx_recall`` + ``ctx_search`` are appended to the whitelist too
+    (graph.py retracts the old "main-agent-only" claim — verified against
+    deepagents 0.6.12)."""
     subs = orgs.load_subagents("p", _SPECIALISTS)
     sub = next(s for s in subs if s["name"] == "browserish")
     assert sub["system_prompt"] == "browser body."
-    assert {t.name for t in sub["tools"]} == {
-        "pux_sandbox_browser_save_session",
-        "pux_sandbox_browser_navigate",
-    }
+    names = {t.name for t in sub["tools"]}
+    # The declared specialist whitelist resolved faithfully.
+    assert {"pux_sandbox_browser_save_session",
+            "pux_sandbox_browser_navigate"} <= names
+    # Phase 19: the context retrieval surface reaches every subagent.
+    assert {"ctx_recall", "ctx_search"} <= names
+    # No surprise specialists leak in (python is NOT in this subagent's whitelist).
+    assert "pux_sandbox_python" not in names
 
 
 def test_load_subagents_applies_profile(fake_tree):

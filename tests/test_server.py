@@ -112,6 +112,10 @@ class _StubGraph:
     def __init__(self) -> None:
         self.invoked: list[tuple[dict[str, Any], dict[str, Any]]] = []
         self._state = _StubSnapshot({})
+        # copilotkit's LangGraphAGUIAgent walks ``graph.nodes.items()`` at
+        # construction to find declared subgraphs; expose an empty node map so
+        # the stub satisfies the compiled-graph contract without subgraphs.
+        self.nodes: dict[str, Any] = {}
 
     async def ainvoke(self, inp: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
         self.invoked.append((inp, config))
