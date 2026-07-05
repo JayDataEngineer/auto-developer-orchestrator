@@ -1286,3 +1286,145 @@ def build_native_specialists(
         _desktop_type_tool(exec_client),
         _desktop_key_tool(exec_client),
     ]
+
+
+# --- grader tools (Phase 17.B.2) -------------------------------------------
+# Distinct from the main agent's native fs/shell tools (which come from
+# ``FilesystemMiddleware`` bound to the backend). ``RubricMiddleware`` runs the
+# grader as a SEPARATE sub-agent that does NOT inherit that middleware, so the
+# grader gets its own sandbox-bound factories here. Named ``pux_grader_*`` (not
+# ``execute``/``read_file``/``grep``) so their identity is unambiguous and they
+# can never collide with the native tools if the grader's tool list is ever
+# merged with anything else.
+
+PUX_GRADER_PREFIX = "pux_grader_"
+
+
+class _GraderExecuteArgs(BaseModel):
+    command: str = Field(
+        ..., description="Shell command to run inside the sandbox (tests, lint, "
+        "typecheck, build). Run from /sandbox/workspace. Cite the exit code in "
+        "your verdict."
+    )
+
+
+_GRADER_EXECUTE_DESC = (
+    "Run a shell command inside the sandbox container to gather EVIDENCE for a "
+    "rubric verdict — run the test suite, lint, typecheck, or build, then read "
+    "the exit code + output. The workspace is at /sandbox/workspace. Do not "
+    "grade from the agent's summary — run the real check and cite what it said."
+)
+
+
+def _grader_execute_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(command: str) -> str:
+        if not command:
+            return _result({"success": False, "error": "no command provided"})
+        out, exit_code = exec_client.exec(command)
+        # Always success=true (we ran the command) — the COMMAND's outcome is in
+        # exit_code + output. A failing test suite is exactly the evidence the
+        # grader needs, not a tool error.
+        return _result({
+            "success": True, "exit_code": exit_code, "output": out,
+        })
+
+    return StructuredTool(
+        name=PUX_GRADER_PREFIX + "execute", description=_GRADER_EXECUTE_DESC,
+        args_schema=_GraderExecuteArgs, func=_run,
+    )
+
+
+class _GraderReadFileArgs(BaseModel):
+    path: str = Field(
+        ..., description="Path to a file inside the sandbox (read the diff, "
+        "inspect touched source). Project-relative paths resolve under "
+        "/sandbox/workspace."
+    )
+
+
+_GRADER_READ_FILE_DESC = (
+    "Read a file's contents inside the sandbox to gather EVIDENCE for a rubric "
+    "verdict — inspect the changed files, read the diff, confirm the "
+    "implementation exists and reads like the surrounding code. Do not take the "
+    "agent's word that a file was changed — read it."
+)
+
+
+def _grader_read_file_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(path: str) -> str:
+        if not path:
+            return _result({"success": False, "error": "no path provided"})
+        out, exit_code = exec_client.exec(f"cat {shlex.quote(path)}")
+        if exit_code != 0:
+            return _result({
+                "success": False, "error": f"cat exited {exit_code}", "output": out,
+            })
+        return _result({"success": True, "path": path, "content": out})
+
+    return StructuredTool(
+        name=PUX_GRADER_PREFIX + "read_file", description=_GRADER_READ_FILE_DESC,
+        args_schema=_GraderReadFileArgs, func=_run,
+    )
+
+
+class _GraderGrepArgs(BaseModel):
+    pattern: str = Field(..., description="Regex or literal to search for.")
+    path: str = Field(
+        "/sandbox/workspace", description="File or directory to search "
+        "(default: the workspace root)."
+    )
+    include: str | None = Field(
+        None, description="Optional glob filter, e.g. '*.py' or '*.go'."
+    )
+
+
+_GRADER_GREP_DESC = (
+    "Search file contents inside the sandbox to gather EVIDENCE for a rubric "
+    "verdict — locate a symbol, check a regression marker didn't reappear, "
+    "confirm a removed API has no remaining callers. Recursive by default."
+)
+
+
+def _grader_grep_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(pattern: str, path: str = "/sandbox/workspace",
+             include: str | None = None) -> str:
+        if not pattern:
+            return _result({"success": False, "error": "no pattern provided"})
+        # grep -rn (recursive, line numbers). --include filtered when given.
+        # exit 1 = no matches (not a tool error); exit 2 = real error (bad regex,
+        # missing path). Quote pattern + path; include is a glob, not a path, so
+        # it rides as a flag arg.
+        cmd = f"grep -rn {shlex.quote(pattern)} {shlex.quote(path)}"
+        if include:
+            cmd += f" --include={shlex.quote(include)}"
+        out, exit_code = exec_client.exec(cmd)
+        if exit_code == 2:
+            return _result({"success": False, "error": f"grep error: {out or 'bad pattern/path'}"})
+        # exit 0 = matches found; exit 1 = no matches. Both are success (the
+        # grader asked a question and got an answer).
+        return _result({
+            "success": True,
+            "matches": out if exit_code == 0 else "",
+            "match_count": out.count("\n") + 1 if (exit_code == 0 and out) else 0,
+        })
+
+    return StructuredTool(
+        name=PUX_GRADER_PREFIX + "grep", description=_GRADER_GREP_DESC,
+        args_schema=_GraderGrepArgs, func=_run,
+    )
+
+
+def build_grader_tools(exec_client: DockerExecClient) -> list[StructuredTool]:
+    """The sandbox-bound tool set for ``RubricMiddleware``'s grader (Phase 17.B).
+
+    Three evidence-gathering tools — run a command (tests/lint/typecheck), read
+    a file (the diff), grep (regressions/symbols) — so the grader grades from
+    REAL evidence, not the agent's summary. The grader is a separate sub-agent
+    that does NOT inherit the main agent's ``FilesystemMiddleware``, so these
+    factories bind to ``exec_client`` directly (mirroring the ``_python_tool``
+    idiom)."""
+    return [
+        _grader_execute_tool(exec_client),
+        _grader_read_file_tool(exec_client),
+        _grader_grep_tool(exec_client),
+    ]

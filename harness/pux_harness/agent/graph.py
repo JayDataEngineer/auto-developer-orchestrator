@@ -14,19 +14,38 @@ from __future__ import annotations
 
 from typing import Any
 
-from deepagents import create_deep_agent
+from deepagents import RubricMiddleware, create_deep_agent
 from langgraph.graph.state import CompiledStateGraph
 
 from pux_harness.agent.model import get_model
 from pux_harness.agent.orgs import build_system_prompt, load_subagents
-from pux_harness.agent.profile import apply_profile_to_tools, load_profile
+from pux_harness.agent.profile import (
+    apply_profile_to_tools,
+    load_profile,
+    load_rubric_gate,
+)
 from pux_harness.context.offload import ContextOffloadMiddleware, build_ctx_tools
 from pux_harness.sandbox.backend import PuxSandboxBackend
 from pux_harness.sandbox.docker_exec import DockerExecClient, get_exec_client
-from pux_harness.sandbox.tools import build_native_specialists
+from pux_harness.sandbox.tools import build_grader_tools, build_native_specialists
 
 _exec: DockerExecClient | None = None  # direct docker exec — fs/shell + specialists
 _backend: PuxSandboxBackend | None = None
+
+
+def _log_rubric_evaluation(ev: dict) -> None:
+    """``on_evaluation`` hook for ``RubricMiddleware`` — print each grader
+    verdict so the gate is OBSERVABLE in the run trace.
+
+    The grader runs through ``RubricMiddleware`` calling the ``pux_grader_*``
+    tools, which exercise ``exec_client`` directly and so bypass
+    ``backend.execute_log``. Without this hook the gate firing (verdict +
+    explanation + per-criterion) is invisible to the operator — and an
+    invisible gate can't be told from a decorative one. Exceptions are
+    suppressed by upstream (it logs + swallows), so a print is safe here."""
+    result = ev.get("result")
+    explanation = str(ev.get("explanation", "") or "").replace("\n", " ")[:240]
+    print(f"[grader] iter={ev.get('iteration')} result={result} :: {explanation}")
 
 
 def shared_exec() -> DockerExecClient:
@@ -90,12 +109,33 @@ def build_graph(org: str, *, checkpointer: Any) -> CompiledStateGraph:
             prompt = f"{prompt}\n\n{cfg.system_prompt_suffix}"
         main_tools = apply_profile_to_tools(main_tools, cfg)
 
+    # Phase 17.B.3 — the RubricMiddleware verify-gate. Per-org opt-in: only an
+    # org whose ``profile.yaml`` ships an ``enabled: true`` ``rubric:`` block
+    # gets it. ``RubricMiddleware`` is a no-op when no ``rubric`` is on invoke
+    # state (upstream-documented), so it's safe to mount unconditionally for an
+    # opted-in org — the gate fires only when ``server._execute`` / ``main._run``
+    # inject the default rubric (or the operator passes ``--rubric``). The
+    # grader runs on the ``grader`` role (decoupled, cheap default) and grades
+    # from REAL evidence via ``build_grader_tools`` (run tests / read the diff /
+    # grep), never from the agent's summary.
+    middleware: list = [ContextOffloadMiddleware()]
+    gate = load_rubric_gate(org)
+    if gate is not None and gate.enabled:
+        middleware.append(
+            RubricMiddleware(
+                model=get_model(role="grader", org=org),
+                tools=build_grader_tools(shared_exec()),
+                max_iterations=gate.max_iterations,
+                on_evaluation=_log_rubric_evaluation,
+            )
+        )
+
     return create_deep_agent(
         model=base_model,
         system_prompt=prompt,
         tools=main_tools,
         subagents=load_subagents(org, specialists, profile=cfg),
-        middleware=[ContextOffloadMiddleware()],
+        middleware=middleware,
         backend=shared_backend(),
         checkpointer=checkpointer,
     )

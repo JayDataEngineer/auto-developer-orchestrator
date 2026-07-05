@@ -99,12 +99,24 @@ orgs/<name>/
 ├── AGENTS.md       # CTO system prompt body (prose only — no frontmatter)
 ├── org.yaml        # specialist roster: `agents: [slug, …]`
 ├── policy.yaml     # optional: egress ACLs, creds, sandbox image/tier, cookies
-└── profile.yaml    # optional: per-org deepagents overrides (prompt suffix, tool desc overrides, excluded tools) — Phase 16
+└── profile.yaml    # optional: per-org overrides (prompt suffix, tool overrides, models map, rubric verify-gate)
 ```
 
 `pux --org <name>` (in-process) / `dispatch --org <name>` (server) appends the
 body to the base system prompt — the main agent becomes that org's CTO and
 delegates to its declared specialists via the `task` tool.
+
+**`dev-bot` is the Claude-Code-equivalent coding org.** Its `AGENTS.md` is a
+10-pattern coding state machine (PLAN → EXECUTE → RECOVER → ESCALATE, risk-tiered
+autonomy, think-aloud-then-act, verify-or-die), and its `profile.yaml` opts into
+the **`RubricMiddleware` verify-gate**: after the agent implements, a grader
+sub-agent runs the test suite + reads the diff + greps for regressions and gates
+the deliverable on a ship rubric (`satisfied` / `needs_revision` / revise, up to
+`max_iterations`). Override the rubric per-run with `--rubric`:
+
+```bash
+pux direct --org dev-bot --rubric "- must include a docstring" "add foo(x) to src/bar.py + a test"
+```
 
 Specialist subagents are ONE file each — `orgs/<name>/agents/<slug>.md` (YAML
 frontmatter: `name`, `description`, optional `tools`/`skills`/`model`; body =

@@ -151,6 +151,30 @@ NOT a policy file (no egress/sandbox effect); it shapes the agent graph itself:
 - `base_system_prompt` — REPLACE the assembled CTO prompt (rarely needed; the
   suffix is the usual lever).
 
+Two more blocks ride on the same file (Phase 17.B):
+
+- `models:` — a map overriding the **model-role spec**. The harness resolves
+  four roles — `base_model` (CTO driver), `worker_model` (subagents),
+  `multimodal_model` (describe_image, decoupled from base), `grader_model` (the
+  rubric gate) — all defaulting to `mimo-v2.5` in the shipped
+  `harness/pux_harness/agent/models.yaml`. Override per-org here, e.g.
+  `models: {grader_model: glm-5.2}`, or per-agent via frontmatter `model:`.
+  Resolution: frontmatter `model:` > this `models:` map > `PUX_<ROLE>_MODEL`
+  env (legacy `PUX_MODEL` for base) > shipped default. One file to edit when
+  cloning — no hardcoded model ids anywhere in the harness.
+- `rubric:` — opt the org into deepagents' beta **`RubricMiddleware`
+  verify-gate**. The grader (a separate sub-agent on `grader_model`) runs after
+  the CTO finishes, grades the deliverable against a ship-gate rubric using
+  sandbox evidence tools (`pux_grader_execute` / `pux_grader_read_file` /
+  `pux_grader_grep` — run tests, read the diff, grep for regressions; NEVER the
+  agent's summary alone), and returns `satisfied` / `needs_revision` /
+  `max_iterations_reached`. On `needs_revision` the feedback is fed back and the
+  CTO revises, up to `max_iterations`. Per-org opt-in + `enabled: true`; orgs
+  without the block are byte-identical to today. The default rubric
+  (`rubric.default`) is injected at invoke time by `server._execute` /
+  `main._run`; an operator `--rubric` override wins. `orgs/dev-bot/profile.yaml`
+  is the shipped sample (dev-bot is the Claude-Code-equivalent coding org).
+
 The loader (`harness/pux_harness/agent/profile.py`) uses deepagents'
 `HarnessProfileConfig` SCHEMA but applies the fields at the `build_graph(org)`
 call site rather than the global model-keyed `_HARNESS_PROFILES` registry —

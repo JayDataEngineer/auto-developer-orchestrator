@@ -51,6 +51,7 @@ from pydantic import BaseModel
 
 from pux_harness.agent.graph import build_graph
 from pux_harness.agent.orgs import discover_orgs, org_agent_slugs
+from pux_harness.agent.profile import default_rubric
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PUX_API_DB = Path(os.environ.get("PUX_API_DB", str(PROJECT_ROOT / ".pux" / "agent-protocol.sqlite")))
@@ -170,13 +171,23 @@ async def _require_thread(thread_id: str) -> str:
 
 
 async def _execute(org: str, thread_id: str, raw_input: Any, recursion_limit: int) -> str:
-    """Run one org graph invocation on a thread; return the final answer text."""
+    """Run one org graph invocation on a thread; return the final answer text.
+
+    Injects the org's default rubric (Phase 17.B.4) when the caller supplied
+    none — this is what arms an opted-in org's ``RubricMiddleware`` gate. A
+    caller-supplied ``rubric`` key (e.g. ``--rubric`` from the CLI, flowing
+    through ``_normalize_input``) wins and is left untouched."""
     graph = _get_graph(org)
     config = {
         "configurable": {"thread_id": thread_id},
         "recursion_limit": recursion_limit,
     }
-    result = await graph.ainvoke(_normalize_input(raw_input), config=config)
+    state = _normalize_input(raw_input)
+    if "rubric" not in state:
+        dr = default_rubric(org)
+        if dr:
+            state["rubric"] = dr
+    result = await graph.ainvoke(state, config=config)
     return _final_answer(result)
 
 

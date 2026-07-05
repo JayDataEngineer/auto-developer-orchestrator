@@ -30,6 +30,7 @@ from pux_harness.agent.contract import (
 )
 from pux_harness.sandbox.docker_exec import get_exec_client
 from pux_harness.agent.graph import build_graph, shared_backend, shared_exec
+from pux_harness.agent.profile import default_rubric
 from pux_harness.sandbox.tools import build_native_specialists
 from pux_harness.agent.orgs import (
     discover_orgs,
@@ -152,7 +153,7 @@ def _trace(messages: list) -> None:
         print(f"  [{i}] {t}{tag}{tcstr}: {cstr}")
 
 
-async def _run(org: str, task: str, recursion_limit: int) -> None:
+async def _run(org: str, task: str, recursion_limit: int, rubric: str | None = None) -> None:
     agent, backend = _build_agent(org)
     # Run prep jobs after container is up, before the agent loop.
     from pux_harness.sandbox.container import prepare  # noqa: PLC0415
@@ -166,8 +167,19 @@ async def _run(org: str, task: str, recursion_limit: int) -> None:
         if failed:
             print(f"\n  {len(failed)} prep job(s) failed (continuing to agent)")
     print(f"[org] {org}   [task] {task}\n")
+    # Phase 17.B.4: arm the org's RubricMiddleware gate. An explicit ``rubric``
+    # (the ``--rubric`` override) wins; otherwise fall back to the org's shipped
+    # default (profile.yaml ``rubric.default``). No rubric → the gate stays a
+    # no-op (upstream RubricMiddleware contract).
+    state: dict = {"messages": [{"role": "user", "content": task}]}
+    if rubric:
+        state["rubric"] = rubric
+    else:
+        dr = default_rubric(org)
+        if dr:
+            state["rubric"] = dr
     result = await agent.ainvoke(
-        {"messages": [{"role": "user", "content": task}]},
+        state,
         config={
             "configurable": {"thread_id": f"{org}-{uuid.uuid4().hex[:8]}"},
             "recursion_limit": recursion_limit,
@@ -438,6 +450,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="deepagents Pux harness")
     ap.add_argument("--org", default="general", help="org to run (default: general)")
     ap.add_argument("--task", help="task string (default: per-org forcing task)")
+    ap.add_argument("--rubric", default=None,
+                    help="override the org's shipped rubric (arms the RubricMiddleware "
+                         "verify-gate for an opted-in org). Default: the org's "
+                         "profile.yaml `rubric.default`.")
     ap.add_argument("--recursion-limit", type=int, default=60)
     ap.add_argument("--check", action="store_true", help="docker-exec backend + native specialist smoke, no model call")
     ap.add_argument("--list", action="store_true", help="list discovered orgs + their agents")
@@ -495,7 +511,7 @@ def main() -> None:
         return
 
     task = args.task or DEFAULT_TASKS[args.org]
-    asyncio.run(_run(args.org, task, args.recursion_limit))
+    asyncio.run(_run(args.org, task, args.recursion_limit, rubric=args.rubric))
 
 
 if __name__ == "__main__":

@@ -237,10 +237,186 @@ def test_build_graph_requests_base_and_multimodal_roles(fake_tree, monkeypatch):
     # base (CTO) + multimodal (describe_image) both resolved, both carry the org.
     assert ("base", "p") in calls
     assert ("multimodal", "p") in calls
-    # No other role leaks in at the graph layer (worker is per-subagent; grader
-    # is the Phase 17.B middleware, not yet wired).
+    # No other role leaks in at the graph layer for a NO-GATE org (worker is
+    # per-subagent; grader is only resolved when the org opts into the gate).
     roles = {role for role, _ in calls}
     assert roles == {"base", "multimodal"}
+
+
+# --- Phase 17.B.3: RubricMiddleware wiring ---------------------------------
+
+def test_rubric_gate_appends_middleware(fake_tree, captured_build, monkeypatch):
+    """Phase 17.B.3 wiring proof (prepare-wiring-e2e-gap): an org that opts into
+    the rubric gate gets ``RubricMiddleware`` appended after the offload
+    middleware, constructed with the GRADER role model, the 3 grader tools, and
+    the gate's max_iterations. Drives the REAL build_graph; RubricMiddleware is
+    captured via a stub so its construction kwargs are asserted directly."""
+    rubric_kwargs: dict[str, Any] = {}
+
+    def _fake_rubric_mw(**kwargs):
+        rubric_kwargs.update(kwargs)
+        return "RUBRIC_MW"
+
+    monkeypatch.setattr(graph, "RubricMiddleware", _fake_rubric_mw)
+    # Write org p a rubric gate (no other profile fields).
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
+        "rubric:\n"
+        "  enabled: true\n"
+        "  max_iterations: 3\n"
+        "  default: 'ship-gate rubric'\n"
+    )
+
+    graph.build_graph("p", checkpointer=None)
+
+    mw = captured_build["middleware"]
+    assert "OFFLOAD" in mw          # ContextOffloadMiddleware still mounted
+    assert "RUBRIC_MW" in mw        # RubricMiddleware appended
+    assert mw.index("OFFLOAD") < mw.index("RUBRIC_MW")  # offload first
+    assert rubric_kwargs["max_iterations"] == 3
+    # The grader's 3 evidence tools (execute / read_file / grep).
+    assert len(rubric_kwargs["tools"]) == 3
+    # The grader model came from get_model (captured_build stubs it -> "MODEL");
+    # proving build_graph asked for it via the role-resolved path.
+    assert rubric_kwargs["model"] == "MODEL"
+
+
+def test_no_rubric_gate_no_rubric_middleware(fake_tree, captured_build, monkeypatch):
+    """Regression: an org with NO rubric block mounts only the offload
+    middleware — byte-identical to today. RubricMiddleware is never constructed."""
+    constructed = []
+
+    def _bomb_rubric_mw(**kwargs):
+        constructed.append(kwargs)
+        raise AssertionError("RubricMiddleware must not be constructed without a gate")
+
+    monkeypatch.setattr(graph, "RubricMiddleware", _bomb_rubric_mw)
+    # org p has no profile.yaml in fake_tree.
+    graph.build_graph("p", checkpointer=None)
+
+    assert constructed == []
+    assert captured_build["middleware"] == ["OFFLOAD"]
+
+
+def test_rubric_gate_disabled_mounts_no_middleware(fake_tree, captured_build, monkeypatch):
+    """``rubric.enabled: false`` is the operator kill-switch — the gate is
+    present but disabled, so no RubricMiddleware mounts (a future deepagents API
+    break is killed by flipping one flag, per the beta mitigation)."""
+    constructed: list[dict] = []
+    monkeypatch.setattr(
+        graph, "RubricMiddleware", lambda **k: constructed.append(k) or "RUBRIC_MW"
+    )
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
+        "rubric:\n"
+        "  enabled: false\n"
+        "  max_iterations: 3\n"
+    )
+
+    graph.build_graph("p", checkpointer=None)
+
+    assert constructed == []
+    assert captured_build["middleware"] == ["OFFLOAD"]
+
+
+# --- Phase 17.B.1: RubricGate + default_rubric (helper level) --------------
+
+def test_load_rubric_gate_parses_block(fake_tree):
+    """load_rubric_gate reads the rubric: block into a RubricGate with the
+    expected fields (enabled / max_iterations / default)."""
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
+        "rubric:\n"
+        "  enabled: true\n"
+        "  max_iterations: 5\n"
+        "  default: 'ship it'\n"
+    )
+    gate = profile.load_rubric_gate("p")
+    assert gate == profile.RubricGate(enabled=True, max_iterations=5, default="ship it")
+
+
+def test_load_rubric_gate_none_when_no_block(fake_tree):
+    """Regression: a profile.yaml with no rubric: block -> no gate (the common
+    case; build_graph's no-op path)."""
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
+        "system_prompt_suffix: 'hi'\n"
+    )
+    assert profile.load_rubric_gate("p") is None
+
+
+def test_load_rubric_gate_none_when_no_profile(fake_tree):
+    """No profile.yaml at all -> no gate."""
+    assert profile.load_rubric_gate("p") is None
+    assert profile.load_rubric_gate("general") is None
+
+
+def test_default_rubric_returns_text(fake_tree):
+    """default_rubric returns the gate's default text (what _execute/_run inject)."""
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
+        "rubric:\n"
+        "  enabled: true\n"
+        "  default: 'GRADE ME'\n"
+    )
+    assert profile.default_rubric("p") == "GRADE ME"
+
+
+def test_default_rubric_none_when_disabled(fake_tree):
+    """enabled: false -> default_rubric returns None (operator kill-switch; the
+    gate is not armed even though a default is present)."""
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
+        "rubric:\n"
+        "  enabled: false\n"
+        "  default: 'GRADE ME'\n"
+    )
+    assert profile.default_rubric("p") is None
+
+
+def test_default_rubric_none_when_no_default(fake_tree):
+    """A gate with no default text -> None (nothing to inject; the middleware
+    stays a no-op)."""
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
+        "rubric:\n"
+        "  enabled: true\n"
+    )
+    assert profile.default_rubric("p") is None
+
+
+def test_rubric_block_peeled_from_profile_config(fake_tree):
+    """The rubric: block is peeled out BEFORE HarnessProfileConfig.from_dict
+    (which would reject it as unknown) AND does not leak into the config object.
+    A coexisting profile field still loads alongside it."""
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
+        "system_prompt_suffix: 'SUFFIX'\n"
+        "rubric:\n"
+        "  enabled: true\n"
+        "  default: 'ship it'\n"
+    )
+    cfg = profile.load_profile("p")
+    assert cfg is not None
+    assert cfg.system_prompt_suffix == "SUFFIX"   # profile still loads
+    # The gate reads independently from the same file.
+    assert profile.load_rubric_gate("p").default == "ship it"
+
+
+def test_load_rubric_gate_rejects_legacy_grader_model(fake_tree):
+    """no-legacy-left-behind: the OLD ``rubric.grader_model`` form (moved to the
+    top-level ``models:`` map in Phase 17.B.0) is a PERMANENT contract failure,
+    not silently ignored. The error points at the new home."""
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
+        "rubric:\n"
+        "  enabled: true\n"
+        "  grader_model: glm-5.2\n"
+    )
+    with pytest.raises(TypeError, match="grader_model moved"):
+        profile.load_rubric_gate("p")
+
+
+def test_load_rubric_gate_rejects_bad_max_iterations(fake_tree):
+    """A non-int max_iterations fails loud at load time, not at the first invoke."""
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
+        "rubric:\n"
+        "  enabled: true\n"
+        "  max_iterations: 'three'\n"
+    )
+    with pytest.raises(TypeError, match="max_iterations"):
+        profile.load_rubric_gate("p")
 
 
 # --- load_profile / validate_profile ---------------------------------------

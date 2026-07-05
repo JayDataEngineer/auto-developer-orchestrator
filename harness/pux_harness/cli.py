@@ -73,8 +73,19 @@ def cmd_agents() -> None:
         print(f"  {a['agent_id']:<22} {a['description']}")
 
 
-def cmd_dispatch(org: str, task: str, recursion_limit: int) -> None:
-    res = _post("/runs/wait", agent_id=org, input=task, recursion_limit=recursion_limit)
+def cmd_dispatch(org: str, task: str, recursion_limit: int, rubric: str | None = None) -> None:
+    # With a --rubric override, send the input as a messages+rubric dict so the
+    # server's _normalize_input passes it through and the override wins over the
+    # org's shipped default rubric. Without --rubric, send a bare task string;
+    # the server injects the org's default rubric if the org opted into the gate.
+    if rubric:
+        payload: Any = {
+            "messages": [{"role": "user", "content": task}],
+            "rubric": rubric,
+        }
+    else:
+        payload = task
+    res = _post("/runs/wait", agent_id=org, input=payload, recursion_limit=recursion_limit)
     status = res.get("status")
     if status == "error":
         _print_block("ERROR", res.get("error", "(no detail)"))
@@ -172,8 +183,11 @@ def main() -> None:
     p_disp = sub.add_parser("dispatch", help="ephemeral blocking run on an org")
     p_disp.add_argument("--org", default="general")
     p_disp.add_argument("--recursion-limit", type=int, default=60)
+    p_disp.add_argument("--rubric", default=None,
+                        help="override the org's shipped rubric (arms the "
+                             "RubricMiddleware verify-gate for an opted-in org)")
     p_disp.add_argument("task")
-    p_disp.set_defaults(func=lambda a: cmd_dispatch(a.org, a.task, a.recursion_limit))
+    p_disp.set_defaults(func=lambda a: cmd_dispatch(a.org, a.task, a.recursion_limit, a.rubric))
 
     p_res = sub.add_parser("resume", help="list recent threads")
     p_res.add_argument("--org", default=None)
