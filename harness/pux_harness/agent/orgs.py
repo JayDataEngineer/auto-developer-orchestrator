@@ -46,13 +46,37 @@ def _orgs_dir() -> Path:
     return PROJECT_ROOT / "orgs"
 
 
+def _specialists_dir() -> Path:
+    return _orgs_dir() / "specialists"
+
+
+def _org_path(name: str) -> Path:
+    """Resolve an org's directory — checks top-level ``orgs/`` first, then
+    ``orgs/specialists/``. Raises ``FileNotFoundError`` if neither exists."""
+    top = _orgs_dir() / name
+    if top.is_dir():
+        return top
+    spec = _specialists_dir() / name
+    if spec.is_dir():
+        return spec
+    raise FileNotFoundError(f"org {name!r} not found in orgs/ or orgs/specialists/")
+
+
 def _agent_search_dirs(org: str) -> list[Path]:
     """Directories searched for an agent ``<slug>.md``, org-local first then
     shared. Single source of truth — ``contract.py`` re-exports / monkeypatches
     this at its call sites. An org specializes a shared agent by placing a
-    same-named ``<slug>.md`` in its own ``agents/`` dir (first hit wins)."""
+    same-named ``<slug>.md`` in its own ``agents/`` dir (first hit wins).
+
+    Checks both ``orgs/<org>/agents`` and ``orgs/specialists/<org>/agents``
+    for the org-local dir (the latter holds orgs that were moved to the
+    ``specialists/`` subfolder)."""
     orgs = _orgs_dir()
-    return [orgs / org / "agents", orgs / "_shared" / "agents"]
+    local: list[Path] = []
+    for candidate in [orgs / org / "agents", _specialists_dir() / org / "agents"]:
+        if candidate.is_dir():
+            local.append(candidate)
+    return [*local, orgs / "_shared" / "agents"]
 
 
 def _read(rel: str) -> str:
@@ -72,25 +96,32 @@ def _parse_list(raw: Any) -> list[str]:
     return [s.strip() for s in str(raw).split(",") if s.strip()]
 
 
-def discover_orgs() -> list[str]:
-    """Sorted names of every org dir containing ``AGENTS.md``. Data-driven —
-    no hardcoded manifest. An org's specialist roster lives in its
-    ``org.yaml``. ``_shared`` and other bundles without an
-    AGENTS.md are excluded by the presence rule."""
+def _scan_orgs(root: Path) -> list[str]:
+    """Scan a single directory for org subdirs (dirs containing ``AGENTS.md``)."""
     out: list[str] = []
-    orgs = _orgs_dir()
-    if not orgs.is_dir():
+    if not root.is_dir():
         return out
-    for child in sorted(orgs.iterdir()):
+    for child in sorted(root.iterdir()):
         if child.is_dir() and (child / "AGENTS.md").is_file():
             out.append(child.name)
     return out
 
 
+def discover_orgs() -> list[str]:
+    """Sorted names of every org dir containing ``AGENTS.md``. Data-driven —
+    no hardcoded manifest. An org's specialist roster lives in its
+    ``org.yaml``. ``_shared`` and other bundles without an
+    AGENTS.md are excluded by the presence rule.
+
+    Scans both ``orgs/`` (top-level orgs like ``general``) and
+    ``orgs/specialists/`` (nested orgs)."""
+    return sorted(_scan_orgs(_orgs_dir()) + _scan_orgs(_specialists_dir()))
+
+
 def org_agent_slugs(name: str) -> list[str]:
     """The specialist slugs this org delegates to, read from
     ``orgs/<name>/org.yaml``."""
-    org_dir = _orgs_dir() / name
+    org_dir = _org_path(name)
     manifest = org_dir / "org.yaml"
     if not manifest.is_file():
         return []
@@ -166,7 +197,7 @@ def load_root_prompt() -> str:
 
 def load_org_prompt(name: str) -> str:
     """Body of orgs/<name>/AGENTS.md (the per-org CTO overlay)."""
-    return _split_frontmatter((_orgs_dir() / name / "AGENTS.md").read_text())[1]
+    return _split_frontmatter((_org_path(name) / "AGENTS.md").read_text())[1]
 
 
 def build_system_prompt(org: str) -> str:

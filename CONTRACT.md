@@ -355,7 +355,7 @@ immediately. The server spawns a goroutine that:
 └── roles/<role>.md    # one per [[roles]] entry
 ```
 
-The shipped `orgs/_demo/` is the canonical example: a CTO + a `researcher`
+The shipped `orgs/specialists/_demo/` is the canonical example: a CTO + a `researcher`
 role. Per-org config knobs:
 
 | Field | Default | Notes |

@@ -385,13 +385,13 @@ def test_load_sandbox_build_parses(tmp_path: Path) -> None:
 sandbox:
   image: video-production-video-producer:latest
   build:
-    dockerfile: orgs/video-production/Dockerfile
-    context: orgs/video-production
+    dockerfile: orgs/specialists/video-production/Dockerfile
+    context: orgs/specialists/video-production
 """
     p = policy.load("vp", _write_policy(tmp_path, "vp", body))
     assert p.sandbox.image == "video-production-video-producer:latest"
-    assert p.sandbox.build.dockerfile == "orgs/video-production/Dockerfile"
-    assert p.sandbox.build.context == "orgs/video-production"
+    assert p.sandbox.build.dockerfile == "orgs/specialists/video-production/Dockerfile"
+    assert p.sandbox.build.context == "orgs/specialists/video-production"
 
 
 def test_load_sandbox_build_not_a_mapping_fails(tmp_path: Path) -> None:
@@ -419,12 +419,12 @@ def test_build_spec_returns_spec(tmp_path: Path) -> None:
     body = """
 sandbox:
   build:
-    dockerfile: orgs/video-production/Dockerfile
+    dockerfile: orgs/specialists/video-production/Dockerfile
 """
     p = policy.load("vp", _write_policy(tmp_path, "vp", body))
     bs = policy.build_spec(p)
     assert bs is not None
-    assert bs.dockerfile == "orgs/video-production/Dockerfile"
+    assert bs.dockerfile == "orgs/specialists/video-production/Dockerfile"
 
 
 def test_known_policy_sections_includes_host_setup() -> None:

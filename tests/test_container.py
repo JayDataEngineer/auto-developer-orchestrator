@@ -266,13 +266,13 @@ def test_ensure_image_builds_when_spec_set_and_absent():
         org="x", project_path="/proj", client=_FakeClient(images)
     )
     build = C.policy.BuildSpec(
-        dockerfile="orgs/video-production/Dockerfile",
-        context="orgs/video-production",
+        dockerfile="orgs/specialists/video-production/Dockerfile",
+        context="orgs/specialists/video-production",
     )
     sb._ensure_image("vp:latest", build)
     assert images.built["tag"] == "vp:latest"
     assert images.built["dockerfile"] == "Dockerfile"  # basename, relative to ctx
-    assert images.built["path"] == os.path.join("/proj", "orgs/video-production")
+    assert images.built["path"] == os.path.join("/proj", "orgs/specialists/video-production")
     assert images.pulled == []  # build, not pull
 
 
@@ -282,9 +282,9 @@ def test_ensure_image_context_defaults_to_dockerfile_dir():
         org="x", project_path="/proj", client=_FakeClient(images)
     )
     # No context → defaults to the Dockerfile's parent, resolved project-relative.
-    build = C.policy.BuildSpec(dockerfile="orgs/video-production/Dockerfile")
+    build = C.policy.BuildSpec(dockerfile="orgs/specialists/video-production/Dockerfile")
     sb._ensure_image("vp:latest", build)
-    assert images.built["path"] == os.path.join("/proj", "orgs/video-production")
+    assert images.built["path"] == os.path.join("/proj", "orgs/specialists/video-production")
     assert images.built["dockerfile"] == "Dockerfile"
 
 

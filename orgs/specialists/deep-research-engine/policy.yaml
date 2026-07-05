@@ -1,0 +1,60 @@
+# Declarative sandbox policy for org deep-research-engine.
+#
+# Migrated off host networking (default TierBridged) to bridge + egress
+# allowlist. Two classes of upstream dependency:
+#
+#   1. Ray cluster (Tailscale 100.86.69.57) — reachable from bridge, proven
+#      by game-studio. Carries the LLM API ingress, media-mcp, and web-mcp.
+#         18080 — API Ingress (LLM, used by context_engine / entity_extract)
+#         8101  — media-mcp (face / audio / video ingest clients)
+#         8327  — web-mcp (web research tools)
+#
+#   2. Host-side SurrealDB (port 8000) — the shared knowledge graph,
+#      started on the operator's machine via shared-docker-infra. Under
+#      bridge networking this is reached via host.docker.internal, which
+#      Docker maps to the host-gateway IP. The Go egress resolver passes
+#      that name through verbatim and apply-egress-policy.sh resolves it
+#      inside the container via /etc/hosts (local lookup, no DNS).
+#
+# Public-internet fallbacks: openrouter.ai (LLM when OPENROUTER_API_KEY is
+# set instead of the Ray ingress) + github.com (source pulls).
+
+sandbox:
+  tier: isolated
+
+egress:
+  allow:
+    # Ray cluster on Tailscale — LLM ingress + media-mcp + web-mcp.
+    - host: 100.86.69.57
+      ports: [18080, 8101, 8327]
+    # Host-side SurrealDB — resolved inside the container via host-gateway.
+    - host: host.docker.internal
+      port: 8000
+    # OpenRouter fallback LLM path (entity_extract / context_engine).
+    - host: openrouter.ai
+      port: 443
+    # Source pulls for research ingest.
+    - host: github.com
+      port: 443
+
+credentials:
+  optional:
+    - OPENROUTER_API_KEY     # fallback LLM when Ray ingress is unused
+    - COMPREFACE_API_KEY     # face recognition (face_client.py)
+
+jobs:
+  - name: diarize_audio
+    script: orgs/specialists/deep-research-engine/sandbox/audio_client.py
+    args: [--batch, /sandbox/workspace/data]
+    timeout: 7200
+    description: "Diarize + transcribe all audio files via media MCP"
+  - name: process_video
+    script: orgs/specialists/deep-research-engine/sandbox/video_frames.py
+    args: [process, --input, /sandbox/workspace/data]
+    timeout: 3600
+    description: "Extract frames + narrate video files"
+  - name: extract_entities
+    script: orgs/specialists/deep-research-engine/sandbox/entity_extract.py
+    args: [--input, /sandbox/workspace/data]
+    timeout: 1800
+    description: "Extract named entities from all text content"

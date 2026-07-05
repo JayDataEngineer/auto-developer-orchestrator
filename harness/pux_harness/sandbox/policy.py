@@ -304,12 +304,19 @@ def _policy_from_dict(d: Mapping) -> Policy:
 
 def load(org_name: str, project_root: str | Path) -> Policy:
     """Read ``orgs/<org_name>/policy.yaml`` under ``project_root``. Raises
-    ``NoPolicy`` (sentinel) if absent; ``PolicyError`` on a malformed file."""
+    ``NoPolicy`` (sentinel) if absent; ``PolicyError`` on a malformed file.
+
+    Checks both ``orgs/<name>/policy.yaml`` and
+    ``orgs/specialists/<name>/policy.yaml`` (orgs that were moved to the
+    ``specialists/`` subfolder)."""
     if not org_name:
         raise NoPolicy()
     if not project_root:
         raise PolicyError("policy.load: project_root required")
-    path = Path(project_root) / "orgs" / org_name / "policy.yaml"
+    root = Path(project_root)
+    path = root / "orgs" / org_name / "policy.yaml"
+    if not path.is_file():
+        path = root / "orgs" / "specialists" / org_name / "policy.yaml"
     try:
         data = path.read_text()
     except FileNotFoundError:

@@ -58,7 +58,7 @@ is bind-mounted at `/sandbox/workspace/`.
 ## Architecture
 
 Two-layer model: **harness/** (lifecycle, policy, scheduling, org roster) +
-**bin/pux** (thin CLI entrypoint).
+**console_scripts entry point** (`pux` CLI from `pux_harness.cli:main`).
 
 The harness owns the full sandbox lifecycle. There is no Go MCP server,
 no `bridge.py`, no `smoke_mcp.py` — the entire Go sandbox was re-hosted
@@ -183,7 +183,7 @@ Two more blocks ride on the same file (Phase 17.B):
   CTO revises, up to `max_iterations`. Per-org opt-in + `enabled: true`; orgs
   without the block are byte-identical to today. The default rubric
   (`rubric.default`) is injected at invoke time by `server._execute` /
-  `main._run`; an operator `--rubric` override wins. `orgs/dev-bot/profile.yaml`
+  `main._run`; an operator `--rubric` override wins. `orgs/specialists/dev-bot/profile.yaml`
   is the shipped sample (dev-bot is the Claude-Code-equivalent coding org).
 
 The loader (`harness/pux_harness/agent/profile.py`) uses deepagents'
@@ -191,7 +191,7 @@ The loader (`harness/pux_harness/agent/profile.py`) uses deepagents'
 call site rather than the global model-keyed `_HARNESS_PROFILES` registry —
 that registry has no per-org namespace, so two orgs sharing a model would
 collide and the long-lived server path would leak across orgs. Most orgs ship
-no profile; absence is a no-op (byte-identical stack). `orgs/twitter-agent/
+no profile; absence is a no-op (byte-identical stack). `orgs/specialists/twitter-agent/
 profile.yaml` is the shipped sample.
 
 ## Testing harness rules
