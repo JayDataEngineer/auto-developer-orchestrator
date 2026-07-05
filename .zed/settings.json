@@ -1,0 +1,16 @@
+{
+  "agent_servers": {
+    "Pux (general)": {
+      "type": "custom",
+      "command": "/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator/scripts/acp-zed.sh",
+      "args": ["--org", "general"],
+      "env": {}
+    },
+    "Pux (dev-bot)": {
+      "type": "custom",
+      "command": "/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator/scripts/acp-zed.sh",
+      "args": ["--org", "dev-bot"],
+      "env": {}
+    }
+  }
+}
