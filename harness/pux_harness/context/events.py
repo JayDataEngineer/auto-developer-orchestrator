@@ -13,13 +13,20 @@ must stay under its ≤2KB budget.
 
 FTS5 is used for ranked retrieval (BM25) so the agent pulls back only the
 relevant slice — fewer tokens recalled = lower cost per call.
+
+Schema additions (v2, modeled after mksglu/context-mode SessionDB):
+- ``category`` — groups event types by domain (file, error, git, etc.)
+- ``data_hash`` — SHA-256 dedup hash (skip if same type+hash in last N events)
+- ``session_resume`` table — compaction snapshots for cross-session rehydration
+- FIFO eviction at 1000 events per session
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +45,10 @@ class Event:
     priority: int = 3  # P1-P4, default P3
     thread_id: str = ""
     data: dict[str, Any] = field(default_factory=dict)
+    # v2 additions (backward-compatible — old callers never set these)
+    category: str = ""
+    data_hash: str = ""
+    created_at: str = ""
 
 
 # Priority constants -----------------------------------------------------------
@@ -47,7 +58,7 @@ P2 = 2  # Working state — preserved unless budget tight
 P3 = 3  # Context — dropped first under budget pressure
 P4 = 4  # Low — analytics/debug
 
-# Event type → default priority mapping
+# Event type → default priority mapping (original API, preserved)
 EVENT_PRIORITIES: dict[str, int] = {
     # P1 — critical
     "task_started": P1,
@@ -70,11 +81,43 @@ EVENT_PRIORITIES: dict[str, int] = {
     "compaction": P4,
 }
 
+# Category grouping (v2, for snapshot builder)
+EVENT_CATEGORIES: dict[str, str] = {
+    "task_started": "task",
+    "task_completed": "task",
+    "task_failed": "task",
+    "file_modified": "file",
+    "git_operation": "git",
+    "tool_call": "data",
+    "error": "error",
+    "blocker": "error",
+    "decision_made": "decision",
+    "user_correction": "decision",
+    "approach_rejected": "decision",
+    "env_change": "env",
+    "session_start": "data",
+    "session_end": "data",
+    "compaction": "data",
+}
+
+# Dedup + eviction constants
+MAX_EVENTS_PER_SESSION = 1000
+DEDUP_WINDOW = 5
+
+
+def _data_hash(data: str) -> str:
+    """SHA-256 dedup hash (first 16 hex chars)."""
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()[:16].upper()
+
 
 class EventStore:
     """Append-only SQLite store for structured agent events.
 
-    Two indexes support the main query patterns:
+    Original API preserved for backward compatibility with event_middleware
+    and event_tools.  v2 additions (category, data_hash, session_resume,
+    dedup, FIFO eviction) are additive — old callers unaffected.
+
+    Indexes:
     - ``idx_events_thread`` — resume a session (thread_id + ts range)
     - ``idx_events_type`` — filter by event type
 
@@ -92,6 +135,7 @@ class EventStore:
             self._conn = sqlite3.connect(str(self.db_path))
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA busy_timeout=3000")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.row_factory = sqlite3.Row
             self._init_schema(self._conn)
         return self._conn
@@ -106,12 +150,23 @@ class EventStore:
                 type TEXT NOT NULL,
                 priority INTEGER NOT NULL DEFAULT 3,
                 thread_id TEXT NOT NULL DEFAULT '',
-                data TEXT NOT NULL DEFAULT '{}'
+                data TEXT NOT NULL DEFAULT '{}',
+                category TEXT NOT NULL DEFAULT '',
+                data_hash TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_events_thread
                 ON events(thread_id, ts);
             CREATE INDEX IF NOT EXISTS idx_events_type
                 ON events(type, ts);
+
+            CREATE TABLE IF NOT EXISTS session_resume (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL UNIQUE,
+                snapshot TEXT NOT NULL,
+                event_count INTEGER NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                consumed INTEGER NOT NULL DEFAULT 0
+            );
             """
         )
         # FTS5 for ranked search — created separately so a missing FTS5
@@ -127,31 +182,84 @@ class EventStore:
             )
         except sqlite3.OperationalError:
             pass  # FTS5 not compiled in — degrade to LIKE
+        # Migrate: add category + data_hash columns to existing tables.
+        try:
+            cols = {r["name"] for r in conn.execute("PRAGMA table_xinfo(events)").fetchall()}
+            if "category" not in cols:
+                conn.execute("ALTER TABLE events ADD COLUMN category TEXT NOT NULL DEFAULT ''")
+            if "data_hash" not in cols:
+                conn.execute("ALTER TABLE events ADD COLUMN data_hash TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
 
     # -- write -----------------------------------------------------------------
 
     def capture(
         self,
         event_type: str,
-        data: dict[str, Any] | None = None,
+        data: Any = None,
         *,
         priority: int | None = None,
         thread_id: str = "",
+        category: str = "",
     ) -> int:
         """Capture an event. Returns the event id.
 
-        If *priority* is ``None`` it is looked up from ``EVENT_PRIORITIES``
-        (defaulting to P3 for unknown types).
+        ``data`` accepts a dict (legacy) or a string (v2).  Dicts are
+        JSON-serialized.  If *priority* is ``None`` it is looked up from
+        ``EVENT_PRIORITIES`` (defaulting to P3 for unknown types).
+
+        v2: dedup skips if same type+data_hash in last DEDUP_WINDOW events.
+        v2: FIFO eviction of lowest-priority event when over MAX_EVENTS.
         """
         if priority is None:
             priority = EVENT_PRIORITIES.get(event_type, P3)
+        if category == "":
+            category = EVENT_CATEGORIES.get(event_type, "data")
+
+        # Normalize data to string for storage + hashing.
+        if isinstance(data, dict):
+            data_str = json.dumps(data, ensure_ascii=False, default=str)
+        elif isinstance(data, str):
+            data_str = data
+        else:
+            data_str = json.dumps(data, ensure_ascii=False, default=str) if data is not None else ""
+
+        dhash = _data_hash(data_str)
         now = time.time()
-        data_json = json.dumps(data or {}, ensure_ascii=False)
         conn = self._get_conn()
+
+        # v2 dedup: skip if same type+hash in last N events for this thread.
+        if thread_id:
+            dup = conn.execute(
+                "SELECT 1 FROM ("
+                "  SELECT type, data_hash FROM events"
+                "  WHERE thread_id = ? ORDER BY id DESC LIMIT ?"
+                ") AS recent WHERE recent.type = ? AND recent.data_hash = ? LIMIT 1",
+                (thread_id, DEDUP_WINDOW, event_type, dhash),
+            ).fetchone()
+            if dup:
+                return 0
+
+        # v2 FIFO eviction of lowest-priority (then oldest) event.
+        if thread_id:
+            count_row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM events WHERE thread_id = ?",
+                (thread_id,),
+            ).fetchone()
+            if count_row and count_row["cnt"] >= MAX_EVENTS_PER_SESSION:
+                conn.execute(
+                    "DELETE FROM events WHERE id = ("
+                    "  SELECT id FROM events WHERE thread_id = ?"
+                    "  ORDER BY priority ASC, id ASC LIMIT 1"
+                    ")",
+                    (thread_id,),
+                )
+
         cur = conn.execute(
-            "INSERT INTO events (ts, type, priority, thread_id, data) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (now, event_type, priority, thread_id, data_json),
+            "INSERT INTO events (ts, type, priority, thread_id, data, category, data_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (now, event_type, priority, thread_id, data_str, category, dhash),
         )
         rowid = cur.lastrowid
         # Sync to FTS index (best-effort).
@@ -159,7 +267,7 @@ class EventStore:
             conn.execute(
                 "INSERT INTO events_fts(rowid, type, data, thread_id) "
                 "VALUES (?, ?, ?, ?)",
-                (rowid, event_type, data_json, thread_id),
+                (rowid, event_type, data_str, thread_id),
             )
         except sqlite3.OperationalError:
             pass
@@ -189,7 +297,7 @@ class EventStore:
         """
         conn = self._get_conn()
         clauses: list[str] = ["priority <= ?"]
-        params: list[Any] = [min_priority]
+        params: list[int | str] = [min_priority]
         if thread_id:
             clauses.append("thread_id = ?")
             params.append(thread_id)
@@ -199,7 +307,7 @@ class EventStore:
         where = " AND ".join(clauses)
         params.append(limit)
         rows = conn.execute(
-            f"SELECT id, ts, type, priority, thread_id, data "
+            f"SELECT id, ts, type, priority, thread_id, data, category, data_hash "
             f"FROM events WHERE {where} ORDER BY ts DESC LIMIT ?",
             params,
         ).fetchall()
@@ -228,7 +336,8 @@ class EventStore:
         try:
             if thread_id:
                 rows = conn.execute(
-                    "SELECT e.id, e.ts, e.type, e.priority, e.thread_id, e.data "
+                    "SELECT e.id, e.ts, e.type, e.priority, e.thread_id, e.data, "
+                    "       e.category, e.data_hash "
                     "FROM events_fts f "
                     "JOIN events e ON e.id = f.rowid "
                     "WHERE events_fts MATCH ? AND e.thread_id = ? "
@@ -237,7 +346,8 @@ class EventStore:
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT e.id, e.ts, e.type, e.priority, e.thread_id, e.data "
+                    "SELECT e.id, e.ts, e.type, e.priority, e.thread_id, e.data, "
+                    "       e.category, e.data_hash "
                     "FROM events_fts f "
                     "JOIN events e ON e.id = f.rowid "
                     "WHERE events_fts MATCH ? "
@@ -251,14 +361,14 @@ class EventStore:
         # LIKE fallback.
         like = f"%{search}%"
         clauses: list[str] = ["data LIKE ?"]
-        params = [like]
+        params: list[int | str] = [like]
         if thread_id:
             clauses.append("thread_id = ?")
             params.append(thread_id)
         where = " AND ".join(clauses)
         params.append(limit)
         rows = conn.execute(
-            f"SELECT id, ts, type, priority, thread_id, data "
+            f"SELECT id, ts, type, priority, thread_id, data, category, data_hash "
             f"FROM events WHERE {where} ORDER BY ts DESC LIMIT ?",
             params,
         ).fetchall()
@@ -280,15 +390,80 @@ class EventStore:
             self._conn.close()
             self._conn = None
 
+    # -- v2: resume snapshot ---------------------------------------------------
+
+    def upsert_resume(self, session_id: str, snapshot: str, event_count: int) -> None:
+        """Store a compaction snapshot (replaces any existing for this session)."""
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT INTO session_resume (session_id, snapshot, event_count) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET "
+            "  snapshot = excluded.snapshot, "
+            "  event_count = excluded.event_count, "
+            "  created_at = datetime('now'), "
+            "  consumed = 0",
+            (session_id, snapshot, event_count),
+        )
+        conn.commit()
+
+    def claim_latest_unconsumed_resume(
+        self, exclude_session: str = ""
+    ) -> dict[str, Any] | None:
+        """Atomically pick the newest unconsumed snapshot and mark it consumed."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "UPDATE session_resume "
+            "SET consumed = 1 "
+            "WHERE id = ("
+            "  SELECT id FROM session_resume "
+            "  WHERE consumed = 0 AND session_id != ? "
+            "  ORDER BY created_at DESC, id DESC LIMIT 1"
+            ") "
+            "RETURNING session_id, snapshot, event_count, consumed",
+            (exclude_session,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "session_id": row["session_id"],
+            "snapshot": row["snapshot"],
+            "event_count": row["event_count"],
+        }
+
+    def get_resume(self, session_id: str) -> dict[str, Any] | None:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT snapshot, event_count, consumed "
+            "FROM session_resume WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "snapshot": row["snapshot"],
+            "event_count": row["event_count"],
+            "consumed": bool(row["consumed"]),
+        }
+
     @staticmethod
     def _row_to_event(row: sqlite3.Row) -> Event:
+        # Parse data: try JSON first (dict legacy), fall back to raw string.
+        raw_data = row["data"]
+        try:
+            parsed_data = json.loads(raw_data)
+        except (json.JSONDecodeError, TypeError):
+            parsed_data = {"raw": raw_data}
+
         return Event(
             id=row["id"],
             ts=row["ts"],
             type=row["type"],
             priority=row["priority"],
             thread_id=row["thread_id"],
-            data=json.loads(row["data"]),
+            data=parsed_data if isinstance(parsed_data, dict) else {"raw": parsed_data},
+            category=row["category"] if "category" in row.keys() else "",
+            data_hash=row["data_hash"] if "data_hash" in row.keys() else "",
         )
 
 

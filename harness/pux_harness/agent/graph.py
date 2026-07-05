@@ -27,6 +27,8 @@ from pux_harness.agent.profile import (
 from pux_harness.context.event_middleware import EventCaptureMiddleware
 from pux_harness.context.event_tools import build_event_tools
 from pux_harness.context.offload import ContextOffloadMiddleware, build_ctx_tools
+from pux_harness.context.sandbox_routing import RoutingMiddleware
+from pux_harness.context.session_guide import SessionGuideMiddleware
 from pux_harness.memory import MEMORY_SOURCES, build_memory_backend
 from pux_harness.sandbox.backend import PuxSandboxBackend
 from pux_harness.sandbox.docker_exec import DockerExecClient, get_exec_client
@@ -132,7 +134,12 @@ def build_graph(
     # grader runs on the ``grader`` role (decoupled, cheap default) and grades
     # from REAL evidence via ``build_grader_tools`` (run tests / read the diff /
     # grep), never from the agent's summary.
-    middleware: list = [ContextOffloadMiddleware(), EventCaptureMiddleware()]
+    middleware: list = [
+        ContextOffloadMiddleware(),
+        EventCaptureMiddleware(),
+        RoutingMiddleware(),
+        SessionGuideMiddleware(),
+    ]
     gate = load_rubric_gate(org)
     if gate is not None and gate.enabled:
         middleware.append(

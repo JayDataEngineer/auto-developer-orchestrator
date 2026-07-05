@@ -80,9 +80,9 @@ def test_recent_filter_by_priority(tmp_path):
 
 def test_recent_filter_by_thread(tmp_path):
     store = EventStore(tmp_path / "events.db")
-    store.capture("tool_call", thread_id="t1")
-    store.capture("tool_call", thread_id="t2")
-    store.capture("tool_call", thread_id="t1")
+    store.capture("tool_call", {"seq": 1}, thread_id="t1")
+    store.capture("tool_call", {"seq": 2}, thread_id="t2")
+    store.capture("tool_call", {"seq": 3}, thread_id="t1")
     store.flush()
 
     t1_events = store.recent(thread_id="t1")
@@ -304,3 +304,137 @@ def test_event_recent_empty(tmp_path):
     recent_tool, _ = build_event_tools(store)
     out = recent_tool.invoke({"event_type": "", "limit": 10})
     assert "no events recorded yet" in out
+
+
+# --- v2: dedup ----------------------------------------------------------------
+
+
+def test_dedup_skips_same_type_and_data(tmp_path):
+    """Same type + same data within DEDUP_WINDOW should be deduped."""
+    store = EventStore(tmp_path / "events.db")
+    store.capture("tool_call", {"tool": "grep"}, thread_id="t1")
+    second = store.capture("tool_call", {"tool": "grep"}, thread_id="t1")
+    store.flush()
+    assert second == 0  # deduped, returns 0
+
+    events = store.recent(thread_id="t1")
+    assert len(events) == 1  # only one stored
+
+
+def test_dedup_allows_different_data(tmp_path):
+    """Same type but different data should NOT be deduped."""
+    store = EventStore(tmp_path / "events.db")
+    store.capture("tool_call", {"tool": "grep"}, thread_id="t1")
+    second = store.capture("tool_call", {"tool": "execute"}, thread_id="t1")
+    store.flush()
+    assert second > 0  # not deduped
+
+    events = store.recent(thread_id="t1")
+    assert len(events) == 2
+
+
+def test_dedup_allows_different_type(tmp_path):
+    """Different type but same data should NOT be deduped."""
+    store = EventStore(tmp_path / "events.db")
+    store.capture("tool_call", {"msg": "hello"}, thread_id="t1")
+    second = store.capture("error", {"msg": "hello"}, thread_id="t1")
+    store.flush()
+    assert second > 0
+
+    events = store.recent(thread_id="t1")
+    assert len(events) == 2
+
+
+# --- v2: FIFO eviction --------------------------------------------------------
+
+
+def test_fifo_eviction(tmp_path):
+    """Over MAX_EVENTS should evict lowest-priority then oldest."""
+    from pux_harness.context.events import MAX_EVENTS_PER_SESSION
+
+    store = EventStore(tmp_path / "events.db")
+    # Fill to max with P3 events (low priority = evictable)
+    for i in range(MAX_EVENTS_PER_SESSION):
+        store.capture("tool_call", {"i": i}, priority=P3, thread_id="t1")
+    # Add a P1 event (high priority = should survive eviction)
+    store.capture("task_started", {"critical": True}, priority=P1, thread_id="t1")
+    store.flush()
+
+    events = store.recent(thread_id="t1")
+    # Should be at most MAX_EVENTS (one P3 evicted to make room for P1)
+    assert len(events) <= MAX_EVENTS_PER_SESSION
+    # The P1 event should be present
+    p1_events = [e for e in events if e.priority == P1]
+    assert len(p1_events) == 1
+    assert p1_events[0].type == "task_started"
+
+
+# --- v2: session_resume -------------------------------------------------------
+
+
+def test_upsert_and_claim_resume(tmp_path):
+    store = EventStore(tmp_path / "events.db")
+    store.upsert_resume("sess-1", "<session_guide>snapshot</session_guide>", 42)
+
+    # Claim it
+    result = store.claim_latest_unconsumed_resume(exclude_session="sess-2")
+    assert result is not None
+    assert result["session_id"] == "sess-1"
+    assert "snapshot" in result
+    assert result["event_count"] == 42
+
+    # Second claim should return None (already consumed)
+    result2 = store.claim_latest_unconsumed_resume()
+    assert result2 is None
+
+
+def test_upsert_replaces_existing(tmp_path):
+    store = EventStore(tmp_path / "events.db")
+    store.upsert_resume("sess-1", "first", 10)
+    store.upsert_resume("sess-1", "second", 20)
+
+    result = store.get_resume("sess-1")
+    assert result is not None
+    assert result["snapshot"] == "second"
+    assert result["event_count"] == 20
+
+
+def test_resume_exclude_self(tmp_path):
+    """A session should not claim its own mid-flight snapshot."""
+    store = EventStore(tmp_path / "events.db")
+    store.upsert_resume("sess-1", "snapshot", 5)
+
+    # Exclude sess-1 — should not claim its own row
+    result = store.claim_latest_unconsumed_resume(exclude_session="sess-1")
+    assert result is None
+
+
+def test_get_resume_missing(tmp_path):
+    store = EventStore(tmp_path / "events.db")
+    assert store.get_resume("nonexistent") is None
+
+
+# --- v2: category field -------------------------------------------------------
+
+
+def test_category_auto_populated(tmp_path):
+    store = EventStore(tmp_path / "events.db")
+    store.capture("task_started", {"task": "x"})
+    store.capture("tool_call", {"tool": "grep"})
+    store.capture("error", {"msg": "fail"})
+    store.flush()
+
+    events = store.recent()
+    cats = {e.type: e.category for e in events}
+    assert cats["task_started"] == "task"
+    assert cats["tool_call"] == "data"
+    assert cats["error"] == "error"
+
+
+def test_category_explicit_override(tmp_path):
+    store = EventStore(tmp_path / "events.db")
+    store.capture("custom_event", {"x": 1}, category="special")
+    store.flush()
+
+    events = store.recent()
+    assert events[0].category == "special"

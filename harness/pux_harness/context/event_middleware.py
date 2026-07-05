@@ -44,7 +44,10 @@ class EventCaptureMiddleware(AgentMiddleware):
 
     def _tool_name(self, request: Any) -> str:
         tc = getattr(request, "tool_call", None) or {}
-        return tc.get("name") if isinstance(tc, dict) else "tool"
+        if isinstance(tc, dict):
+            name = tc.get("name")
+            return str(name) if name is not None else "tool"
+        return "tool"
 
     def _tool_args_summary(self, request: Any) -> str:
         """Truncated args string for the event payload."""
