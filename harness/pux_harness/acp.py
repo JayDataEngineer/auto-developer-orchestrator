@@ -31,13 +31,19 @@ from deepagents_acp.server import AgentServerACP, AgentSessionContext
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph.state import CompiledStateGraph
 
+from langchain_core.tools import BaseTool
+
 from pux_harness.agent.graph import build_graph
+from pux_harness.agent.model import resolve_model_id
 from pux_harness.agent.orgs import discover_orgs
+from pux_harness.agent.tool_servers import resolve_tool_servers
 
 DEFAULT_ORG = "general"
 
 
-def _make_factory(org: str) -> Callable[[AgentSessionContext], CompiledStateGraph]:
+def _make_factory(
+    org: str, mcp_tools: list[BaseTool] | None = None,
+) -> Callable[[AgentSessionContext], CompiledStateGraph]:
     """Build a graph factory bound to ``org``.
 
     ``context.cwd`` (the editor's project dir) is intentionally ignored: the
@@ -48,18 +54,58 @@ def _make_factory(org: str) -> Callable[[AgentSessionContext], CompiledStateGrap
     cannot vary per session — it is fixed at server startup.
     """
 
+    _tools = list(mcp_tools) if mcp_tools else []
+
     def factory(_context: AgentSessionContext) -> CompiledStateGraph:
-        # build_graph() pulls the shared DockerExecClient + PuxSandboxBackend
-        # (process singletons) and compiles model + 13 specialists + subagents.
-        # The checkpointer is caller-supplied; MemorySaver keys sessions by
-        # thread_id (= ACP session_id). Persistent AsyncSqliteSaver (like
-        # server.py) is a deliberate future option, not a v1 need.
-        return build_graph(org, checkpointer=MemorySaver())
+        return build_graph(org, checkpointer=MemorySaver(), mcp_tools=_tools)
 
     return factory
 
 
+def _advertised_models(org: str) -> list[dict[str, str]]:
+    """The model selector the editor (Zed) sees for this org's agent.
+
+    ``AgentServerACP`` only populates ``new_session.config_options`` — the model
+    dropdown the editor renders — when ``models=[...]`` is passed at construction.
+    Pass nothing and the editor falls back to its own built-in model list: Zed
+    shows ChatGPT/OpenAI models even though this agent runs MiMo via OpenCode Go
+    (the "asks for OpenAI models" bug).
+
+    The advertised id is the main agent's base-role model — the SAME id
+    ``build_graph`` compiles — resolved via ``resolve_model_id`` (id only: no
+    ``ChatOpenAI``, no key, no network). So what the editor shows == what runs.
+
+    The factory ignores ``context.model``, so the single advertised option is
+    authoritative. Honoring Zed-side model switching (threading ``context.model``
+    into ``build_graph``) is a deliberate future option, not v1.
+    """
+    mid = resolve_model_id(role="base", org=org)
+    return [{"value": mid, "name": mid, "description": "OpenCode Go (MiMo)"}]
+
+
 # --- Public API (called from the unified CLI) ---------------------------------
+
+
+async def _acp_main(org: str) -> None:
+    """Async wrapper that opens MCP sessions, builds the ACP server, then runs."""
+    from pux_harness.agent.mcp_client import McpSessionManager  # noqa: PLC0415
+    mcp_tools: list[BaseTool] = []
+    _mcp_mgr = None
+    try:
+        specs = resolve_tool_servers(org)
+        if specs:
+            _mcp_mgr = McpSessionManager(org, specs)
+            await _mcp_mgr.open()
+            mcp_tools = _mcp_mgr.tools
+    except Exception as exc:
+        sys.stderr.write(f"pux acp: tool_servers resolution failed: {exc}\n")
+    acp_agent = AgentServerACP(
+        agent=_make_factory(org, mcp_tools=mcp_tools),
+        models=_advertised_models(org),
+    )
+    await run_acp_agent(acp_agent)
+    if _mcp_mgr is not None:
+        await _mcp_mgr.close()
 
 
 def run_acp(org: str = DEFAULT_ORG) -> None:
@@ -69,8 +115,7 @@ def run_acp(org: str = DEFAULT_ORG) -> None:
         sys.stderr.write(f"pux acp: unknown org {org!r}; discovered: {known}\n")
         raise SystemExit(2)
 
-    acp_agent = AgentServerACP(agent=_make_factory(org))
-    asyncio.run(run_acp_agent(acp_agent))
+    asyncio.run(_acp_main(org))
 
 
 def main() -> None:

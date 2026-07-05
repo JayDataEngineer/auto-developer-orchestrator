@@ -43,6 +43,7 @@ stale ``tools:`` reference fails loud here without any process to probe.
 """
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,6 +54,8 @@ import yaml
 from pux_harness.sandbox import policy as policy_mod
 from pux_harness.agent import profile as profile_mod
 from pux_harness.agent import model as model_mod
+from pux_harness.agent import stack as stack_mod
+from pux_harness.agent import tool_servers as tool_servers_mod
 from pux_harness.sandbox.tools import (
     NATIVE_FS_TOOLS,
     Category,
@@ -87,7 +90,7 @@ _REQUIRED_AGENT_KEYS: frozenset[str] = frozenset({
 # ``build`` is a sub-key under ``sandbox``, NOT a top-level section.
 KNOWN_POLICY_SECTIONS: frozenset[str] = frozenset({
     "workspace", "egress", "credentials", "sandbox", "browser", "host_setup",
-    "jobs",
+    "jobs", "tool_servers",
 })
 
 # ``NATIVE_FS_TOOLS`` is imported from ``pux_harness.sandbox.tools`` (derived
@@ -275,6 +278,7 @@ def check_org(name: str) -> list[Violation]:
                 v.extend(_validate_host_setup(name, pol))
                 v.extend(_validate_build_spec(name, pol))
                 v.extend(_validate_jobs(name, pol))
+                v.extend(_validate_tool_servers(name, pol))
         elif parsed is not None:
             v.append(Violation("error", "policy-shape",
                                f"{name}: policy.yaml top-level must be a "
@@ -291,6 +295,14 @@ def check_org(name: str) -> list[Violation]:
         except (TypeError, ValueError, yaml.YAMLError) as exc:
             v.append(Violation("error", "profile-schema",
                                f"{name}: profile.yaml invalid: {exc}"))
+        # Phase 21: validate the ``middleware:`` override block's name + scope
+        # — every add/remove name must be a registered middleware
+        # (``stack.MIDDLEWARE_REGISTRY``) mounted on the scope it's added to.
+        # ``profile.validate_profile`` only SHAPE-checks; the registry lives in
+        # ``stack.py``, so the name/scope check fires here (offline). A typo'd
+        # override fails --check-contract, not the first build.
+        for err in stack_mod.validate_overrides(name):
+            v.append(Violation("error", "middleware-overrides", err))
 
     return v
 
@@ -407,6 +419,16 @@ def _validate_jobs(name: str, pol: policy_mod.Policy) -> list[Violation]:
     return v
 
 
+def _validate_tool_servers(name: str, pol: policy_mod.Policy) -> list[Violation]:
+    """Offline validation of the ``tool_servers`` declaration in policy.yaml.
+    Mirrors ``tool_servers.validate_tool_servers`` but returns Violation objects
+    instead of plain strings."""
+    v: list[Violation] = []
+    for err in tool_servers_mod.validate_tool_servers(name):
+        v.append(Violation("error", "tool-servers", err))
+    return v
+
+
 # --- global checks (rules 6-7) -------------------------------------------
 
 _MANIFEST_RE = re.compile(r"^\s*ORG_AGENTS\s*[:=]", re.MULTILINE)
@@ -475,6 +497,55 @@ def _no_legacy_agent_py() -> list[Violation]:
     return v
 
 
+def _no_legacy_middleware_in_graph() -> list[Violation]:
+    """Permanent tripwire (Phase 21; no-legacy-left-behind): ``graph.py`` must
+    NOT import the deepagents middleware classes directly.
+
+    The factory ``stack.build_stack`` is the SINGLE place the per-org middleware
+    stack is resolved (the user's "one place to adjust defaults" goal). Before
+    Phase 21, ``graph.py`` hand-assembled the middleware list — importing
+    ``RoutingMiddleware`` / ``SessionGuideMiddleware`` / ``RubricMiddleware``
+    and building them inline. That dual-read (a second, hand-maintained
+    middleware list) is exactly the drift the factory killed: an override in
+    ``stack.MIDDLEWARE_REGISTRY`` or ``DEFAULT_SUPERVISOR`` would silently NOT
+    reach the graph. A future re-introduction (someone wires a middleware in
+    ``graph.py`` because it "feels simpler") is a HARD contract failure, not a
+    silent regression — mirroring ``no-legacy-agent-py`` /
+    ``no-legacy-sandbox-artifacts``.
+
+    Mechanism: AST-scan ``graph.py``'s IMPORT nodes for the three banned names.
+    AST (not a regex) so a commented-out line or a string literal doesn't
+    trip a false positive, and a re-import under a renamed alias DOES trip.
+    """
+    v: list[Violation] = []
+    graph_src = Path(__file__).with_name("graph.py")
+    if not graph_src.is_file():
+        return v  # the tripwire is about graph.py; nothing to check if it's gone
+    banned = {"RoutingMiddleware", "SessionGuideMiddleware", "RubricMiddleware"}
+    try:
+        tree = ast.parse(graph_src.read_text())
+    except SyntaxError as exc:  # pragma: no cover - graph.py is imported, so valid
+        v.append(Violation(
+            "error", "no-legacy-middleware-in-graph",
+            f"{graph_src}: does not parse: {exc}"))
+        return v
+    for node in ast.walk(tree):
+        names: set[str] = set()
+        if isinstance(node, ast.Import):
+            names = {alias.name.split(".")[-1] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                names = {alias.name.split(".")[-1] for alias in node.names}
+        hits = names & banned
+        if hits:
+            v.append(Violation(
+                "error", "no-legacy-middleware-in-graph",
+                f"{graph_src}: imports {sorted(hits)} — middleware assembly "
+                f"belongs in stack.build_stack (the single factory); graph.py "
+                f"is the thin deps+binding caller"))
+    return v
+
+
 def _no_legacy_sandbox_artifacts() -> list[Violation]:
     """No ``orgs/<name>/{bootstrap.sh,docker-compose.yml,docker-compose.override.yml}``
     may ship — the harness owns the full sandbox lifecycle now (Phase 13; the
@@ -523,6 +594,7 @@ def check_harness() -> list[Violation]:
                            f"models.yaml invalid: {exc}"))
     v.extend(_no_legacy_agent_py())
     v.extend(_no_legacy_sandbox_artifacts())
+    v.extend(_no_legacy_middleware_in_graph())
     return v
 
 

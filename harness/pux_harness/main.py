@@ -21,6 +21,8 @@ import uuid
 
 from langgraph.checkpoint.memory import MemorySaver
 
+from langchain_core.tools import BaseTool
+
 from pux_harness.agent.contract import (
     check_all,
     check_harness,
@@ -30,6 +32,7 @@ from pux_harness.agent.contract import (
 from pux_harness.sandbox.docker_exec import get_exec_client
 from pux_harness.agent.graph import build_graph, shared_backend, shared_exec
 from pux_harness.agent.profile import default_rubric
+from pux_harness.agent.tool_servers import resolve_tool_servers
 from pux_harness.sandbox.tools import (
     LEGACY_TOOL_NAMES,
     NATIVE_FS_TOOLS,
@@ -44,10 +47,10 @@ from pux_harness.sandbox.backend import PuxSandboxBackend
 
 
 
-def _build_agent(org: str):
+def _build_agent(org: str, mcp_tools: list[BaseTool] | None = None):
     # Ephemeral in-memory checkpointer — the runner is one-shot per process.
     # The server (server.py) uses a persistent AsyncSqliteSaver instead.
-    agent = build_graph(org, checkpointer=MemorySaver())
+    agent = build_graph(org, checkpointer=MemorySaver(), mcp_tools=mcp_tools or ())
     return agent, shared_backend()
 
 
@@ -83,7 +86,18 @@ def _trace(messages: list) -> None:
 
 
 async def _run(org: str, task: str, recursion_limit: int, rubric: str | None = None) -> None:
-    agent, backend = _build_agent(org)
+    from pux_harness.agent.mcp_client import McpSessionManager  # noqa: PLC0415
+    mcp_tools: list[BaseTool] = []
+    _mcp_mgr = None
+    try:
+        specs = resolve_tool_servers(org)
+        if specs:
+            _mcp_mgr = McpSessionManager(org, specs)
+            await _mcp_mgr.open()
+            mcp_tools = _mcp_mgr.tools
+    except ValueError as exc:
+        print(f"  [mcp] tool_servers resolution failed: {exc}")
+    agent, backend = _build_agent(org, mcp_tools=mcp_tools)
     # Run prep jobs after container is up, before the agent loop.
     from pux_harness.sandbox.container import prepare  # noqa: PLC0415
     job_results = prepare(org, exec_client=shared_exec())
@@ -155,6 +169,9 @@ async def _run(org: str, task: str, recursion_limit: int, rubric: str | None = N
         print(f"  $ {one[:140]}")
     if not backend.execute_log:
         print("  (none — no native fs/shell call was made this run)")
+
+    if _mcp_mgr is not None:
+        await _mcp_mgr.close()
 
 
 def _jobs_run(org: str, job: str | None) -> int:

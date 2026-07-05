@@ -49,9 +49,12 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
+from langchain_core.tools import BaseTool
+
 from pux_harness.agent.graph import build_graph
 from pux_harness.agent.orgs import discover_orgs, org_agent_slugs
 from pux_harness.agent.profile import default_rubric
+from pux_harness.agent.tool_servers import resolve_tool_servers
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PUX_API_DB = Path(os.environ.get("PUX_API_DB", str(PROJECT_ROOT / ".pux" / "agent-protocol.sqlite")))
@@ -143,6 +146,21 @@ async def lifespan(app: FastAPI):
         app.state.graphs: dict[str, CompiledStateGraph] = {}
         app.state.runs: dict[str, asyncio.Task] = {}
         app.state.run_meta: dict[str, dict[str, Any]] = {}
+        app.state.mcp: dict[str, list[BaseTool]] = {}
+
+        # Load foreign MCP tool servers for every org that declares them.
+        from pux_harness.agent.mcp_client import McpSessionManager  # noqa: PLC0415
+        _mcp_managers: dict[str, McpSessionManager] = {}
+        for org_name in discover_orgs():
+            try:
+                specs = resolve_tool_servers(org_name)
+            except ValueError:
+                specs = []
+            if specs:
+                mgr = McpSessionManager(org_name, specs)
+                await mgr.open()
+                _mcp_managers[org_name] = mgr
+                app.state.mcp[org_name] = mgr.tools
 
         # Register AG-UI endpoints now that the checkpointer is ready.
         if _HAS_AG_UI:
@@ -160,6 +178,8 @@ async def lifespan(app: FastAPI):
         try:
             yield
         finally:
+            for mgr in _mcp_managers.values():
+                await mgr.close()
             await db.close()
 
 
@@ -177,10 +197,12 @@ except ImportError:
 
 def _get_graph(org: str) -> CompiledStateGraph:
     if org not in app.state.graphs:
-        # Pass an InMemoryStore so MemoryMiddleware has a working backend.
         from langgraph.store.memory import InMemoryStore  # noqa: PLC0415
         store = InMemoryStore()
-        app.state.graphs[org] = build_graph(org, checkpointer=app.state.saver, store=store)
+        app.state.graphs[org] = build_graph(
+            org, checkpointer=app.state.saver, store=store,
+            mcp_tools=app.state.mcp.get(org, ()),
+        )
     return app.state.graphs[org]
 
 
