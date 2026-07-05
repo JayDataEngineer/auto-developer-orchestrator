@@ -8,47 +8,35 @@ the caller — building is expensive (model init + subagent assembly) and the
 only per-org variation is system_prompt + subagents + the specialist-tool
 whitelist. All 13 specialists are native Python tools (Phase 8i deleted the Go
 bridge that used to supply them over MCP).
+
+**Phase 21 — this module is THIN.** It owns the runtime DEPS (the model, the
+specialist tools, the loaded profile + rubric gate, the memory backend, the
+checkpointer) and the final BINDING (``create_deep_agent``), but NO stack
+assembly — every middleware, the prompt, the tool list, and the subagents are
+resolved by the factory ``stack.build_stack``. There is no second
+hand-maintained middleware list here; the ``no-legacy-middleware-in-graph``
+contract tripwire enforces that (this module imports NEITHER
+``RoutingMiddleware`` / ``SessionGuideMiddleware`` / ``RubricMiddleware``).
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
-from deepagents import RubricMiddleware, create_deep_agent
+from deepagents import create_deep_agent
+from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 
 from pux_harness.agent.model import get_model
-from pux_harness.agent.orgs import build_system_prompt, load_subagents
-from pux_harness.agent.profile import (
-    apply_profile_to_tools,
-    load_profile,
-    load_rubric_gate,
-)
-from pux_harness.context.layer import build_context_layer
-from pux_harness.context.sandbox_routing import RoutingMiddleware
-from pux_harness.context.session_guide import SessionGuideMiddleware
+from pux_harness.agent.profile import load_profile, load_rubric_gate
+from pux_harness.agent.stack import build_stack
 from pux_harness.memory import MEMORY_SOURCES, build_memory_backend
 from pux_harness.sandbox.backend import PuxSandboxBackend
 from pux_harness.sandbox.docker_exec import DockerExecClient, get_exec_client
-from pux_harness.sandbox.tools import build_grader_tools, build_native_specialists
+from pux_harness.sandbox.tools import build_native_specialists
 
 _exec: DockerExecClient | None = None  # direct docker exec — fs/shell + specialists
 _backend: PuxSandboxBackend | None = None
-
-
-def _log_rubric_evaluation(ev: dict) -> None:
-    """``on_evaluation`` hook for ``RubricMiddleware`` — print each grader
-    verdict so the gate is OBSERVABLE in the run trace.
-
-    The grader runs through ``RubricMiddleware`` calling the ``pux_grader_*``
-    tools, which exercise ``exec_client`` directly and so bypass
-    ``backend.execute_log``. Without this hook the gate firing (verdict +
-    explanation + per-criterion) is invisible to the operator — and an
-    invisible gate can't be told from a decorative one. Exceptions are
-    suppressed by upstream (it logs + swallows), so a print is safe here."""
-    result = ev.get("result")
-    explanation = str(ev.get("explanation", "") or "").replace("\n", " ")[:240]
-    print(f"[grader] iter={ev.get('iteration')} result={result} :: {explanation}")
 
 
 def shared_exec() -> DockerExecClient:
@@ -72,6 +60,7 @@ def build_graph(
     *,
     checkpointer: Any,
     store: Any | None = None,
+    mcp_tools: Sequence[BaseTool] = (),
 ) -> CompiledStateGraph:
     """Compile the deepagents graph for ``org`` against ``checkpointer``.
 
@@ -82,14 +71,11 @@ def build_graph(
     can use an ephemeral ``MemorySaver`` while the server uses a persistent
     ``AsyncSqliteSaver``.
 
-    Per-org ``orgs/<org>/profile.yaml`` (Phase 16.3b; OPTIONAL — most orgs ship
-    none) applies three org-wide overrides to the CTO stack:
-    ``base_system_prompt`` (full prompt replace), ``system_prompt_suffix``
-    (appended), ``tool_description_overrides`` + ``excluded_tools`` (applied via
-    ``profile.apply_profile_to_tools``). The same profile is threaded into
-    ``load_subagents`` so the suffix + tool overrides reach EACH specialist
-    subagent (e.g. the shared browser agent) — the user's stated goal. With no
-    profile this path is byte-identical to a profile-less build.
+    The whole stack — supervisor tools, supervisor middleware (in order),
+    supervisor prompt, and the compiled subagents — is resolved by
+    ``stack.build_stack`` from the deps below + the org's ``profile.yaml``.
+    This function only supplies those deps + the memory backend + checkpointer
+    and binds the result via ``create_deep_agent``.
 
     Phase 18: ``store`` is an optional ``BaseStore`` for persistent memory.
     When provided, memory survives server restarts. When ``None`` (the runner
@@ -105,49 +91,20 @@ def build_graph(
         shared_exec(), vision_model=get_model(role="multimodal", org=org), org=org,
         backend=shared_backend(),
     )
-    # The unified context layer: one ContextMiddleware (capture + offload in a
-    # single wrap_tool_call pass) + the ctx_recall/ctx_search retrieval tools,
-    # both bound to the process-wide EventStore. ``build_context_layer`` is the
-    # SAME seam orgs._build_sub uses, so capture + offload + retrieval reach the
-    # main agent AND every subagent (verified against deepagents 0.6.12:
-    # SubAgentMiddleware forwards a spec's ``middleware`` key — the old
-    # "main-agent-only" Phase-7 claim was wrong and is retracted).
-    ctx_middleware, ctx_tools = build_context_layer()
-
-    prompt = build_system_prompt(org)
-    main_tools: list = [*specialists, *ctx_tools]
     cfg = load_profile(org)
-    if cfg is not None:
-        if cfg.base_system_prompt:
-            prompt = cfg.base_system_prompt
-        if cfg.system_prompt_suffix:
-            prompt = f"{prompt}\n\n{cfg.system_prompt_suffix}"
-        main_tools = apply_profile_to_tools(main_tools, cfg)
-
-    # Phase 17.B.3 — the RubricMiddleware verify-gate. Per-org opt-in: only an
-    # org whose ``profile.yaml`` ships an ``enabled: true`` ``rubric:`` block
-    # gets it. ``RubricMiddleware`` is a no-op when no ``rubric`` is on invoke
-    # state (upstream-documented), so it's safe to mount unconditionally for an
-    # opted-in org — the gate fires only when ``server._execute`` / ``main._run``
-    # inject the default rubric (or the operator passes ``--rubric``). The
-    # grader runs on the ``grader`` role (decoupled, cheap default) and grades
-    # from REAL evidence via ``build_grader_tools`` (run tests / read the diff /
-    # grep), never from the agent's summary.
-    middleware: list = [
-        *ctx_middleware,
-        RoutingMiddleware(),
-        SessionGuideMiddleware(),
-    ]
     gate = load_rubric_gate(org)
-    if gate is not None and gate.enabled:
-        middleware.append(
-            RubricMiddleware(
-                model=get_model(role="grader", org=org),
-                tools=build_grader_tools(shared_exec()),
-                max_iterations=gate.max_iterations,
-                on_evaluation=_log_rubric_evaluation,
-            )
-        )
+
+    # The factory owns everything that varies per-org across tools, middleware,
+    # subagents, and the prompt. Byte-identical to the pre-factory build when
+    # the org ships no profile (same middleware order, same tools, same prompt).
+    plan = build_stack(
+        org,
+        specialists=specialists,
+        profile=cfg,
+        rubric_gate=gate,
+        exec_client=shared_exec(),
+        mcp_tools=mcp_tools,
+    )
 
     # Phase 18: agent-managed persistent memory. The composite backend routes
     # /memories/ to a StoreBackend (project-scoped namespace) and everything
@@ -162,11 +119,11 @@ def build_graph(
 
     return create_deep_agent(
         model=base_model,
-        system_prompt=prompt,
-        tools=main_tools,
+        system_prompt=plan.supervisor_prompt,
+        tools=plan.supervisor_tools,
         memory=MEMORY_SOURCES,
-        subagents=load_subagents(org, specialists, profile=cfg),
-        middleware=middleware,
+        subagents=plan.subagents,
+        middleware=plan.supervisor_middleware,
         backend=memory_backend,
         store=memory_store,
         checkpointer=checkpointer,
