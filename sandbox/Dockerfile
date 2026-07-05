@@ -82,6 +82,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-eng \
     fonts-liberation \
     fonts-noto-cjk \
+    fonts-noto-color-emoji \
+    fonts-freefont-ttf \
+    fonts-dejavu-core \
+    fonts-noto-core \
+    fonts-noto-ui-core \
+    fonts-noto-mono \
     libappindicator3-1 \
     libasound2 \
     libatk-bridge2.0-0 \
