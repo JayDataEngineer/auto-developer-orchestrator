@@ -93,7 +93,9 @@ def build_graph(
 
     Phase 18: ``store`` is an optional ``BaseStore`` for persistent memory.
     When provided, memory survives server restarts. When ``None`` (the runner
-    default), ``StoreBackend`` falls back to the in-graph store (ephemeral).
+    default), ``build_memory_backend`` supplies an ephemeral ``InMemoryStore``
+    — a real store is required because ``StoreBackend(store=None)`` crashes on
+    the first ``download_files`` (no in-graph fallback exists).
     """
     # Roles (Phase 17.B.0): the CTO runs on `base`; describe_image runs on
     # `multimodal` (decoupled so an org can pin a vision model != the driver).

@@ -12,13 +12,14 @@ Two pieces, one each:
   graphs (a CTO + specialist subagents), serves them over the Agent Protocol
   REST API, and ships a thin `pux` client. Native fs/shell tools (`ls` /
   `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute`) run
-  through a `PuxSandboxBackend`; the 33 specialist tools (`browser_*`,
+  through a `PuxSandboxBackend`; the 40 specialist tools (`browser_*`,
   `desktop_*`, `describe_image`, `python`, skills) are native Python too
   (Phase 8a–8f). `container.py` owns the Docker sandbox lifecycle +
   declarative policy enforcement (Phase 8g). The harness boots its own
   container directly over the Docker SDK — there is no Go server.
-- **`bin/pux`** (bash launcher) — routes `pux serve` / `pux direct` /
-  `pux sandbox` / `pux <client-cmd>` into the harness.
+- **`console_scripts` entry point** (`pux` from `pux_harness.cli:main`) — the
+  native CLI dispatches `pux serve` / `pux direct` / `pux sandbox` / `pux <client-cmd>`
+  into the harness.
 
 Single-tenant, localhost-only, no auth. One pux process = one project = one
 sandbox.
@@ -57,6 +58,8 @@ harness drives the Docker sandbox directly over the SDK.
 | Subcommand | What it does |
 |------------|-------------|
 | `pux serve` | Start the Agent Protocol server (uvicorn on :9988). |
+| `pux acp [--org <name>]` | ACP stdio server — exposes one org to ACP editors (Zed / VS Code / Neovim); the editor IS the TUI. |
+| `pux mcp` | FastMCP server (SSE on :9987) wrapping the Agent Protocol — exposes orgs as MCP tools to any MCP client (Hermes, Claude Desktop, Zed). Requires `pux serve` running. |
 | `pux direct --org <name> --task "..."` | In-process runner — no server. The verify/dev path. |
 | `pux sandbox <start\|stop\|status\|ensure>` | Docker sandbox lifecycle (harness-owned, 8g). Replaces the old `task start/stop/status`. |
 | `pux agents` | List orgs as Agent Protocol agents (+ their specialists). |
@@ -70,7 +73,7 @@ harness drives the Docker sandbox directly over the SDK.
 ## Tool surface
 
 fs/shell is **deepagents-native** (via `PuxSandboxBackend.execute()` → docker
-exec inside the container); all 33 specialists are **`pux_sandbox_*`** native
+exec inside the container); all 40 specialists are **`pux_sandbox_*`** native
 Python tools too (Phase 8b–8f). Phase 8g moved the container lifecycle into
 `container.py`; Phase 8i deleted the Go bridge — every model-visible path is
 Python:
@@ -131,7 +134,7 @@ form), every `tools:` entry is a real tool (native fs or a `pux_sandbox_*`
 specialist), and any `policy.yaml` is schema-valid:
 
 ```bash
-cd harness && uv run python -m pux_harness.main --check-contract   # exit 0 = green
+uv run pux check-contract   # exit 0 = green
 ```
 
 ## Threads & history
@@ -150,7 +153,8 @@ pux run <thread_id> "follow up"    # continue on the same thread
 ## Tests
 
 ```bash
-cd harness && uv run pytest -q          # 260 tests: org contract + browser/profile wiring + server routing + policy + context offload + container lifecycle
+# from the repo root — `tests/` lives here (workspace pattern), NOT under harness/
+uv run --project harness pytest -q          # 586 passed (9 skipped): org contract + browser/profile wiring + MCP server + memory backend + server routing + policy + context offload + container lifecycle
 ```
 
 The server tests use FastAPI's `TestClient` with a stub graph (no tokens, no
@@ -161,7 +165,7 @@ is proven end-to-end in the Phase 8i verify log (`pux direct --org general --tas
 
 ```
 ┌──────────────────────────────────────────┐
-│ pux (bash launcher → harness/cli.py)     │  client
+│ pux (console_scripts → cli.py)          │  native CLI
 └──────────────┬───────────────────────────┘
                │ Agent Protocol REST (httpx)
 ┌──────────────▼───────────────────────────┐
@@ -170,7 +174,7 @@ is proven end-to-end in the Phase 8i verify log (`pux direct --org general --tas
 └──────────────┬───────────────────────────┘
                │ deepagents graph + PuxSandboxBackend
 ┌──────────────▼───────────────────────────┐
-│ harness (Python, deepagents)             │  33 specialists NATIVE; no MCP hop
+│ harness (Python, deepagents)             │  40 specialists NATIVE; no MCP hop
 │  container.py (lifecycle + policy) +     │  for fs/shell OR specialists
 │  docker_exec.py (docker exec)            │
 └──────────────┬───────────────────────────┘
@@ -183,18 +187,37 @@ is proven end-to-end in the Phase 8i verify log (`pux direct --org general --tas
 ```
 
 There is no Go server on this branch. The Go MCP tree + JSON-RPC bridge were
-deleted in Phase 8i — every model-visible path (fs, shell, the 33 specialists,
+deleted in Phase 8i — every model-visible path (fs, shell, the 40 specialists,
 and the container lifecycle) lives in the Python harness and drives the sandbox
 directly over the Docker SDK.
 
+## Web UI (`site/`)
+
+`site/` is an OPTIONAL, standalone React/Vite/CopilotKit frontend — a browser
+workbench for the harness (chat sidebar + editor / terminal / sandbox / VNC
+panels). It is NOT a member of any workspace: the repo root is a uv workspace,
+and `site/` carries its own `package.json` + `package-lock.json` + `tsconfig.json`
+(`rm -rf site/` leaves the rest of the repo untouched). It talks to a running
+harness two ways — the chat sidebar hits the AG-UI endpoint at
+`http://127.0.0.1:9988/agui/<org>` (proxied through a small Node BFF in
+`site/server/`), and thread/run/agent CRUD goes to the Agent Protocol REST API
+at `:9988` directly. Run it from `site/`:
+
+```bash
+pux serve &                             # the harness must be running on :9988
+cd site && npm install && npm run dev   # vite (5176) + Node BFF (3001)
+```
+
+Open http://127.0.0.1:5176. See [`site/README.md`](site/README.md) for details.
+
 ## Branch layout
 
-- **`pi-pivot`** — current. Deepagents pivot: Phases 0–8i shipped (harness +
+- **`pi-pivot`** — current. Deepagents pivot: Phases 0–18 shipped (harness +
   native sandbox, declarative contract, TS harness deleted, Agent Protocol
   server + client, all 10 orgs ported to RUN on deepagents, the policy engine
   ported Go→Python + its enforcement wired into `container.py`, proactive
   context-offload, the entire Go sandbox re-hosted in Python — fs/shell + all
-  33 specialists via direct `docker exec`, container lifecycle + policy
+  40 specialists via direct `docker exec`, container lifecycle + policy
   enforcement harness-owned — and the Go MCP server + JSON-RPC bridge deleted).
   **Phase 9** (TUI as Agent Protocol consumer + SSE) remains.
 - **`master`** — pre-pivot MVP. Slim Go MCP server with in-process agent loop.

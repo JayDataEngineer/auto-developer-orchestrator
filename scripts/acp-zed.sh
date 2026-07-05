@@ -12,4 +12,4 @@ if [[ -f "$REPO/.env" ]]; then
   set +a
 fi
 
-exec "$REPO/bin/pux" acp "$@"
+exec uv run --directory "$REPO/harness" python -m pux_harness acp "$@"

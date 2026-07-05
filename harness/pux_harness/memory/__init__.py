@@ -16,8 +16,11 @@ Architecture:
   - The agent updates memory via ``edit_file`` on the backend, which persists
     through the store.
 
-The runner (``main.py``) passes ``InMemoryStore`` for ephemeral memory; the
-server (``server.py``) should pass a persistent store for cross-restart survival.
+The runner (``main.py``) passes ``store=None`` and gets an ephemeral
+``InMemoryStore`` (created inside ``build_memory_backend``); the server
+(``server.py``) passes its own store for cross-restart survival. A ``None``
+store can NOT reach ``StoreBackend`` — it has no in-graph fallback and crashes
+on the first ``download_files``.
 """
 from __future__ import annotations
 

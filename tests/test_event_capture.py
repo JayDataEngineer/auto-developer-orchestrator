@@ -350,6 +350,78 @@ def test_fifo_eviction(tmp_path):
     assert p1_events[0].type == "task_started"
 
 
+# --- FTS5 ↔ events sync (triggers + one-time rebuild) -------------------------
+
+
+def _fts_matches(store: EventStore, term: str) -> int:
+    """Count events_fts hits for ``term`` via MATCH — the truthful probe for
+    whether a row is still indexed. External-content FTS5 (``content=events``)
+    HIDES rowids that have no backing ``events`` row from plain SELECT/JOIN,
+    so a LEFT-JOIN orphan count is blind to them; only MATCH reports the
+    stale index entry. This is exactly why an eviction that didn't propagate
+    to events_fts is invisible to the naked eye yet still skews BM25."""
+    conn = store._get_conn()
+    return conn.execute(
+        "SELECT COUNT(*) FROM events_fts WHERE events_fts MATCH ?", (term,)
+    ).fetchone()[0]
+
+
+def test_eviction_keeps_fts_index_in_sync(tmp_path):
+    """FIFO eviction DELETEs from events; the AFTER DELETE trigger must also
+    remove the matching events_fts entry. Without it the evicted row's tokens
+    stay in the index (MATCH-detectable) and pollute BM25 corpus stats. The
+    evicted event's unique marker must therefore no longer MATCH; a
+    surviving event's marker still must."""
+    from pux_harness.context.events import MAX_EVENTS_PER_SESSION
+
+    store = EventStore(tmp_path / "events.db")
+    # Fill to the limit with evictable P3 events. uniq0 is oldest → evicted.
+    for i in range(MAX_EVENTS_PER_SESSION):
+        store.capture("tool_call", {"marker": f"uniq{i}"}, priority=P3, thread_id="t1")
+    # One more → evicts the lowest-priority (P3), oldest event (uniq0).
+    store.capture("task_started", {"critical": True}, priority=P1, thread_id="t1")
+    store.flush()
+
+    assert store.count(thread_id="t1") <= MAX_EVENTS_PER_SESSION  # an eviction ran
+    assert _fts_matches(store, "uniq0") == 0   # evicted → gone from index
+    assert _fts_matches(store, "uniq1") == 1   # survivor → still indexed
+
+
+def test_rebuild_clears_preexisting_fts_orphans(tmp_path):
+    """An existing DB upgraded in place may carry orphaned events_fts entries
+    from pre-trigger evictions. Opening with the new schema must rebuild the
+    index once (gated by PRAGMA user_version) — repopulating from the events
+    content table drops any phantom — and never run that rebuild again."""
+    db = tmp_path / "events.db"
+    store = EventStore(db)
+    store.capture("tool_call", {"marker": "real"}, thread_id="t1")
+    store.flush()
+
+    conn = store._get_conn()
+    # Inject a phantom index entry whose rowid is absent from events —
+    # simulates a pre-fix eviction orphan. (MATCH sees it; SELECT does not.)
+    conn.execute(
+        "INSERT INTO events_fts(rowid, type, data, thread_id) VALUES (?, ?, ?, ?)",
+        (999999, "tool_call", '{"marker":"ghosttoken"}', "t1"),
+    )
+    conn.commit()
+    assert _fts_matches(store, "ghosttoken") == 1   # precondition: phantom present
+
+    # Force the gated rebuild to run again, then re-open the same DB.
+    conn.execute("PRAGMA user_version = 0")
+    conn.commit()
+    store.close()
+
+    reopened = EventStore(db)
+    reopened.capture("tool_call", {"marker": "warmup"}, thread_id="t1")  # forces _init_schema
+    reopened.flush()
+    conn2 = reopened._get_conn()
+
+    assert _fts_matches(reopened, "ghosttoken") == 0   # rebuild dropped the phantom
+    assert _fts_matches(reopened, "real") == 1         # real row survived
+    assert conn2.execute("PRAGMA user_version").fetchone()[0] == 1  # gated: won't run again
+
+
 # --- v2: session_resume -------------------------------------------------------
 
 

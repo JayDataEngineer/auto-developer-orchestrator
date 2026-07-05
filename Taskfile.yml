@@ -34,7 +34,7 @@ tasks:
     desc: Validate the declarative org contract (all 10 orgs green; no server)
     dir: "{{.HARNESS}}"
     cmds:
-      - uv run python -m pux_harness.main --check-contract
+      - uv run pux check-contract
 
   serve:
     desc: Start the Agent Protocol server (FastAPI on :9988)

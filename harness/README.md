@@ -18,6 +18,7 @@ pux_harness/
   __main__.py         # [entry] `python -m pux_harness`
   server.py           # Agent Protocol server (FastAPI, :9988) — `pux serve`
   acp.py              # ACP stdio server — `pux acp` (editor = TUI, Phase 9)
+  mcp_server.py       # FastMCP server (SSE :9987) wrapping the Agent Protocol — `pux mcp`
   main.py             # in-process runner — `pux direct` + sandbox lifecycle
   agent/              # assembly layer — builds the deepagents graph
     graph.py          # build_graph(org) -> compiled graph (1 DockerExecClient + backend/process)
@@ -25,11 +26,16 @@ pux_harness/
                       # frontmatter+body + orgs/_shared/agents + org.yaml rosters; resolves tools/skills/model)
     model.py          # provider/model factory (PUX_MODEL)
     contract.py       # declarative org-contract enforcer (rules 1-8 + legacy tripwires)
+    profile.py        # per-org HarnessProfile loader (optional profile.yaml: prompt suffix,
+                      # tool overrides/exclusions) — applied at build_graph, not the model registry
   sandbox/            # Docker sandbox layer — self-contained (no agent/context import)
     backend.py        # PuxSandboxBackend(BaseSandbox) -> native fs tools
     docker_exec.py    # DockerExecClient: direct `docker exec`
     container.py      # SandboxContainer: create/start/stop/remove + policy enforce
-    tools.py          # 13 specialist StructuredTools (python/skills/vision/browser/desktop)
+    tools/            # REGISTRY: 40 specialist + 7 native + 3 grader ToolSpecs (counts pinned
+                      # by tests/test_registry.py). Submodules: registry.py (ToolSpec + classify_slug),
+                      # _shared.py + browser.py + desktop.py + describe_image.py + grader.py
+                      # + multimodal.py + _media.py + python.py + skills.py
     policy.py         # declarative policy resolver
     host_setup.py     # host-side hooks (cached uv venv, stdout → env exports)
   context/            # unified context-saving layer (one store, one middleware, all agents)
@@ -40,10 +46,16 @@ pux_harness/
     snapshot.py      # cross-session resume snapshot (reads events)
     session_guide.py # session_guide middleware (reads events)
     sandbox_routing.py  # RoutingMiddleware (org-aware exec routing)
-tests/
-  test_org_contract.py    test_server.py    test_acp.py    test_policy.py
-  test_container.py       test_context_offload.py    test_load_subagents.py
-  test_describe_image.py  test_host_setup.py
+  memory/              # agent-managed persistent memory (Phase 18): .pux/memory/ (gitignored),
+                       # injected into the system prompt via MemoryMiddleware
+    backend.py         # CompositeBackend: routes /memories/ -> StoreBackend, else PuxSandboxBackend
+    config.py          # memory paths + project-scoped namespace (per-working-directory isolation)
+tests/                     # 32 files / 586 tests passed (9 skipped), at the REPO ROOT (workspace pattern: the
+                           # tests live above the harness member, not under harness/). Covers: org
+                           # contract + tool REGISTRY single-source-of-truth, browser/desktop/vision/
+                           # multimodal specialists, MCP server, Agent Protocol routing, ACP, policy,
+                           # context offload, grader/rubric gate, container lifecycle.
+                           # Run from the repo root: `uv run --project harness pytest -q`.
 ```
 
 **Layering:** the unified CLI (`cli.py`) dispatches all commands through one

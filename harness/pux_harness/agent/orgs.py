@@ -11,9 +11,9 @@ frontmatter). Cross-org agents (e.g. ``researcher``) live in
 an org can specialize a shared agent by dropping a same-named ``<slug>.md`` in
 its own ``agents/`` dir.
 
-The harness addendum corrects the one terminology drift between pi-mono and
-deepagents: pi-mono delegates via ``subagent(agent, task)``; deepagents
-delegates via the ``task`` tool with ``subagent_type=<name>``.
+The harness addendum pins the deepagents delegation surface (the ``task``
+tool with ``subagent_type=<name>``), bridging any legacy wording in inherited
+org docs to the live tool.
 
 Agent definitions are pure data (frontmatter + prose) — no executable module,
 no ``importlib``. Tool + skills resolution stays CENTRAL (here, via
@@ -139,15 +139,14 @@ _ADDENDUM = """\
 
 ## Harness addendum (deepagents) — authoritative
 
-You are running under the Python deepagents harness, not pi-mono. Where this
-addendum conflicts with the org docs above, THIS ADDENDUM wins.
+You are running under the Python deepagents harness. Where this addendum
+conflicts with the org docs above, THIS ADDENDUM wins.
 
-- **Delegation:** ignore any `subagent(agent, task)` wording. Delegate with
-  the `task` tool: `task(subagent_type="<name>", description="<what to
-  do>")`. The subagents available to you are listed in the `task` tool's own
-  description. The subagent sees only your `description`, not your
-  conversation — give it enough context (relevant paths, the question, the
-  expected output shape).
+- **Delegation:** delegate with the `task` tool:
+  `task(subagent_type="<name>", description="<what to do>")`. The subagents
+  available to you are listed in the `task` tool's own description. The
+  subagent sees only your `description`, not your conversation — give it
+  enough context (relevant paths, the question, the expected output shape).
 - **File/shell surface:** the file and shell tools are the NATIVE deepagents
   tools — `execute` (run a shell command), `read_file`, `write_file`,
   `edit_file`, `glob`, `grep`, `ls`. There is NO `pux_sandbox_bash` or

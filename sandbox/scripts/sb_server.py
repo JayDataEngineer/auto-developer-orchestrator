@@ -872,7 +872,7 @@ class Handler(BaseHTTPRequestHandler):
             click_method = "selenium"
             try:
                 # Check if element is occluded
-                occ_result = safe(lambda: json.loads(sb.execute_script(f'return {OCCLUSION_CHECK_JS}("{selector.replace(chr(34), chr(92)+chr(34))}")') or "{}"), {})
+                occ_result = safe(lambda: json.loads(sb.execute_script(f'{OCCLUSION_CHECK_JS}("{selector.replace(chr(34), chr(92)+chr(34))}")') or "{}"), {})
                 if occ_result.get("occluded"):
                     log(f"element occluded by {occ_result.get('blocker')}, using JS click")
                     sb.execute_script(f'document.querySelector("{selector.replace(chr(34), chr(92)+chr(34))}").click()')
@@ -913,7 +913,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 escaped_sel = selector.replace("'", "\\'").replace("\\", "\\\\")
                 escaped_text = text.replace("'", "\\'").replace("\\", "\\\\")
-                js_code = f'return {CDP_TYPE_JS}(\'{escaped_sel}\', \'{escaped_text}\', {str(clear).lower()})'
+                js_code = f'{CDP_TYPE_JS}(\'{escaped_sel}\', \'{escaped_text}\', {str(clear).lower()})'
                 result = safe(lambda: json.loads(sb.execute_script(js_code) or "{}"), {})
                 if not result.get("ok"):
                     # Fall back to Selenium type
@@ -1106,7 +1106,7 @@ class Handler(BaseHTTPRequestHandler):
             if err: return self._err(err, 400)
             try:
                 escaped = selector.replace("'", "\\'").replace("\\", "\\\\")
-                result = json.loads(sb.execute_script(f'return {DROPDOWN_OPTIONS_JS}(\'{escaped}\')'))
+                result = json.loads(sb.execute_script(f'{DROPDOWN_OPTIONS_JS}(\'{escaped}\')'))
                 if not result.get("ok"):
                     return self._err(result.get("error", "not a select element"), 400)
                 self._ok({"selector": selector, "options": result["options"],
@@ -1128,7 +1128,7 @@ class Handler(BaseHTTPRequestHandler):
                 val_arg = json.dumps(value) if value is not None else "undefined"
                 text_arg = json.dumps(text_val) if text_val is not None else "undefined"
                 result = json.loads(sb.execute_script(
-                    f'return {SELECT_DROPDOWN_JS}(\'{escaped}\', {val_arg}, {text_arg})'))
+                    f'{SELECT_DROPDOWN_JS}(\'{escaped}\', {val_arg}, {text_arg})'))
                 if not result.get("ok"):
                     return self._err("option not found in dropdown", 400)
                 sb.sleep(0.5)
@@ -1464,7 +1464,7 @@ class Handler(BaseHTTPRequestHandler):
             src_x = body.get("from_x"); src_y = body.get("from_y")
             if src_sel and (src_x is None or src_y is None):
                 r = safe(lambda: json.loads(sb.execute_script(
-                    f"return {ELEMENT_CENTER_JS}({js_str(src_sel)})") or "{}"), {})
+                    f"{ELEMENT_CENTER_JS}({js_str(src_sel)})") or "{}"), {})
                 if not r.get("ok"): return self._err("source: " + r.get("error", "not found"))
                 src_x, src_y = r["x"], r["y"]
                 # Auto-pick HTML5 when source is genuinely draggable and not an offset drag.
@@ -1485,7 +1485,7 @@ class Handler(BaseHTTPRequestHandler):
                     {"selector": body.get("to_selector", ""), "index": body.get("to_index", 0)})
                 if err: return self._err("target: " + err, 400)
                 r = safe(lambda: json.loads(sb.execute_script(
-                    f"return {ELEMENT_CENTER_JS}({js_str(tgt_sel)})") or "{}"), {})
+                    f"{ELEMENT_CENTER_JS}({js_str(tgt_sel)})") or "{}"), {})
                 if not r.get("ok"): return self._err("target: " + r.get("error", "not found"))
                 tgt_x, tgt_y = r["x"], r["y"]
                 if strategy == "auto": strategy = "html5"
@@ -1501,11 +1501,11 @@ class Handler(BaseHTTPRequestHandler):
                     method = "physics"  # coords-only: HTML5 needs element handles
                 else:
                     res = safe(lambda: json.loads(sb.execute_script(
-                        f"return {SIMULATE_DND_JS}({js_str(src_sel)}, {js_str(tgt_sel)})") or "{}"), {})
+                        f"{SIMULATE_DND_JS}({js_str(src_sel)}, {js_str(tgt_sel)})") or "{}"), {})
                     if not res.get("ok"): return self._err("html5 drag failed: " + res.get("error", ""))
             if method == "physics":
                 res = safe(lambda: json.loads(sb.execute_script(
-                    f"return {PHYS_DRAG_JS}({src_x}, {src_y}, {tgt_x}, {tgt_y}, {steps}, 0)") or "{}"), {})
+                    f"{PHYS_DRAG_JS}({src_x}, {src_y}, {tgt_x}, {tgt_y}, {steps}, 0)") or "{}"), {})
                 if not res.get("ok"): return self._err("physics drag failed: " + res.get("error", ""))
             sb.sleep(0.8)
             capture = self._capture_with_fingerprint(sb, self.state)
@@ -1528,7 +1528,7 @@ class Handler(BaseHTTPRequestHandler):
             xx = x if x is not None else 0
             yy = y if y is not None else 0
             res = safe(lambda: json.loads(sb.execute_script(
-                f"return {HOVER_JS}({sel_arg}, {xx}, {yy})") or "{}"), {})
+                f"{HOVER_JS}({sel_arg}, {xx}, {yy})") or "{}"), {})
             if not res.get("ok"): return self._err("hover failed: " + res.get("error", ""))
             sb.sleep(0.5)
             self._ok(self._capture_with_fingerprint(sb, self.state))
@@ -1544,7 +1544,7 @@ class Handler(BaseHTTPRequestHandler):
             self.state.snapshot_before()
             sel_arg = js_str(selector) if selector else "null"
             res = safe(lambda: json.loads(sb.execute_script(
-                f"return {PRESS_JS}({js_str(keys)}, {sel_arg})") or "{}"), {})
+                f"{PRESS_JS}({js_str(keys)}, {sel_arg})") or "{}"), {})
             if not res.get("ok"): return self._err("press failed: " + res.get("error", ""))
             sb.sleep(0.5)
             capture = self._capture_with_fingerprint(sb, self.state)
@@ -1559,7 +1559,7 @@ class Handler(BaseHTTPRequestHandler):
                     selector, err = self._resolve_selector(body)
                     if err: return self._err(err, 400)
                     r = safe(lambda: json.loads(sb.execute_script(
-                        f"return {ELEMENT_CENTER_JS}({js_str(selector)})") or "{}"), {})
+                        f"{ELEMENT_CENTER_JS}({js_str(selector)})") or "{}"), {})
                     if not r.get("ok"): return self._err("click_at: " + r.get("error", "not found"))
                     x, y = r["x"], r["y"]
                 else:
@@ -1570,7 +1570,7 @@ class Handler(BaseHTTPRequestHandler):
             before_handles, _ = self._capture_tabs_info(sb)
             self.state.snapshot_before()
             res = safe(lambda: json.loads(sb.execute_script(
-                f"return {CLICK_AT_JS}({x}, {y}, {button}, {is_double}, {is_right})") or "{}"), {})
+                f"{CLICK_AT_JS}({x}, {y}, {button}, {is_double}, {is_right})") or "{}"), {})
             if not res.get("ok"): return self._err("click_at failed: " + res.get("error", ""))
             sb.sleep(0.8)
             tab_info = self._detect_and_handle_new_tab(sb, before_handles)
@@ -1584,7 +1584,7 @@ class Handler(BaseHTTPRequestHandler):
             if err: return self._err(err, 400)
             self.state.snapshot_before()
             res = safe(lambda: json.loads(sb.execute_script(
-                f"return {SCROLL_INTO_VIEW_JS}({js_str(selector)})") or "{}"), {})
+                f"{SCROLL_INTO_VIEW_JS}({js_str(selector)})") or "{}"), {})
             if not res.get("ok"): return self._err("scroll_into_view failed: " + res.get("error", ""))
             sb.sleep(0.4)
             self._ok(self._capture_with_fingerprint(sb, self.state))

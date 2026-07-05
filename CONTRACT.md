@@ -6,6 +6,11 @@
 > agent + sandbox layer is the Python deepagents harness — see `CLAUDE.md` and
 > `harness/README.md` for the current surface. Kept here as the frozen contract
 > for `master`.
+>
+> **Live MCP server (pi-pivot):** the surface Hermes/OpenClaw connect to is the
+> Python FastMCP wrapper at `harness/pux_harness/mcp_server.py` (`pux mcp`, SSE
+> :9987), not this Go spec. A full rewrite of this document to match it is
+> deferred to a separate PR.
 
 > Source of truth for the slim MVP on `master`. Everything in this codebase
 > conforms to this document or it's a bug. The fullstack contract (TUI, web

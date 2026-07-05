@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "pux-sandbox": {
-      "url": "http://127.0.0.1:9987",
+    "pux": {
+      "url": "http://127.0.0.1:9987/sse",
       "lifecycle": "eager",
       "directTools": true
     }

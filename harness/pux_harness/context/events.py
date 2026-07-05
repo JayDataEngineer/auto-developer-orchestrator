@@ -247,6 +247,33 @@ class EventStore:
                 )
                 """
             )
+            # External-content sync triggers: keep events_fts consistent with
+            # events on every INSERT / DELETE / UPDATE. events_fts is an
+            # external-content table (content=events), so without the AFTER
+            # DELETE trigger, FIFO eviction (which DELETEs from events only)
+            # would orphan the matching FTS row — leaving dead entries that
+            # skew BM25 corpus stats. This is the canonical sync pattern from
+            # the SQLite FTS5 docs; capture() no longer hand-syncs the index.
+            # (Events rows are never UPDATEd today, but the AFTER UPDATE
+            # trigger is included for correctness if that ever changes.)
+            conn.executescript(
+                """
+                CREATE TRIGGER IF NOT EXISTS events_fts_ai AFTER INSERT ON events BEGIN
+                    INSERT INTO events_fts(rowid, type, data, thread_id)
+                    VALUES (new.id, new.type, new.data, new.thread_id);
+                END;
+                CREATE TRIGGER IF NOT EXISTS events_fts_ad AFTER DELETE ON events BEGIN
+                    INSERT INTO events_fts(events_fts, rowid, type, data, thread_id)
+                    VALUES ('delete', old.id, old.type, old.data, old.thread_id);
+                END;
+                CREATE TRIGGER IF NOT EXISTS events_fts_au AFTER UPDATE ON events BEGIN
+                    INSERT INTO events_fts(events_fts, rowid, type, data, thread_id)
+                    VALUES ('delete', old.id, old.type, old.data, old.thread_id);
+                    INSERT INTO events_fts(rowid, type, data, thread_id)
+                    VALUES (new.id, new.type, new.data, new.thread_id);
+                END;
+                """
+            )
             # Blobs get their OWN standalone fts5 table (separate corpus, so a
             # blob search isn't drowned out by event volume). It is NOT an
             # external-content table: blobs.id is TEXT (the hex handle), but
@@ -260,6 +287,18 @@ class EventStore:
                 )
                 """
             )
+            # One-time resync, gated by PRAGMA user_version (persisted in the
+            # DB file, so this runs exactly once across all connections): an
+            # existing DB upgraded in place may carry orphaned events_fts rows
+            # from pre-trigger evictions. 'rebuild' repopulates the index from
+            # the events content table, dropping any orphans. Committed at
+            # once so other thread-local connections don't block on the write
+            # lock during this migration.
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if version < 1:
+                conn.execute("INSERT INTO events_fts(events_fts) VALUES('rebuild')")
+                conn.execute("PRAGMA user_version = 1")
+                conn.commit()
         except sqlite3.OperationalError:
             pass  # FTS5 not compiled in — degrade to LIKE
         # Migrate: add category + data_hash columns to existing tables.
@@ -342,15 +381,8 @@ class EventStore:
             (now, event_type, priority, thread_id, data_str, category, dhash),
         )
         rowid = cur.lastrowid
-        # Sync to FTS index (best-effort).
-        try:
-            conn.execute(
-                "INSERT INTO events_fts(rowid, type, data, thread_id) "
-                "VALUES (?, ?, ?, ?)",
-                (rowid, event_type, data_str, thread_id),
-            )
-        except sqlite3.OperationalError:
-            pass
+        # FTS index is kept in sync by the events_fts_ai trigger (see
+        # _init_schema) — no manual INSERT here.
         return rowid  # type: ignore[return-value]
 
     def flush(self) -> None:

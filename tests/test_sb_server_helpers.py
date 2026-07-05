@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import types
 from pathlib import Path
 
@@ -187,6 +188,36 @@ def test_phys_drag_js_fires_mouse_sequence():
     js = mod.PHYS_DRAG_JS
     for evt in ("mousedown", "mousemove", "mouseup"):
         assert evt in js, f"PHYS_DRAG_JS missing {evt!r}"
+
+
+def test_no_execute_script_uses_return_iife_pattern():
+    """No-legacy-left-behind tripwire for the SeleniumBase-CDP multi-line bug.
+
+    SeleniumBase CDP ``evaluate``/``execute_script`` only strips a leading
+    ``return`` from the LAST line of the script. Our JS constants are multi-line
+    IIFEs, so a call site ``sb.execute_script(f'return {CONST_JS}(args)')`` puts
+    ``return`` on the FIRST line; the strip is skipped and the raw ``return``
+    reaches Playwright ``page.evaluate`` → "Illegal return statement" → the call
+    silently no-ops (and ``/type`` silently fell back to ``sb.type``, masking it).
+
+    The constants are IIFEs that return a value as an EXPRESSION, so the correct
+    call site is the bare ``sb.execute_script(f'{CONST_JS}(args)')`` — no
+    ``return``. This static check reads the source and refuses any
+    ``return {ALL_CAPS_JS}`` inside an ``execute_script`` f-string so the bug
+    class can never come back.
+    """
+    src = _SB_SERVER_PY.read_text()
+    offending = []
+    for line in src.splitlines():
+        if "execute_script" not in line:
+            continue
+        if re.search(r"return \{[A-Z][A-Z_]*_JS\}", line):
+            offending.append(line.strip())
+    assert not offending, (
+        "execute_script call site(s) use the buggy `return {X_JS}` pattern "
+        "(multi-line IIFE + SeleniumBase CDP = Illegal return statement):\n"
+        + "\n".join(offending)
+    )
 
 
 def test_js_str_quotes_and_escapes():

@@ -27,26 +27,38 @@ def build_memory_backend(
     org: str,
     default_backend: PuxSandboxBackend,
     store: BaseStore | None = None,
-) -> tuple[callable, BaseStore | None]:
+) -> tuple[callable, BaseStore]:
     """Build the composite backend and store for memory.
 
     Returns:
         ``(backend_factory, store)`` — the factory is passed as ``backend=``
-        to ``create_deep_agent()``; the store is passed as ``store=``.
+        to ``create_deep_agent()``; the store is passed as ``store=``. Both
+        share the SAME store object so the graph's store and the
+        ``StoreBackend``'s store are one and the same.
 
-        When ``store`` is ``None``, ``StoreBackend`` falls back to the
-        in-graph store (``get_store()``). Passing an explicit store gives
-        the caller control over persistence (``InMemoryStore`` for the
-        runner, ``AsyncSqliteSaver``-backed for the server).
+        When ``store`` is ``None`` an :class:`InMemoryStore` is created here.
+        ``StoreBackend(store=None)`` has NO in-graph fallback — it holds
+        ``None`` and crashes on ``store.get`` the first time
+        ``MemoryMiddleware.before_agent`` downloads memory files
+        (``download_files`` → ``store.get`` → ``AttributeError: 'NoneType'
+        object has no attribute 'get'``). So a real store MUST be supplied;
+        the ephemeral default gives callers (the ``pux direct`` runner) a
+        working one-shot memory without having to know this. Callers wanting
+        cross-restart survival (the server) pass their own persistent store.
     """
+    from langgraph.store.memory import InMemoryStore
+
+    if store is None:
+        # Do NOT pass None through to StoreBackend — see docstring.
+        store = InMemoryStore()
     namespace_fn = memory_namespace(org)
 
     def _backend_factory(rt):
         """Resolve composite backend at graph execution time.
 
         ``StoreBackend`` needs the runtime to resolve the namespace factory.
-        ``StateBackend`` is used as the memory-side default when no explicit
-        store is provided (ephemeral, thread-scoped).
+        The store is the one resolved above (caller-supplied or the
+        ephemeral InMemoryStore default) — never None.
         """
         from deepagents.backends.store import StoreBackend
 
