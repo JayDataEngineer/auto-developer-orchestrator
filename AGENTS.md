@@ -96,24 +96,10 @@ your `description`, not your conversation — give it enough context (relevant
 paths, the question, the expected output shape).
 
 Without `--org`, you are the operator — drive tasks directly.
-
-### Specialist roster
-
-| Specialist | Org | Role |
-|---|---|---|
-| `cto` | game-studio | Full-stack dev + project management + creative strategy |
-| `researcher` | game-studio | Research agent |
-| `comms` | game-studio | Communications |
-| `media-buyer` | game-studio | Ad campaign optimization |
-| `social-media` | social-media-pipeline | Social media automation |
-| `researcher` | deep-research-engine | Deep research |
-| `writer` | deep-research-engine | Content writing |
-| `coder` | deep-research-engine | Coding tasks |
-| `analyst` | deep-research-engine | Analysis |
-| `media-buyer` | invest | Ad campaign optimization |
-| `researcher` | invest | Research |
-| `coder` | invest | Coding |
-| `analyst` | invest | Analysis |
+The live specialist roster is whatever `task` tool lists at runtime (built
+from `.pi/agents/*.py` + each org's `org.yaml`). Do not maintain a static
+copy here — it goes stale (the table that lived here named specialists that
+no longer exist).
 
 ## Conventions
 

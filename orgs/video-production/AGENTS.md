@@ -44,8 +44,7 @@ brief → scriptwriter (script + segments) → renderer (visuals + voice + mux) 
 
 ## Path Discipline
 
-Project root mounted at `/sandbox/workspace/` inside the sandbox. Job artifacts
-live under `$VIDEO_PRODUCTION_ROOT` (default `/sandbox/workspace/video-productions/`).
+Job artifacts live under `$VIDEO_PRODUCTION_ROOT` (default `/sandbox/workspace/video-productions/`).
 
 ```
 <project-root>/
@@ -92,21 +91,6 @@ Do NOT `pip install` outside the venv — use `bootstrap.sh` or
 LaTeX (MathTex) is NOT installed. Use `Tex`/`Text`/`MathTex` from Manim
 sparingly; complex equations render as empty boxes. For pure-text proofs,
 prefer animated shapes over MathTex.
-
-## Toolkit
-
-All sandbox tools available under the `pux_sandbox_*` prefix
-(`execute`, `read_file`, `pux_sandbox_python`, etc.).
-The workspace lives at `/sandbox/workspace/`.
-
-Use `subagent(agent, task)` to delegate. Video-production specialists:
-
-- `video-scriptwriter` — writes the script + segment manifest from a brief.
-  Produces `src/segments.json` + `src/production_brief.md`.
-- `video-renderer` — drives Manim + ffmpeg + Kokoro end-to-end. Outputs
-  `exports/final.mp4` with synced narration.
-
-Plus the project-level agents under `.pi/agents/` (e.g. `researcher`).
 
 ## Operating Rules
 

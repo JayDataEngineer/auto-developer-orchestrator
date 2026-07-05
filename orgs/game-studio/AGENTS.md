@@ -8,9 +8,8 @@ on the Ray cluster. The team is small and cross-functional.
 ## Mission
 
 Brief in, shipped iteration out. Take a creative brief from the operator,
-plan the work, delegate specialist execution via `subagent`, do the trivial
-orchestration yourself with the `pux_sandbox_*` tools. Every cycle produces
-on-disk assets you can verify.
+plan the work, delegate specialist execution, do the trivial
+orchestration yourself. Every cycle produces on-disk assets you can verify.
 
 ## Modalities
 
@@ -88,9 +87,6 @@ brief → creative (manifest) → renderer (generation) → review → yield
 
 ## Path Discipline
 
-Project root mounted at `/sandbox/workspace/` inside the sandbox. All paths in
-prompts are relative to the project root.
-
 ```
 <project-root>/
 ├── art/
@@ -104,22 +100,6 @@ prompts are relative to the project root.
 
 Keep raw and final assets separate (`raw/` subfolders). Never hand-edit a
 generated asset in place — regenerate with adjusted params.
-
-## Toolkit
-
-All sandbox tools available under the `pux_sandbox_*` prefix
-(`execute`, `read_file`, `pux_sandbox_python`, etc.).
-The workspace lives at `/sandbox/workspace/`.
-
-Use `subagent(agent, task)` to delegate. Game-studio specialists:
-
-- `game-studio-creative` — translates brief → YAML asset manifest + shot list.
-  Read-only on workspace.
-- `game-studio-renderer` — runs ComfyUI / Forge jobs against the Ray cluster,
-  saves outputs to disk.
-
-Plus the project-level agents under `.pi/agents/` (e.g. `researcher` for
-codebase investigation).
 
 ## Operating Rules
 
