@@ -16,11 +16,20 @@ Features:
     - Structured data extraction
 
 Usage:
-    sb_server.py [--port PORT] [--stealth]
+    sb_server.py [--port PORT] [--stealth] [--use-chromium]
+
+Flags:
+    --stealth         Launch own Chrome with fingerprint-masking flags, proxy
+                      support, and randomized viewport instead of attaching to
+                      the supervisord Chrome. Kills any existing Chrome first.
+    --use-chromium    Use unbranded Chromium (auto-downloaded via SeleniumBase)
+                      instead of Google Chrome. Implies a stealthier fingerprint
+                      on some sites (e.g. Reddit). Only meaningful with --stealth.
 
 Environment:
-    SB_SERVER_PORT  Port to listen on (default: 9876)
-    DISPLAY         X11 display (set by supervisord)
+    SB_SERVER_PORT    Port to listen on (default: 9876)
+    SB_SERVER_PROXY   HTTP/S proxy URL for Chrome (e.g. http://user:pass@host:port)
+    DISPLAY           X11 display (set by supervisord)
 
 API — POST unless noted:
     /navigate           {"url":"..."}                    → page + SoM + screenshot
@@ -71,10 +80,14 @@ import os
 import io
 import hashlib
 import time
+import asyncio
 import traceback
 import threading
 import re
 import base64
+import random
+import socket
+import tempfile
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -296,8 +309,10 @@ SELECT_DROPDOWN_JS = r"""
 # runs them unwrapped, so each is a single arrow-fn expression returning a JSON
 # string. Selenium's native drag_and_drop() does NOT emit the HTML5
 # dragstart/dragover/drop sequence (W3C WebDriver gap — Selenium issue #3604),
-# so SIMULATE_DND_JS synthesizes that chain; PHYS_DRAG_JS covers custom
-# draggables/sliders that listen to mousedown/mousemove/mouseup.
+# so SIMULATE_DND_JS synthesizes that chain. Physics drags (custom sliders,
+# dnd-kit, canvas) use _trusted_cdp_drag below — a Python helper that drives
+# the CDP Input domain directly, NOT an IIFE (it needs isTrusted=true events
+# that no in-page JS can produce).
 
 # Element center + draggable flag from a CSS selector.
 ELEMENT_CENTER_JS = r"""
@@ -356,38 +371,61 @@ SIMULATE_DND_JS = r"""
 })
 """
 
-# Mouse-physics drag for custom draggables / sliders / canvas that listen to
-# mousedown→mousemove(N)→mouseup. Steps interpolates a straight path; callers
-# wanting human-like curves can pre-compute waypoints. Untrusted MouseEvents —
-# most custom widgets respond; anti-bot-hardened sites may not.
-PHYS_DRAG_JS = r"""
-((x1, y1, x2, y2, steps, button) => {
-    button = (typeof button === "number") ? button : 0;
-    steps = Math.max(2, (steps | 0) || 25);
-    x1 = Number(x1) || 0; y1 = Number(y1) || 0; x2 = Number(x2) || 0; y2 = Number(y2) || 0;
-    const fired = [];
-    const fire = (type, x, y) => {
-        const el = document.elementFromPoint(x, y) || document.body;
-        const e = new MouseEvent(type, {
-            bubbles:true, cancelable:true, view:window,
-            clientX:x, clientY:y, button:button,
-            buttons: type === "mouseup" ? 0 : (button === 2 ? 2 : 1),
-            relatedTarget:null
-        });
-        el.dispatchEvent(e);
-        fired.push(type + "(" + Math.round(x) + "," + Math.round(y) + ")");
-    };
-    fire("mouseover", x1, y1);
-    fire("mousemove", x1, y1);
-    fire("mousedown", x1, y1);
-    for (let i = 1; i <= steps; i++) {
-        const t = i / steps;
-        fire("mousemove", x1 + (x2 - x1) * t, y1 + (y2 - y1) * t);
-    }
-    fire("mouseup", x2, y2);
-    return JSON.stringify({ok:true, fired:fired, from:[x1,y1], to:[x2,y2], steps:steps});
-})
-"""
+# Trusted physics drag via the CDP Input domain. Replaces the old synthetic
+# PHYS_DRAG_JS (untrusted dispatchEvent), which could NOT move native widgets:
+# a real <input type=range> ignores synthetic MouseEvents because Chrome
+# computes its value from the *default action* of trusted pointer input, and
+# pointer-based DnD libraries (dnd-kit) ignore untrusted pointer events. CDP
+# Input.dispatchMouseEvent moves the real browser cursor → isTrusted=true mouse
+# + synthesized pointer events → native sliders move, dnd-kit's PointerSensor
+# fires, canvas/map widgets respond. The HTML5 SIMULATE_DND_JS chain above is
+# STILL required for native draggable=true (CDP mouse input does not synthesize
+# dragstart/dragover/drop — only a real OS drag gesture does, which no API
+# produces). mycdp is imported lazily because it exists only in the sandbox
+# image, not on the host where the test suite imports this module.
+def _trusted_cdp_drag(sb, x1, y1, x2, y2, steps=40, button="left"):
+    """Trusted drag via CDP Input.dispatchMouseEvent. Caller MUST scroll the
+    start element into view first and pass post-scroll viewport coordinates
+    (off-screen coordinates hit nothing).
+
+    Mirrors the CDP primitive SeleniumBase's mouse_click_async uses (the WORKING
+    one): mousePressed/Released carry ``buttons`` (the held-button bitmask) and
+    ``click_count=1`` so the browser treats them as a real click → default
+    actions fire (native sliders move, checkboxes toggle). The drag-move steps
+    carry ``buttons=1`` too — that bitmask is how the browser distinguishes a
+    held-button DRAG (range follows the cursor, dnd-kit PointerSensor stays
+    armed) from a bare hover. Without it, SeleniumBase's own mouse_drag_async
+    (and our v1) emit press+move+release that custom-widget JS handlers catch
+    but native default-actions ignore."""
+    import mycdp as cdp  # vendored by seleniumbase; container-only
+
+    async def _run():
+        tab = sb.page
+        btn = cdp.input_.MouseButton(button)
+        held = 1 if button == "left" else 2  # buttons bitmask: left=1, right=2
+        # hover onto the start point first
+        await tab.send(cdp.input_.dispatch_mouse_event("mouseMoved", x=x1, y=y1))
+        await asyncio.sleep(0.05)
+        # press — click_count=1 + buttons=held makes this a real primary press
+        await tab.send(cdp.input_.dispatch_mouse_event(
+            "mousePressed", x=x1, y=y1, button=btn,
+            buttons=held, click_count=1))
+        await asyncio.sleep(0.03)
+        # interpolated drag moves — buttons=held signals "left still down"
+        for i in range(1, steps + 1):
+            t = i / steps
+            await tab.send(cdp.input_.dispatch_mouse_event(
+                "mouseMoved",
+                x=x1 + (x2 - x1) * t, y=y1 + (y2 - y1) * t,
+                buttons=held))
+            await asyncio.sleep(0.005)
+        await asyncio.sleep(0.03)
+        await tab.send(cdp.input_.dispatch_mouse_event(
+            "mouseReleased", x=x2, y=y2, button=btn,
+            buttons=held, click_count=1))
+
+    sb.loop.run_until_complete(_run())
+
 
 # Hover (mouseover/mousemove/mouseenter) over a selector OR raw x,y.
 HOVER_JS = r"""
@@ -493,43 +531,43 @@ SCROLL_INTO_VIEW_JS = r"""
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class BrowserState:
-    """Persistent SeleniumBase browser with labeler cache and fingerprinting."""
+    """Persistent SeleniumBase browser with labeler cache and fingerprinting.
 
-    def __init__(self, stealth=False):
+    Two modes:
+      - Normal: attach to supervisord's Chrome on CDP port 9222 (default).
+      - Stealth: kill supervisord Chrome, launch own Chrome with fingerprint-
+        masking flags, optional unbranded Chromium, proxy, random viewport.
+    """
+
+    def __init__(self, stealth=False, use_chromium=False):
         self.stealth = stealth
+        self.use_chromium = use_chromium
         self.sb = None
         self._ctx = None
         self._lock = threading.Lock()
         self._last_element_map = []
         self._download_dir = "/tmp/sb_downloads"
         self._last_fingerprint = ""
+        self._chrome_process = None
+        self._user_data_dir = None
         os.makedirs(self._download_dir, exist_ok=True)
         self._init_browser()
 
     def _init_browser(self):
         self._close_browser()
-        # pyvirtualdisplay is mocked at module level (noop), so SeleniumBase
-        # cannot create a hidden Xvfb. Chrome uses DISPLAY from environment
-        # (:99 by default), making browser automation visible via VNC.
-        #
-        # We use sb_cdp.Chrome (SeleniumBase Pure CDP Mode) for both stealth
-        # and non-stealth modes. This is already CDP-based (no webdriver flag,
-        # no detectable automation footprint).
-        #
-        # ── Single Chrome instance ──────────────────────────────────────────
-        # The sandbox container runs ONE Chrome via supervisord (PID 43, CDP
-        # port 9222). sb_server ATTACHES to that Chrome instead of launching a
-        # separate one (sb_cdp.Chrome supports this via host+port parameters).
-        # This ensures:
-        #   1. VNC shows the browser the agent is using (same X display :99)
-        #   2. No orphan Chrome processes on restart (sb_server disconnects,
-        #      Chrome keeps running, sb_server reconnects next time)
-        #   3. EnableBrowserMode (port 9222 check) keeps working
-        #
-        # Stray Chrome processes from previous sb_server versions (which use
-        # user data dir /tmp/uc_*) are killed here so only ONE browser window
-        # appears on the VNC screen.
         os.environ.setdefault("DISPLAY", ":99")
+
+        if self.stealth:
+            self._init_browser_stealth()
+        else:
+            self._init_browser_normal()
+
+    # ── Normal mode: attach to supervisord Chrome ───────────────────────────
+    def _init_browser_normal(self):
+        """Attach to the supervisord Chrome on CDP port 9222 (default).
+        No stealth, no proxy, no fingerprint masking — but still uses CDP so
+        actions (click/type/drag) go through the trusted Input domain."""
+
         import subprocess as _sp
         import time as _t
         for _pat in ("google-chrome", "chromium-browser", "chromium"):
@@ -544,8 +582,6 @@ class BrowserState:
 
         try:
             from seleniumbase import sb_cdp
-            # Attach to the supervisord Chrome (port 9222) instead of launching
-            # a new instance. This way VNC shows the browser being automated.
             self.sb = sb_cdp.Chrome("about:blank", host="127.0.0.1", port=9222)
             self._ctx = None
             self._setup_cdp_downloads()
@@ -556,13 +592,122 @@ class BrowserState:
             self.sb = None
             self._ctx = None
 
+    # ── Stealth mode: launch own Chrome with fingerprint masking ────────────
+    def _init_browser_stealth(self):
+        """Kill supervisord Chrome, launch a fresh Chrome (or unbranded
+        Chromium) with fingerprint-masking flags, optional proxy, and
+        randomized viewport. Attach sb_cdp.Chrome to it."""
+
+        import subprocess as _sp
+        import time as _t
+
+        # Kill ALL existing Chrome processes — supervisord's and any strays
+        for _pat in ("google-chrome", "chromium-browser", "chromium"):
+            try:
+                _sp.run(["pkill", "-9", "-f", _pat], capture_output=True, timeout=5)
+            except Exception:
+                pass
+        _t.sleep(0.8)
+
+        # 1. Chrome binary — unbranded Chromium or Google Chrome
+        chrome_bin = "/usr/bin/google-chrome-stable"
+        if self.use_chromium:
+            try:
+                from seleniumbase import SB
+                chrome_bin = SB.get_chromium()
+                print(f"[sb_server] using unbranded Chromium: {chrome_bin}", file=sys.stderr)
+            except Exception as e:
+                print(f"[sb_server] chromium download failed, fallback to google-chrome: {e}", file=sys.stderr)
+
+        # 2. Randomized viewport (base 1280x720 ± small variance)
+        base_w, base_h = 1280, 720
+        w = base_w + random.randint(-80, 80)
+        h = base_h + random.randint(-40, 40)
+
+        # 3. Proxy from environment
+        proxy = os.environ.get("SB_SERVER_PROXY", "").strip()
+        proxy_args = [f"--proxy-server={proxy}"] if proxy else []
+
+        # 4. Unique user data dir (avoid fingerprint reuse)
+        self._user_data_dir = tempfile.mkdtemp(prefix="sb_stealth_")
+
+        # 5. CDP port — reuse 9222 since supervisord Chrome is dead
+        cdp_port = 9222
+
+        # 6. Build Chrome args
+        args = [
+            chrome_bin,
+            f"--window-size={w},{h}",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            f"--remote-debugging-port={cdp_port}",
+            f"--user-data-dir={self._user_data_dir}",
+            # ── Fingerprint masking ─────────────────────────────────────────
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=ChromeWhatsNewUI,ChromeLabs,TranslateUI,"
+            "InterestFeedContentSuggestions,ChromeWhatsNewHATS,"
+            "EnableExtensionsExtensionsCheckup,OptimizationHints,"
+            "MediaRouter,PasswordGeneration,PasswordsAccountStorage,"
+            "AutofillServerCommunication",
+            "--disable-sync",
+            "--disable-default-apps",
+            "--disable-background-networking",
+            "--disable-component-update",
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--disable-field-trial-config",
+            "--disable-ipc-flooding-protection",
+            "--disable-search-engine-choice-screen",
+            "--disable-dinosaur-easter-egg",
+            # ── Visual consistency ─────────────────────────────────────────
+            "--enable-features=WebContentsForceDark",
+            "about:blank",
+        ] + proxy_args
+
+        print(f"[sb_server] starting Chrome (stealth=True, chromium={self.use_chromium}, "
+              f"viewport={w}x{h}, proxy={bool(proxy)})", file=sys.stderr)
+
+        self._chrome_process = _sp.Popen(
+            args, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+        )
+
+        # 7. Wait for CDP port to be ready (poll up to 20s)
+        for attempt in range(40):
+            try:
+                s = socket.socket()
+                s.settimeout(1)
+                s.connect(("127.0.0.1", cdp_port))
+                s.close()
+                break
+            except Exception:
+                _t.sleep(0.5)
+        else:
+            print(f"[sb_server] CDP port {cdp_port} not ready after 20s", file=sys.stderr)
+            self._chrome_process = None
+            self.sb = None
+            return
+
+        # 8. Attach sb_cdp.Chrome to our Chrome instance
+        try:
+            from seleniumbase import sb_cdp
+            self.sb = sb_cdp.Chrome("about:blank", host="127.0.0.1", port=cdp_port)
+            self._ctx = None
+            self._setup_cdp_downloads()
+            print("[sb_server] stealth browser ready", file=sys.stderr)
+        except Exception as e:
+            print(f"[sb_server] stealth attach failed: {e}", file=sys.stderr)
+            import traceback as _tb
+            _tb.print_exc(file=sys.stderr)
+            self.sb = None
+
+    # ── Utilities ──────────────────────────────────────────────────────────
+
     def _setup_cdp_downloads(self):
         try:
             downloads_path = str(Path(self._download_dir).absolute())
-            # sb_cdp.Chrome uses a different driver; set download behavior via JS hook
-            # that creates an <a> link with download attribute when downloads are initiated.
-            # For SeleniumBase UC mode this would be sb.execute_cdp_cmd(...) but sb_cdp.Chrome
-            # doesn't expose that. The /download endpoint handles explicit downloads via curl.
             self._download_dir = downloads_path
         except Exception as e:
             print(f"[sb_server] download dir setup failed (non-fatal): {e}", file=sys.stderr)
@@ -576,6 +721,18 @@ class BrowserState:
             try: self.sb.driver.stop()
             except Exception: pass
             self.sb = None
+        if self._chrome_process is not None:
+            try: self._chrome_process.kill()
+            except Exception: pass
+            try: self._chrome_process.wait(3)
+            except Exception: pass
+            self._chrome_process = None
+        if self._user_data_dir and os.path.isdir(self._user_data_dir):
+            try:
+                import shutil
+                shutil.rmtree(self._user_data_dir, ignore_errors=True)
+            except Exception: pass
+            self._user_data_dir = None
 
     def reset(self):
         with self._lock:
@@ -784,6 +941,7 @@ class Handler(BaseHTTPRequestHandler):
             self._ok({
                 "alive": alive, "url": url,
                 "stealth": self.state.stealth,
+                "chromium": self.state.use_chromium,
                 "tabs": safe(lambda: len(self.state.sb.driver.window_handles), 0) if alive else 0,
             })
         elif self.path.startswith("/file/"):
@@ -822,6 +980,48 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/reset":
             self.state.reset()
             self._ok({"message": "browser reset"})
+
+        elif path == "/solve_captcha":
+            if sb is None: return self._err("browser not available")
+            self.state.snapshot_before()
+            try:
+                if hasattr(sb, "solve_captcha"):
+                    sb.solve_captcha()
+                    sb.sleep(2)
+                    capture = self._capture_with_fingerprint(sb, self.state)
+                    capture["captcha_solved"] = True
+                    self._ok(capture)
+                else:
+                    # sb_cdp.Chrome may not expose solve_captcha — try JS approach
+                    # Click common CAPTCHA checkbox selectors inside iframes
+                    import json as _json
+                    result = safe(lambda: sb.execute_script("""
+                        (() => {
+                            const frames = document.querySelectorAll('iframe');
+                            for (const f of frames) {
+                                try {
+                                    const doc = f.contentDocument || f.contentWindow?.document;
+                                    if (!doc) continue;
+                                    const cb = doc.querySelector('.recaptcha-checkbox-border, ' +
+                                        '[role="checkbox"], #checkbox, .cf-turnstile-checkbox, ' +
+                                        '[data-action="challenge"], .challenge-button');
+                                    if (cb) { cb.click(); return 'clicked captcha in iframe'; }
+                                } catch(e) {}
+                            }
+                            // Also try top-level
+                            const top = document.querySelector('.recaptcha-checkbox-border, ' +
+                                '[role="checkbox"], #checkbox, .cf-turnstile-checkbox');
+                            if (top) { top.click(); return 'clicked top-level captcha'; }
+                            return 'no captcha element found';
+                        })()
+                    """), "no captcha element found")
+                    sb.sleep(2)
+                    capture = self._capture_with_fingerprint(sb, self.state)
+                    capture["captcha_solved"] = True
+                    capture["captcha_result"] = result
+                    self._ok(capture)
+            except Exception as e:
+                return self._err(f"solve_captcha failed: {e}")
 
         elif path == "/navigate":
             url = body.get("url", "")
@@ -909,27 +1109,18 @@ class Handler(BaseHTTPRequestHandler):
 
             self.state.snapshot_before()
 
-            # CDP-based typing: uses native input setter for React compatibility
-            try:
-                escaped_sel = selector.replace("'", "\\'").replace("\\", "\\\\")
-                escaped_text = text.replace("'", "\\'").replace("\\", "\\\\")
-                js_code = f'{CDP_TYPE_JS}(\'{escaped_sel}\', \'{escaped_text}\', {str(clear).lower()})'
-                result = safe(lambda: json.loads(sb.execute_script(js_code) or "{}"), {})
-                if not result.get("ok"):
-                    # Fall back to Selenium type
-                    if clear:
-                        try: sb.clear(selector)
-                        except Exception: pass
-                    sb.type(selector, text)
-            except Exception:
-                # Final fallback
-                try:
-                    if clear:
-                        try: sb.clear(selector)
-                        except Exception: pass
-                    sb.type(selector, text)
-                except Exception as e:
-                    return self._err(f"type failed: {e}")
+            # Single path: the CDP native-value-setter (React/Vue compatible).
+            # No silent fallback to sb.type() — that's a no-fallbacks-no-aliases
+            # violation AND it masked the dead CDP_TYPE_JS for the whole pre-fix
+            # run (the multi-line `return {X_JS}` bug made it throw every time,
+            # the handler swallowed it, and sb.type papered over the gap). If the
+            # setter fails, surface the error so the caller knows typing failed.
+            escaped_sel = selector.replace("\\", "\\\\").replace("'", "\\'")
+            escaped_text = text.replace("\\", "\\\\").replace("'", "\\'")
+            js_code = f'{CDP_TYPE_JS}(\'{escaped_sel}\', \'{escaped_text}\', {str(clear).lower()})'
+            result = safe(lambda: json.loads(sb.execute_script(js_code) or "{}"), {})
+            if not isinstance(result, dict) or not result.get("ok"):
+                return self._err("type failed: " + (result.get("error") if isinstance(result, dict) else "no result"))
 
             if submit:
                 try:
@@ -1019,9 +1210,18 @@ class Handler(BaseHTTPRequestHandler):
             self._ok(self._capture_with_fingerprint(sb, self.state))
 
         elif path == "/evaluate":
-            code = body.get("code", "")
+            code = body.get("code", "").strip()
             if not code: return self._err("missing code", 400)
             if sb is None: return self._err("browser not available")
+            # Normalize a leading `return ` (a common caller convention for
+            # marking an expression). SeleniumBase CDP execute_script only
+            # strips `return` from the LAST line, so `return <multi-line expr>`
+            # leaves a top-level `return` → "Illegal return statement". We strip
+            # exactly one leading `return` ourselves and pass the bare
+            # expression, which Playwright evaluates directly. Statement blocks
+            # (no leading return) pass through untouched.
+            if code.startswith("return ") or code.startswith("return\t"):
+                code = code[6:].lstrip()
             try:
                 result = sb.execute_script(code)
                 self._ok({"result": str(result)[:5000] if result is not None else None,
@@ -1453,33 +1653,37 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/drag":
             if sb is None: return self._err("browser not available")
             strategy = body.get("strategy", "auto")
-            steps = int(body.get("steps", 25) or 25)
+            steps = int(body.get("steps", 40) or 40)
+            original_strategy = strategy
 
             # Resolve SOURCE: optional selector (from_index/from_selector) and/or coords.
             src_sel = ""
+            src_draggable = False
             if body.get("from_selector") or body.get("from_index"):
                 src_sel, err = self._resolve_selector(
                     {"selector": body.get("from_selector", ""), "index": body.get("from_index", 0)})
                 if err: return self._err("source: " + err, 400)
             src_x = body.get("from_x"); src_y = body.get("from_y")
             if src_sel and (src_x is None or src_y is None):
+                # Trusted CDP drags need the element IN the viewport — scroll first,
+                # then read post-scroll center + draggable flag.
+                safe(lambda: sb.execute_script(f"{SCROLL_INTO_VIEW_JS}({js_str(src_sel)})"), None)
+                sb.sleep(0.15)
                 r = safe(lambda: json.loads(sb.execute_script(
                     f"{ELEMENT_CENTER_JS}({js_str(src_sel)})") or "{}"), {})
                 if not r.get("ok"): return self._err("source: " + r.get("error", "not found"))
                 src_x, src_y = r["x"], r["y"]
-                # Auto-pick HTML5 when source is genuinely draggable and not an offset drag.
-                if strategy == "auto" and r.get("draggable") and body.get("dx") is None and body.get("dy") is None:
-                    strategy = "html5"
+                src_draggable = bool(r.get("draggable"))
             if (src_x is None or src_y is None) and not src_sel:
                 return self._err("drag needs a source: from_index/from_selector OR from_x/from_y", 400)
 
             # Resolve TARGET: offset (dx/dy) > element (to_*) > coords (to_x/to_y).
             tgt_sel = ""
             tgt_x = body.get("to_x"); tgt_y = body.get("to_y")
-            if body.get("dx") is not None or body.get("dy") is not None:
+            offset_drag = body.get("dx") is not None or body.get("dy") is not None
+            if offset_drag:
                 if src_x is None or src_y is None: return self._err("offset drag needs a resolved source position", 400)
                 tgt_x = src_x + (body.get("dx") or 0); tgt_y = src_y + (body.get("dy") or 0)
-                if strategy == "auto": strategy = "physics"
             elif body.get("to_selector") or body.get("to_index"):
                 tgt_sel, err = self._resolve_selector(
                     {"selector": body.get("to_selector", ""), "index": body.get("to_index", 0)})
@@ -1488,28 +1692,60 @@ class Handler(BaseHTTPRequestHandler):
                     f"{ELEMENT_CENTER_JS}({js_str(tgt_sel)})") or "{}"), {})
                 if not r.get("ok"): return self._err("target: " + r.get("error", "not found"))
                 tgt_x, tgt_y = r["x"], r["y"]
-                if strategy == "auto": strategy = "html5"
             elif tgt_x is not None and tgt_y is not None:
-                if strategy == "auto": strategy = "physics"
+                pass
             else:
                 return self._err("drag needs a target: to_index/to_selector, to_x/to_y, or dx/dy", 400)
 
+            # Auto-pick: native HTML5 DnD only when the source is genuinely
+            # draggable AND it's an element-to-element drag (HTML5 needs element
+            # handles). Otherwise trusted-physics — the path that moves native
+            # sliders and fires the pointer events dnd-kit watches for.
+            if strategy == "auto":
+                strategy = "html5" if (src_draggable and tgt_sel and not offset_drag) else "physics"
+
             self.state.snapshot_before()
-            method = strategy
-            if method == "html5":
-                if not (src_sel and tgt_sel):
-                    method = "physics"  # coords-only: HTML5 needs element handles
-                else:
+
+            def _do(m):
+                if m == "html5":
+                    if not (src_sel and tgt_sel):
+                        return "physics-fallback-needed", None
                     res = safe(lambda: json.loads(sb.execute_script(
                         f"{SIMULATE_DND_JS}({js_str(src_sel)}, {js_str(tgt_sel)})") or "{}"), {})
-                    if not res.get("ok"): return self._err("html5 drag failed: " + res.get("error", ""))
-            if method == "physics":
-                res = safe(lambda: json.loads(sb.execute_script(
-                    f"{PHYS_DRAG_JS}({src_x}, {src_y}, {tgt_x}, {tgt_y}, {steps}, 0)") or "{}"), {})
-                if not res.get("ok"): return self._err("physics drag failed: " + res.get("error", ""))
-            sb.sleep(0.8)
+                    return ("ok" if res.get("ok") else "html5 failed: " + res.get("error", "")), res
+                # physics = trusted CDP drag
+                try:
+                    _trusted_cdp_drag(sb, src_x, src_y, tgt_x, tgt_y, steps)
+                    return "ok", None
+                except Exception as e:
+                    return "physics failed: " + str(e), None
+
+            method = strategy
+            status, _ = _do(method)
+            if status == "physics-fallback-needed":
+                method, status, _ = "physics", _do("physics")[0], None
+            sb.sleep(0.6)
             capture = self._capture_with_fingerprint(sb, self.state)
+
+            # Verify-and-retry: if the page didn't react AND we auto-picked, try
+            # the other strategy once (HTML5↔physics) — but only when we have
+            # both selectors to switch between. Closes the "auto guessed wrong"
+            # case (e.g. a non-draggable list that needs pointer events, or a
+            # draggable that needs the synthetic DnD chain).
+            retried = False
+            if (original_strategy == "auto" and not capture.get("page_changed")
+                    and src_sel and tgt_sel and status.startswith("ok")):
+                other = "physics" if method == "html5" else "html5"
+                s2, _ = _do(other)
+                if s2.startswith("ok"):
+                    method, retried = other, True
+                    sb.sleep(0.6)
+                    capture = self._capture_with_fingerprint(sb, self.state)
+
+            if not status.startswith("ok") and not retried:
+                return self._err(status)
             capture["drag_method"] = method
+            capture["auto_retried"] = retried
             capture["from"] = [src_x, src_y]
             capture["to"] = [tgt_x, tgt_y]
             self._ok(capture)
@@ -1598,20 +1834,70 @@ class Handler(BaseHTTPRequestHandler):
                     "index:i, name:f.name||'', id:f.id||'', src:(f.src||'').substring(0,120), "
                     "title:(f.title||f.getAttribute('aria-label')||'').substring(0,80)})))") or "[]"), [])
                 self._ok({"frames": frames, "total": len(frames)})
-            elif action == "enter":
+            elif action in ("enter", "exit"):
+                # RETIRED (no-legacy-left-behind): CDP has no global frame-context
+                # switch like WebDriver's switch_to_frame / switch_to_default_content
+                # — those methods don't exist on the SeleniumBase CDP Chrome object,
+                # so the old enter/exit actions were silently broken (AttributeError
+                # swallowed → "iframe enter failed"). Use action='click'/'evaluate'
+                # with inner_selector/code, which bridges through contentDocument.
+                return self._err(
+                    f"iframe action '{action}' is retired — CDP has no WebDriver-style "
+                    "frame switch. Use action='click' (selector=iframe, inner_selector="
+                    "in-frame element) or action='evaluate' (selector=iframe, code=JS).", 400)
+            elif action == "click":
                 selector, err = self._resolve_selector(body)
-                if err: return self._err(err, 400)
-                try:
-                    sb.switch_to_frame(selector)
-                    self._ok(self._capture_with_fingerprint(sb, self.state))
-                except Exception as e:
-                    return self._err(f"iframe enter failed: {e}")
-            elif action == "exit":
-                try:
-                    sb.switch_to_default_content()
-                    self._ok(self._capture_with_fingerprint(sb, self.state))
-                except Exception as e:
-                    return self._err(f"iframe exit failed: {e}")
+                if err: return self._err("iframe: " + err, 400)
+                inner = body.get("inner_selector")
+                if not inner: return self._err("iframe click needs inner_selector (the in-frame element)", 400)
+                # Same-origin bridge: reach into the iframe's contentDocument. We
+                # also focus+dispatch a real click so listeners fire. contentDocument
+                # access throws for cross-origin iframes — surface that honestly.
+                esc_ifr = selector.replace("\\", "\\\\").replace("'", "\\'")
+                esc_inner = inner.replace("\\", "\\\\").replace("'", "\\'")
+                res = safe(lambda: json.loads(sb.execute_script(
+                    f"((ifrSel, innerSel) => {{"
+                    f"  const ifr = document.querySelector(ifrSel);"
+                    f"  if (!ifr) return JSON.stringify({{ok:false, error:'iframe not found'}});"
+                    f"  let doc; try {{ doc = ifr.contentDocument || (ifr.contentWindow && ifr.contentWindow.document); }}"
+                    f"  catch (e) {{ return JSON.stringify({{ok:false, cross_origin:true, "
+                    f"    error:'cross-origin iframe — contentDocument blocked by SOP'}}); }}"
+                    f"  if (!doc) return JSON.stringify({{ok:false, error:'iframe has no contentDocument'}});"
+                    f"  const el = doc.querySelector(innerSel);"
+                    f"  if (!el) return JSON.stringify({{ok:false, error:'in-frame element not found: ' + innerSel}});"
+                    f"  el.scrollIntoView({{block:'center'}});"
+                    f"  try {{ el.focus(); }} catch (e) {{}}"
+                    f"  el.click();"
+                    f"  return JSON.stringify({{ok:true, tag: el.tagName.toLowerCase()}});"
+                    f"}})('{esc_ifr}', '{esc_inner}')") or "{}"), {})
+                if not res.get("ok"):
+                    return self._err("iframe click failed: " + res.get("error", ""))
+                sb.sleep(0.6)
+                self._ok(self._capture_with_fingerprint(sb, self.state))
+            elif action == "evaluate":
+                selector, err = self._resolve_selector(body)
+                if err: return self._err("iframe: " + err, 400)
+                code = (body.get("code") or "").strip()
+                if not code: return self._err("iframe evaluate needs code", 400)
+                if code.startswith("return ") or code.startswith("return\t"):
+                    code = code[6:].lstrip()
+                esc_ifr = selector.replace("\\", "\\\\").replace("'", "\\'")
+                esc_code = code.replace("\\", "\\\\").replace("'", "\\'")
+                res = safe(lambda: json.loads(sb.execute_script(
+                    f"((ifrSel, expr) => {{"
+                    f"  const ifr = document.querySelector(ifrSel);"
+                    f"  if (!ifr) return JSON.stringify({{ok:false, error:'iframe not found'}});"
+                    f"  let win; try {{ win = ifr.contentWindow; }}"
+                    f"  catch (e) {{ return JSON.stringify({{ok:false, cross_origin:true, "
+                    f"    error:'cross-origin iframe — contentWindow blocked by SOP'}}); }}"
+                    f"  if (!win) return JSON.stringify({{ok:false, error:'iframe has no contentWindow'}});"
+                    f"  let result; try {{ result = win.eval(expr); }}"
+                    f"  catch (e) {{ return JSON.stringify({{ok:false, error:'eval failed: ' + e.message}}); }}"
+                    f"  return JSON.stringify({{ok:true, result: String(result)}});"
+                    f"}})('{esc_ifr}', '{esc_code}')") or "{}"), {})
+                if not res.get("ok"):
+                    return self._err("iframe evaluate failed: " + res.get("error", ""))
+                self._ok({"result": res.get("result"), "type": "str"})
             else:
                 return self._err(f"unknown iframe action: {action}", 400)
 
@@ -1626,10 +1912,14 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     port = int(os.environ.get("SB_SERVER_PORT", DEFAULT_PORT))
     stealth = "--stealth" in sys.argv
-    state = BrowserState(stealth=stealth)
+    use_chromium = "--use-chromium" in sys.argv
+    state = BrowserState(stealth=stealth, use_chromium=use_chromium)
     Handler.state = state
-    server = HTTPServer(("127.0.0.1", port), Handler)
-    log(f"listening on :{port} stealth={stealth} download_dir={state._download_dir}")
+    details = []
+    if stealth: details.append("stealth")
+    if use_chromium: details.append("chromium")
+    extra = f" ({', '.join(details)})" if details else ""
+    log(f"listening on :{port}{extra} download_dir={state._download_dir}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
