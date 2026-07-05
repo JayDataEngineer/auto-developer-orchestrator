@@ -2,9 +2,9 @@
 in-sandbox ONNX FALLBACK.
 
 These lock the dispatch contract without touching Docker or spending tokens:
-a fake ``exec_client`` stands in for the sandbox (returns base64 for the fetch
-command, ONNX JSON for the ``describe_image.py`` command) and a fake model
-stands in for the driving LLM. The four behaviors that matter:
+a fake ``backend`` stands in for the sandbox filesystem (returns base64 via
+``backend.read()``), a fake ``exec_client`` handles curl/ONNX commands, and a
+fake model stands in for the driving LLM. The four behaviors that matter:
 
   1. model returns text  → ``source: "primary"``, ONNX never runs
   2. model raises / empty → ONNX fallback runs, ``source: "fallback"`` +
@@ -42,9 +42,23 @@ class _FakeModel:
         return _Resp(self._content)
 
 
+class _FakeBackend:
+    """Stands in for PuxSandboxBackend. Returns base64 content from read()."""
+
+    def __init__(self, b64="aGVsbG8="):
+        self._b64 = b64
+        self.reads: list[str] = []
+
+    def read(self, path, offset=0, limit=2000):
+        from deepagents.backends.protocol import FileData, ReadResult
+        self.reads.append(path)
+        return ReadResult(file_data=FileData(
+            content=self._b64, encoding="base64"))
+
+
 class _FakeExec:
     """Stands in for DockerExecClient. Routes on the command prefix:
-    ``base64``/``curl`` → image-bytes fetch; anything else → the ONNX script.
+    ``curl`` → URL fetch; anything else → the ONNX script.
     Records every command so tests can assert the ONNX path did/didn't run."""
 
     def __init__(self, *, b64="aGVsbG8=", onnx_out=None, onnx_exit=0):
@@ -57,7 +71,7 @@ class _FakeExec:
 
     def exec(self, cmd, timeout=None):
         self.cmds.append(cmd)
-        if cmd.startswith("base64") or cmd.startswith("curl"):
+        if cmd.startswith("curl"):
             return self._b64, 0
         return self._onnx_out, self._onnx_exit
 
@@ -71,23 +85,26 @@ def _invoke(tool, kwargs):
 # --- case 1: primary success ------------------------------------------------
 
 def test_primary_success_returns_primary_source_and_skips_onnx():
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _describe_image_tool(exec_, _FakeModel(content="a diagram of a triangle"))
+    tool = _describe_image_tool(backend, exec_, _FakeModel(content="a diagram of a triangle"))
     res = _invoke(tool, {"image_path": "/sandbox/workspace/qc_01.png"})
 
     assert res["success"] is True
     assert res["source"] == "primary"
     assert res["description"] == "a diagram of a triangle"
     assert res["model"] == "mimo-v2.5"
-    # Only the base64 fetch ran — the ONNX script never did.
+    # backend.read() was used for the sandbox path — no ONNX script.
+    assert backend.reads == ["/sandbox/workspace/qc_01.png"]
     assert [c for c in exec_.cmds if "describe_image.py" in c] == []
 
 
 def test_primary_supports_content_block_list():
     # Some providers return content as a list of blocks.
+    backend = _FakeBackend()
     exec_ = _FakeExec()
     blocks = [{"type": "text", "text": "block-desc"}]
-    tool = _describe_image_tool(exec_, _FakeModel(content=blocks))
+    tool = _describe_image_tool(backend, exec_, _FakeModel(content=blocks))
     res = _invoke(tool, {"image_path": "/sandbox/workspace/x.png"})
 
     assert res["source"] == "primary"
@@ -97,8 +114,9 @@ def test_primary_supports_content_block_list():
 # --- case 2: model failure → ONNX fallback ----------------------------------
 
 def test_model_raises_falls_back_to_onnx_with_primary_error():
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _describe_image_tool(exec_, _FakeModel(raises=RuntimeError("model 429")))
+    tool = _describe_image_tool(backend, exec_, _FakeModel(raises=RuntimeError("model 429")))
     res = _invoke(tool, {"image_path": "/sandbox/workspace/x.png"})
 
     assert res["success"] is True
@@ -112,8 +130,9 @@ def test_model_raises_falls_back_to_onnx_with_primary_error():
 
 
 def test_model_empty_content_falls_back_to_onnx():
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _describe_image_tool(exec_, _FakeModel(content="   "))
+    tool = _describe_image_tool(backend, exec_, _FakeModel(content="   "))
     res = _invoke(tool, {"image_url": "https://example.com/a.png"})
 
     assert res["source"] == "fallback"
@@ -123,8 +142,9 @@ def test_model_empty_content_falls_back_to_onnx():
 
 def test_both_paths_fail_surfaces_unavailable_with_primary_error():
     # ONNX returns exit 2 (model not downloaded) AND primary failed.
+    backend = _FakeBackend()
     exec_ = _FakeExec(onnx_out="model not found", onnx_exit=2)
-    tool = _describe_image_tool(exec_, _FakeModel(raises=RuntimeError("no vision")))
+    tool = _describe_image_tool(backend, exec_, _FakeModel(raises=RuntimeError("no vision")))
     res = _invoke(tool, {"image_path": "/sandbox/workspace/x.png"})
 
     assert res["success"] is False
@@ -135,8 +155,9 @@ def test_both_paths_fail_surfaces_unavailable_with_primary_error():
 # --- case 3: model=None → ONNX only (offline --check path) ------------------
 
 def test_no_model_is_onnx_only_no_primary_attempt():
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _describe_image_tool(exec_, vision_model=None)
+    tool = _describe_image_tool(backend, exec_, vision_model=None)
     res = _invoke(tool, {"image_path": "/sandbox/workspace/x.png"})
 
     assert res["success"] is True
@@ -149,14 +170,14 @@ def test_no_model_is_onnx_only_no_primary_attempt():
 # --- case 4: arg validation --------------------------------------------------
 
 def test_requires_one_of_path_or_url():
-    tool = _describe_image_tool(_FakeExec(), _FakeModel())
+    tool = _describe_image_tool(_FakeBackend(), _FakeExec(), _FakeModel())
     res = _invoke(tool, {})
     assert res["success"] is False
     assert "required" in res["error"]
 
 
 def test_path_and_url_are_mutually_exclusive():
-    tool = _describe_image_tool(_FakeExec(), _FakeModel())
+    tool = _describe_image_tool(_FakeBackend(), _FakeExec(), _FakeModel())
     res = _invoke(tool, {"image_path": "/a.png", "image_url": "https://x/a.png"})
     assert res["success"] is False
     assert "mutually exclusive" in res["error"]
@@ -165,8 +186,9 @@ def test_path_and_url_are_mutually_exclusive():
 # --- prompt plumbing --------------------------------------------------------
 
 def test_prompt_forwarded_to_onnx_fallback():
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _describe_image_tool(exec_, _FakeModel(raises=RuntimeError("boom")))
+    tool = _describe_image_tool(backend, exec_, _FakeModel(raises=RuntimeError("boom")))
     _invoke(tool, {"image_path": "/x.png", "prompt": "what text is on the sign?"})
     onnx_cmd = next(c for c in exec_.cmds if "describe_image.py" in c)
     assert "--prompt" in onnx_cmd

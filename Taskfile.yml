@@ -16,10 +16,19 @@ tasks:
       - uv sync
 
   test:
-    desc: Run the harness pytest suite (no Docker, no tokens)
-    dir: "{{.HARNESS}}"
+    desc: Run the pytest suite (no Docker, no tokens)
     cmds:
       - uv run pytest -q
+
+  lint:
+    desc: Run ruff linter
+    cmds:
+      - uv run ruff check .
+
+  typecheck:
+    desc: Run mypy type checker
+    cmds:
+      - uv run mypy .
 
   contract:
     desc: Validate the declarative org contract (all 10 orgs green; no server)

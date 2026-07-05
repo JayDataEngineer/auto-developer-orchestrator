@@ -9,10 +9,12 @@ downgrade would return a worse answer the caller can't distinguish.
 WATERFALL on failure (image→ONNX, audio→honest-unavailable, video→keyframes).
 
 Both are locked here without touching Docker or spending tokens: a fake
-``exec_client`` stands in for the sandbox and a fake model stands in for the
-multimodal LLM. The fake model's ``rejects_video`` flag models the real failure
-mode that justifies the video waterfall — the model rejects a raw ``video_url``
-block but accepts per-frame ``image_url`` blocks.
+``backend`` stands in for the sandbox filesystem (returns base64 via
+``backend.read()``), a fake ``exec_client`` handles curl/ONNX/ffmpeg commands,
+and a fake model stands in for the multimodal LLM. The fake model's
+``rejects_video`` flag models the real failure mode that justifies the video
+waterfall — the model rejects a raw ``video_url`` block but accepts per-frame
+``image_url`` blocks.
 """
 from __future__ import annotations
 
@@ -66,9 +68,23 @@ def _onnx_json(desc="onnx-desc"):
     return json.dumps({"description": desc, "model": "Qwen3.5-2B-ONNX-OPT"})
 
 
+class _FakeBackend:
+    """Stands in for PuxSandboxBackend. Returns base64 content from read()."""
+
+    def __init__(self, b64="aGVsbG8="):
+        self._b64 = b64
+        self.reads: list[str] = []
+
+    def read(self, path, offset=0, limit=2000):
+        from deepagents.backends.protocol import FileData, ReadResult
+        self.reads.append(path)
+        return ReadResult(file_data=FileData(
+            content=self._b64, encoding="base64"))
+
+
 class _FakeExec:
     """Routes on the command prefix: ``ffprobe`` (duration) / ``ffmpeg`` (frame
-    extraction) / ``ls -1`` (frame glob) / ``base64``|``curl`` (byte fetch) /
+    extraction) / ``ls -1`` (frame glob) / ``curl`` (URL byte fetch) /
     anything else (the ONNX describe_image.py script). ``ffmpeg_missing`` makes
     ffprobe exit 127."""
 
@@ -90,7 +106,7 @@ class _FakeExec:
         if cmd.startswith("ls -1") and "pux_multimodal_kf" in cmd:
             return ("\n".join(f"/tmp/pux_multimodal_kf/kf_{i:03d}.png"
                               for i in range(3)), 0)
-        if cmd.startswith("base64") or cmd.startswith("curl"):
+        if cmd.startswith("curl"):
             return self._b64, 0
         return self._onnx_out, self._onnx_exit
 
@@ -104,8 +120,9 @@ def _invoke(tool, kwargs):
 # ============================================================================
 
 def test_simple_image_primary_success():
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _multimodal_tool(exec_, _FakeModel(content="a diagram of a triangle"))
+    tool = _multimodal_tool(backend, exec_, _FakeModel(content="a diagram of a triangle"))
     res = _invoke(tool, {"media_path": "/sandbox/workspace/qc_01.png"})
 
     assert res["success"] is True
@@ -113,6 +130,7 @@ def test_simple_image_primary_success():
     assert res["media_type"] == "image"
     assert res["description"] == "a diagram of a triangle"
     assert res["model"] == "mimo-v2.5"
+    assert backend.reads == ["/sandbox/workspace/qc_01.png"]
     # The simple tool never touches the ONNX path.
     assert [c for c in exec_.cmds if "describe_image.py" in c] == []
 
@@ -120,8 +138,9 @@ def test_simple_image_primary_success():
 def test_simple_image_model_raises_is_honest_error_no_fallback():
     # The whole point of the simple tool: model failure is HONEST, not a silent
     # ONNX downgrade. The agent gets a clear error and decides what to do.
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _multimodal_tool(exec_, _FakeModel(raises=RuntimeError("model 429")))
+    tool = _multimodal_tool(backend, exec_, _FakeModel(raises=RuntimeError("model 429")))
     res = _invoke(tool, {"media_path": "/sandbox/workspace/x.png"})
 
     assert res["success"] is False
@@ -137,8 +156,9 @@ def test_simple_audio_model_raises_is_model_failed_not_unavailable():
     # The simple tool does NOT distinguish audio from image on failure — both are
     # "model_failed". (Only multimodal_mega has the audio_unavailable_offline
     # terminal tier, because only mega tries an offline fallback.)
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _multimodal_tool(exec_, _FakeModel(raises=RuntimeError("audio 429")))
+    tool = _multimodal_tool(backend, exec_, _FakeModel(raises=RuntimeError("audio 429")))
     res = _invoke(tool, {"media_path": "/sandbox/workspace/clip.mp3"})
 
     assert res["success"] is False
@@ -150,8 +170,9 @@ def test_simple_audio_model_raises_is_model_failed_not_unavailable():
 def test_simple_no_model_returns_no_model_error():
     # Offline --check path: vision_model=None. The simple tool can't do anything
     # (it has no fallback), so it says so honestly + points at the alternatives.
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _multimodal_tool(exec_, vision_model=None)
+    tool = _multimodal_tool(backend, exec_, vision_model=None)
     res = _invoke(tool, {"media_path": "/sandbox/workspace/x.png"})
 
     assert res["success"] is False
@@ -161,14 +182,14 @@ def test_simple_no_model_returns_no_model_error():
 
 
 def test_simple_unknown_extension():
-    tool = _multimodal_tool(_FakeExec(), _FakeModel())
+    tool = _multimodal_tool(_FakeBackend(), _FakeExec(), _FakeModel())
     res = _invoke(tool, {"media_path": "/sandbox/workspace/data.xyz"})
     assert res["success"] is False
     assert "unsupported media type" in res["error"]
 
 
 def test_simple_validation():
-    tool = _multimodal_tool(_FakeExec(), _FakeModel())
+    tool = _multimodal_tool(_FakeBackend(), _FakeExec(), _FakeModel())
     assert _invoke(tool, {})["success"] is False
     assert _invoke(tool, {"media_path": "/a.png",
                           "media_url": "https://x/a.png"})["success"] is False
@@ -179,8 +200,9 @@ def test_simple_validation():
 # ============================================================================
 
 def test_mega_image_primary_success_skips_onnx():
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _multimodal_mega_tool(exec_, _FakeModel(content="a red square"))
+    tool = _multimodal_mega_tool(backend, exec_, _FakeModel(content="a red square"))
     res = _invoke(tool, {"media_path": "/sandbox/workspace/x.png"})
 
     assert res["success"] is True
@@ -190,8 +212,9 @@ def test_mega_image_primary_success_skips_onnx():
 
 
 def test_mega_image_model_raises_falls_back_to_onnx_normalized_source():
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _multimodal_mega_tool(exec_, _FakeModel(raises=RuntimeError("model 429")))
+    tool = _multimodal_mega_tool(backend, exec_, _FakeModel(raises=RuntimeError("model 429")))
     res = _invoke(tool, {"media_path": "/sandbox/workspace/x.png"})
 
     assert res["success"] is True
@@ -204,8 +227,9 @@ def test_mega_image_model_raises_falls_back_to_onnx_normalized_source():
 
 
 def test_mega_image_no_model_is_onnx_only():
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _multimodal_mega_tool(exec_, vision_model=None)
+    tool = _multimodal_mega_tool(backend, exec_, vision_model=None)
     res = _invoke(tool, {"media_path": "/sandbox/workspace/x.png"})
 
     assert res["success"] is True
@@ -217,8 +241,9 @@ def test_mega_image_no_model_is_onnx_only():
 def test_mega_audio_model_raises_is_honest_terminal_tier():
     # mega TRIES the model, then on failure reports the honest "no offline
     # audio fallback exists" — it never fabricates a whisper transcript.
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _multimodal_mega_tool(exec_, _FakeModel(raises=RuntimeError("audio 429")))
+    tool = _multimodal_mega_tool(backend, exec_, _FakeModel(raises=RuntimeError("audio 429")))
     res = _invoke(tool, {"media_path": "/sandbox/workspace/clip.mp3"})
 
     assert res["success"] is False
@@ -228,8 +253,9 @@ def test_mega_audio_model_raises_is_honest_terminal_tier():
 
 
 def test_mega_video_primary_success_skips_keyframes():
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _multimodal_mega_tool(exec_, _FakeModel(content="a car drives by"))
+    tool = _multimodal_mega_tool(backend, exec_, _FakeModel(content="a car drives by"))
     res = _invoke(tool, {"media_path": "/sandbox/workspace/clip.mp4"})
 
     assert res["success"] is True
@@ -242,8 +268,9 @@ def test_mega_video_primary_success_skips_keyframes():
 def test_mega_video_model_rejects_raw_video_falls_back_to_keyframes():
     # rejects_video: the whole-clip video_url call fails → keyframe extraction →
     # each frame's image_url call succeeds. This is the realistic trigger.
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _multimodal_mega_tool(exec_, _FakeModel(content="frame action",
+    tool = _multimodal_mega_tool(backend, exec_, _FakeModel(content="frame action",
                                                    rejects_video=True))
     res = _invoke(tool, {"media_path": "/sandbox/workspace/clip.mp4"})
 
@@ -257,11 +284,15 @@ def test_mega_video_model_rejects_raw_video_falls_back_to_keyframes():
     assert [c for c in exec_.cmds if "describe_image.py" in c] == []
     assert any(c.startswith("ffprobe") for c in exec_.cmds)
     assert any(c.startswith("ffmpeg") for c in exec_.cmds)
+    # Frames were read via backend.read(), not base64 exec commands.
+    # 4 reads: the clip + 3 keyframes.
+    assert len(backend.reads) == 4
 
 
 def test_mega_video_no_model_falls_back_to_keyframes_onnx_per_frame():
+    backend = _FakeBackend()
     exec_ = _FakeExec()
-    tool = _multimodal_mega_tool(exec_, vision_model=None)
+    tool = _multimodal_mega_tool(backend, exec_, vision_model=None)
     res = _invoke(tool, {"media_path": "/sandbox/workspace/clip.mp4"})
 
     assert res["success"] is True
@@ -271,8 +302,9 @@ def test_mega_video_no_model_falls_back_to_keyframes_onnx_per_frame():
 
 
 def test_mega_video_ffmpeg_absent_returns_ffmpeg_missing():
+    backend = _FakeBackend()
     exec_ = _FakeExec(ffmpeg_missing=True)
-    tool = _multimodal_mega_tool(exec_, _FakeModel(rejects_video=True))
+    tool = _multimodal_mega_tool(backend, exec_, _FakeModel(rejects_video=True))
     res = _invoke(tool, {"media_path": "/sandbox/workspace/clip.mp4"})
 
     assert res["success"] is False
@@ -281,7 +313,7 @@ def test_mega_video_ffmpeg_absent_returns_ffmpeg_missing():
 
 
 def test_mega_validation_matches_simple_tool():
-    tool = _multimodal_mega_tool(_FakeExec(), _FakeModel())
+    tool = _multimodal_mega_tool(_FakeBackend(), _FakeExec(), _FakeModel())
     assert _invoke(tool, {})["success"] is False
     assert _invoke(tool, {"media_path": "/a.png",
                           "media_url": "https://x/a.png"})["success"] is False
