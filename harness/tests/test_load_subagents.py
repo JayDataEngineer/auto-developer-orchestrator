@@ -235,3 +235,30 @@ def test_org_yaml_top_level_must_be_mapping(fake_tree):
     (d / "org.yaml").write_text("- just\n- a\n- list\n")
     with pytest.raises(ValueError, match="mapping"):
         orgs.org_agent_slugs("o")
+
+
+# --- Phase 16: shared browser agent + its full whitelist ------------------
+
+def test_real_browser_whitelist_resolves(monkeypatch):
+    """The shipped browser agent (orgs/_shared/agents/browser.md) is rostered by
+    `general`; its full ~24-tool whitelist resolves against the REAL specialist
+    registry (every slug is a registered pux_sandbox_* tool). load_subagents
+    would raise KeyError on any unresolved slug, so reaching the assertions
+    proves the whole whitelist binds."""
+    from pux_harness.sandbox.tools import build_native_specialists
+
+    specialists = build_native_specialists("DUMMY", None, None)
+    subs = orgs.load_subagents("general", specialists)
+    browser = next(s for s in subs if s["name"] == "browser")
+    names = {t.name for t in browser["tools"]}
+    # Representative coverage across navigate / search / screenshot / tabs /
+    # sessions / vision — every Phase-16 family is present + resolved.
+    for slug in (
+        "browser_navigate", "browser_search", "browser_click", "browser_type",
+        "browser_scroll", "browser_screenshot", "browser_save_screenshot",
+        "browser_evaluate", "browser_extract_images", "browser_download",
+        "browser_new_tab", "browser_switch_tab", "browser_close_tab",
+        "browser_save_session", "browser_restore_session",
+        "describe_image",
+    ):
+        assert "pux_sandbox_" + slug in names, f"{slug} not resolved"

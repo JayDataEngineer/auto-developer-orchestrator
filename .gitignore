@@ -68,6 +68,10 @@ orgs/*/*
 # Org roster (specialist slugs) is SOURCE — a real config file, not runtime
 # data. Must come after ``orgs/*/*`` so git tracks it. See feedback_orgs_gitignore_source_trap.
 !orgs/*/org.yaml
+# Optional per-org harness profile (Phase 16.3b) — overrides the deepagents
+# stack (system_prompt_suffix / tool_description_overrides / excluded_tools).
+# Real config file, not runtime data — same re-negation rationale as org.yaml.
+!orgs/*/profile.yaml
 # Per-org skills are SOURCE under the declarative contract (shipped as
 # <org>/skills/<skill>/SKILL.md + references/ + scripts/), not runtime data —
 # ship the whole skills/ tree. Must come after ``orgs/*/*`` and re-negate the

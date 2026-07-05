@@ -21,6 +21,7 @@ from pux_harness.sandbox.docker_exec import DockerExecClient, get_exec_client
 from pux_harness.agent.model import get_model
 from pux_harness.sandbox.tools import build_native_specialists
 from pux_harness.agent.orgs import build_system_prompt, load_subagents
+from pux_harness.agent.profile import apply_profile_to_tools, load_profile
 from pux_harness.sandbox.backend import PuxSandboxBackend
 
 _exec: DockerExecClient | None = None  # direct docker exec — fs/shell + specialists
@@ -46,12 +47,21 @@ def shared_backend() -> PuxSandboxBackend:
 def build_graph(org: str, *, checkpointer: Any) -> CompiledStateGraph:
     """Compile the deepagents graph for ``org`` against ``checkpointer``.
 
-    Specialist ``pux_sandbox_*`` tools come from ``tools=`` (all 13 native);
+    Specialist ``pux_sandbox_*`` tools come from ``tools=`` (all native);
     native fs/shell tools come from ``FilesystemMiddleware`` via the shared
     backend (auto-injected into the main agent + every subagent by
     ``create_deep_agent``). The checkpointer is caller-supplied so the runner
     can use an ephemeral ``MemorySaver`` while the server uses a persistent
     ``AsyncSqliteSaver``.
+
+    Per-org ``orgs/<org>/profile.yaml`` (Phase 16.3b; OPTIONAL — most orgs ship
+    none) applies three org-wide overrides to the CTO stack:
+    ``base_system_prompt`` (full prompt replace), ``system_prompt_suffix``
+    (appended), ``tool_description_overrides`` + ``excluded_tools`` (applied via
+    ``profile.apply_profile_to_tools``). The same profile is threaded into
+    ``load_subagents`` so the suffix + tool overrides reach EACH specialist
+    subagent (e.g. the shared browser agent) — the user's stated goal. With no
+    profile this path is byte-identical to a profile-less build.
     """
     model = get_model()
     specialists = build_native_specialists(shared_exec(), model, org=org)
@@ -63,11 +73,22 @@ def build_graph(org: str, *, checkpointer: Any) -> CompiledStateGraph:
     # spec's `middleware` key (verified in the Phase 7 E2E), so attaching it to
     # specialists is a silent no-op — see context_offload.py module docstring.
     ctx_tools = build_ctx_tools()
+
+    prompt = build_system_prompt(org)
+    main_tools: list = [*specialists, *ctx_tools]
+    cfg = load_profile(org)
+    if cfg is not None:
+        if cfg.base_system_prompt:
+            prompt = cfg.base_system_prompt
+        if cfg.system_prompt_suffix:
+            prompt = f"{prompt}\n\n{cfg.system_prompt_suffix}"
+        main_tools = apply_profile_to_tools(main_tools, cfg)
+
     return create_deep_agent(
         model=model,
-        system_prompt=build_system_prompt(org),
-        tools=[*specialists, *ctx_tools],
-        subagents=load_subagents(org, specialists),
+        system_prompt=prompt,
+        tools=main_tools,
+        subagents=load_subagents(org, specialists, profile=cfg),
         middleware=[ContextOffloadMiddleware()],
         backend=shared_backend(),
         checkpointer=checkpointer,

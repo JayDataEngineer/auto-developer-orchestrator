@@ -18,10 +18,18 @@ Two tool surfaces, all running **inside the Docker container**:
   - **describe_image** — local ONNX vision (Qwen3.5-2B). Graceful-degradation:
     returns `success:false, reason:"unavailable"` when the model isn't
     downloaded; surface the `scripts/bootstrap-vision.sh` hint to the operator.
-  - **browser_navigate / browser_click / browser_type / browser_screenshot /
-    browser_evaluate** — wrap the sandbox's persistent SeleniumBase Chrome
-    session. Set-of-Marks integer indexes from navigate/screenshot can be passed
-    to click/type.
+  - **browser_\*** — wrap the sandbox's persistent SeleniumBase Chrome session
+    on `:9876`. The core five (`browser_navigate` / `_click` / `_type` /
+    `_screenshot` / `_evaluate`) plus the Phase-16 autopilot action set
+    (`browser_search` / `_scroll` / `_go_back` / `_wait` / `_find_text` /
+    `_extract` / `_extract_images` / `_save_screenshot` / `_download` /
+    `_upload` / `_tabs` / `_new_tab` / `_switch_tab` / `_close_tab` /
+    `_dropdown_options` / `_select_dropdown` / `_save_session` /
+    `_restore_session`). Each tool's docstring tells you when + how to use it
+    and what it returns; Set-of-Marks integer indexes from navigate/screenshot
+    can be passed to click/type/select. The shared `browser` agent
+    (`orgs/_shared/agents/browser.md`) is a lean autopilot loop over these;
+    `browser_evaluate` is the escape hatch for anything the named tools can't do.
   - **desktop_screenshot / desktop_click / desktop_type / desktop_key** — wrap
     xdotool + the sandbox's Xvfb desktop (DISPLAY=:99). Pixel coordinates are
     the contract; click the `(cx, cy)` of an element from the latest
@@ -126,6 +134,30 @@ no longer exist).
 Jobs are triggered via CLI (`pux jobs run --org X`) or server endpoint
 (`POST /jobs/{org}/run`). Status is queryable via `pux jobs status --org X`
 or `GET /jobs/{org}/status`.
+
+## Per-org harness profile
+
+An OPTIONAL `orgs/<name>/profile.yaml` applies small org-wide overrides to the
+deepagents stack the harness compiles for that org — the CTO system prompt AND
+every specialist subagent (so the shared `browser` agent inherits it too). It is
+NOT a policy file (no egress/sandbox effect); it shapes the agent graph itself:
+
+- `system_prompt_suffix` — appended to the assembled CTO prompt + each
+  subagent's prompt.
+- `tool_description_overrides` — rewrite a specialist tool's description, keyed
+  by its full `pux_sandbox_*` name (nudges how the model calls it in this org).
+- `excluded_tools` — drop specialist tools (full `pux_sandbox_*` names) from
+  this org's stack entirely.
+- `base_system_prompt` — REPLACE the assembled CTO prompt (rarely needed; the
+  suffix is the usual lever).
+
+The loader (`harness/pux_harness/agent/profile.py`) uses deepagents'
+`HarnessProfileConfig` SCHEMA but applies the fields at the `build_graph(org)`
+call site rather than the global model-keyed `_HARNESS_PROFILES` registry —
+that registry has no per-org namespace, so two orgs sharing a model would
+collide and the long-lived server path would leak across orgs. Most orgs ship
+no profile; absence is a no-op (byte-identical stack). `orgs/twitter-agent/
+profile.yaml` is the shipped sample.
 
 ## Testing harness rules
 

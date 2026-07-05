@@ -272,7 +272,11 @@ def _build_sub(
     return sub
 
 
-def load_subagents(org: str, all_tools: list[BaseTool]) -> list[dict[str, Any]]:
+def load_subagents(
+    org: str,
+    all_tools: list[BaseTool],
+    profile: Any = None,
+) -> list[dict[str, Any]]:
     """Build deepagents SubAgent dicts for ``org``'s specialists.
 
     For each slug in ``org.yaml``, load ``orgs/<org>/agents/<slug>.md`` (or
@@ -283,10 +287,24 @@ def load_subagents(org: str, all_tools: list[BaseTool]) -> list[dict[str, Any]]:
     Phase 7 E2E), so setting it would be a silent no-op. Context-offload runs on
     the main agent only; see ``context_offload.py`` for the rationale + how to
     add subagent offload properly later (CompiledSubAgent pre-compilation).
+
+    ``profile`` (optional ``HarnessProfileConfig`` from ``orgs/<org>/
+    profile.yaml``; Phase 16.3b) applies the org-wide overrides to EACH
+    specialist: ``system_prompt_suffix`` is appended to the body, and
+    ``tool_description_overrides`` + ``excluded_tools`` are applied to the
+    resolved tool whitelist (so an org-wide override reaches a shared subagent
+    like the browser agent, not just the CTO). The helper is imported lazily to
+    avoid a module cycle (``profile.py`` imports ``orgs._orgs_dir``). Default
+    ``None`` keeps every existing call site byte-identical to today.
     """
     if org not in discover_orgs():
         raise KeyError(f"unknown org {org!r}; discovered orgs: {discover_orgs()}")
     tool_map: dict[str, BaseTool] = {t.name: t for t in all_tools}
+    apply_profile_to_tools = None
+    if profile is not None:
+        # Lazy: profile.py imports ``_orgs_dir`` from THIS module at load time.
+        from pux_harness.agent.profile import apply_profile_to_tools as _aptt
+        apply_profile_to_tools = _aptt
     subs: list[dict[str, Any]] = []
     for slug in org_agent_slugs(org):
         spec = _load_agent_spec(slug, org)
@@ -295,5 +313,12 @@ def load_subagents(org: str, all_tools: list[BaseTool]) -> list[dict[str, Any]]:
             raise FileNotFoundError(
                 f"no agent {slug!r} for org {org!r} — searched {searched}")
         sub = _build_sub(slug, spec, tool_map, spec["system_prompt"])
+        if profile is not None:
+            if profile.system_prompt_suffix:
+                sub["system_prompt"] = (
+                    f"{sub['system_prompt']}\n\n{profile.system_prompt_suffix}"
+                )
+            if sub.get("tools"):
+                sub["tools"] = apply_profile_to_tools(sub["tools"], profile)
         subs.append(sub)
     return subs

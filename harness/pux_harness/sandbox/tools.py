@@ -101,6 +101,11 @@ def _skills_dirs(org: str | None = None) -> list[Path]:
 SPECIALISTS: frozenset[str] = frozenset({
     "python", "list_skills", "load_skill", "describe_image",
     "browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_evaluate",
+    "browser_search", "browser_scroll", "browser_go_back", "browser_wait", "browser_find_text",
+    "browser_extract", "browser_extract_images", "browser_save_screenshot", "browser_download",
+    "browser_upload", "browser_tabs", "browser_new_tab", "browser_switch_tab", "browser_close_tab",
+    "browser_dropdown_options", "browser_select_dropdown",
+    "browser_save_session", "browser_restore_session",
     "desktop_screenshot", "desktop_click", "desktop_type", "desktop_key",
 })
 
@@ -653,6 +658,428 @@ def _browser_evaluate_tool(exec_client: DockerExecClient) -> StructuredTool:
     )
 
 
+_BROWSER_SEARCH_DESC = (
+    "Search the web via DuckDuckGo and land on the results page. Returns the "
+    "same labeled screenshot + page state as browser_navigate (the engine builds "
+    "the DuckDuckGo URL for you). Use as the ENTRY POINT when you have a query "
+    "but no URL. After searching, read the returned screenshot, pick a result by "
+    "its SoM label, and browser_click it to open."
+)
+
+
+class _BrowserSearchArgs(BaseModel):
+    query: str = Field(..., description="Natural-language search query (the engine URL-encodes it)")
+
+
+def _browser_search_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(query: str) -> str:
+        if not query:
+            return _result({"success": False, "error": "query is required"})
+        return _sb_post(exec_client, "/search", {"query": query})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_search", description=_BROWSER_SEARCH_DESC,
+        args_schema=_BrowserSearchArgs, func=_run,
+    )
+
+
+_BROWSER_SCROLL_DESC = (
+    "Scroll the current page to reveal more content, then return a fresh "
+    "labeled screenshot of the newly-visible region. Pass direction='down' or "
+    "'up' for a viewport-sized jump; or set amount to a pixel count (e.g. 800) "
+    "for a precise scroll. Essential on long pages — interactive elements below "
+    "the fold have NO SoM label until you scroll them into view."
+)
+
+
+class _BrowserScrollArgs(BaseModel):
+    direction: str = Field("down", description="'down' or 'up' (viewport-sized); ignored when amount>0")
+    amount: int = Field(0, description="Pixel count to scroll (sign follows direction). 0 = use direction for a viewport jump.")
+
+
+def _browser_scroll_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(direction: str = "down", amount: int = 0) -> str:
+        return _sb_post(exec_client, "/scroll", {"direction": direction, "amount": amount})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_scroll", description=_BROWSER_SCROLL_DESC,
+        args_schema=_BrowserScrollArgs, func=_run,
+    )
+
+
+_BROWSER_GO_BACK_DESC = (
+    "Navigate back to the previous page in history. Returns the prior page's "
+    "labeled screenshot. Use when a navigation took you somewhere unhelpful and "
+    "you want to undo it without re-searching or re-typing a URL."
+)
+
+
+def _browser_go_back_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run() -> str:
+        return _sb_post(exec_client, "/go_back", {})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_go_back", description=_BROWSER_GO_BACK_DESC,
+        args_schema=_NoArgs, func=_run,
+    )
+
+
+_BROWSER_WAIT_DESC = (
+    "Pause for up to 30 seconds (server clamps; default 2) for async content to "
+    "load, then return a fresh labeled screenshot. Use after navigate/click/type "
+    "when the page is still loading or a JS render is in flight — a cheap way to "
+    "let the DOM settle before re-reading. Prefer this over guessing that a "
+    "screenshot is current."
+)
+
+
+class _BrowserWaitArgs(BaseModel):
+    seconds: int = Field(2, description="How long to wait; server clamps to 30")
+
+
+def _browser_wait_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(seconds: int = 2) -> str:
+        return _sb_post(exec_client, "/wait", {"seconds": seconds})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_wait", description=_BROWSER_WAIT_DESC,
+        args_schema=_BrowserWaitArgs, func=_run,
+    )
+
+
+_BROWSER_FIND_TEXT_DESC = (
+    "Scroll to and highlight the first occurrence of the given text on the "
+    "current page (uses window.find). Returns a fresh labeled screenshot centered "
+    "on the match. Use to locate specific information in a long page faster than "
+    "scanning the whole screenshot."
+)
+
+
+class _BrowserFindTextArgs(BaseModel):
+    text: str = Field(..., description="Substring to locate on the page")
+
+
+def _browser_find_text_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(text: str) -> str:
+        if not text:
+            return _result({"success": False, "error": "text is required"})
+        return _sb_post(exec_client, "/find_text", {"text": text})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_find_text", description=_BROWSER_FIND_TEXT_DESC,
+        args_schema=_BrowserFindTextArgs, func=_run,
+    )
+
+
+_BROWSER_EXTRACT_DESC = (
+    "Extract structured text data from the current page: title, url, headings, "
+    "paragraphs, lists, tables, and forms. The query is a free-text note of "
+    "intent (defaults to 'extract all text content'). Returns {extracted:{...}}. "
+    "Use to pull CLEAN text from an article or enumerate form fields, instead of "
+    "OCR-ing the screenshot."
+)
+
+
+class _BrowserExtractArgs(BaseModel):
+    query: str = Field("extract all text content", description="Free-text note of what you want (the engine extracts the same DOM structures regardless)")
+
+
+def _browser_extract_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(query: str = "extract all text content") -> str:
+        return _sb_post(exec_client, "/extract", {"query": query})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_extract", description=_BROWSER_EXTRACT_DESC,
+        args_schema=_BrowserExtractArgs, func=_run,
+    )
+
+
+_BROWSER_EXTRACT_IMAGES_DESC = (
+    "List every <img> on the current page with its src + alt text. Returns "
+    "{images:[{src,alt}], url}. Use to collect image URLs for downloading (pass "
+    "a src to browser_download) or to inventory page media without parsing the "
+    "screenshot."
+)
+
+
+def _browser_extract_images_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run() -> str:
+        return _sb_post(exec_client, "/extract_images", {})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_extract_images", description=_BROWSER_EXTRACT_IMAGES_DESC,
+        args_schema=_NoArgs, func=_run,
+    )
+
+
+_BROWSER_SAVE_SCREENSHOT_DESC = (
+    "Save the current page as a clean PNG file at the given path (e.g. "
+    "/tmp/evidence.png). DISTINCT from browser_screenshot (which returns a "
+    "base64 SoM-labeled view for ACTING on the page): this writes an archival "
+    "image to disk for evidence, attachments, or later describe_image analysis. "
+    "Returns {screenshot_path, url}."
+)
+
+
+class _BrowserSaveScreenshotArgs(BaseModel):
+    path: str | None = Field(None, description="Absolute sandbox path incl. .png extension. If omitted the engine generates one and returns it.")
+
+
+def _browser_save_screenshot_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(path: str | None = None) -> str:
+        body: dict = {}
+        if path:
+            body["path"] = path
+        return _sb_post(exec_client, "/screenshot", body)
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_save_screenshot", description=_BROWSER_SAVE_SCREENSHOT_DESC,
+        args_schema=_BrowserSaveScreenshotArgs, func=_run,
+    )
+
+
+_BROWSER_DOWNLOAD_DESC = (
+    "Download a file from a direct URL to a path inside the sandbox (e.g. "
+    "/tmp/report.pdf). Both url and path are required. Returns {url, path, size}. "
+    "Use for direct file URLs (discovered via browser_extract_images or link "
+    "hrefs) — NOT for pages that require interaction to produce the file."
+)
+
+
+class _BrowserDownloadArgs(BaseModel):
+    url: str = Field(..., description="Direct file URL to fetch")
+    path: str = Field(..., description="Absolute sandbox output path (incl. extension)")
+
+
+def _browser_download_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(url: str, path: str) -> str:
+        if not url or not path:
+            return _result({"success": False, "error": "url and path are both required"})
+        return _sb_post(exec_client, "/download", {"url": url, "path": path})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_download", description=_BROWSER_DOWNLOAD_DESC,
+        args_schema=_BrowserDownloadArgs, func=_run,
+    )
+
+
+_BROWSER_UPLOAD_DESC = (
+    "Upload a local file into an <input type='file'> on the current page. "
+    "Identify the input by CSS selector and pass a sandbox-absolute file_path "
+    "(which must already exist). Returns {uploaded, selector, file}. Use to "
+    "attach a resume/photo/document to a form whose upload UI can't be driven by "
+    "browser_type."
+)
+
+
+class _BrowserUploadArgs(BaseModel):
+    selector: str = Field(..., description="CSS selector of the <input type='file'>")
+    file_path: str = Field(..., description="Absolute sandbox path of the file to upload (must exist)")
+
+
+def _browser_upload_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(selector: str, file_path: str) -> str:
+        if not selector or not file_path:
+            return _result({"success": False, "error": "selector and file_path are both required"})
+        return _sb_post(exec_client, "/upload", {"selector": selector, "file_path": file_path})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_upload", description=_BROWSER_UPLOAD_DESC,
+        args_schema=_BrowserUploadArgs, func=_run,
+    )
+
+
+_BROWSER_TABS_DESC = (
+    "List all open browser tabs with their index, url, title, and which is "
+    "active. Returns {tabs:[{index,url,title,active}]}. Use before "
+    "browser_switch_tab to find the index of the tab you want, or to confirm how "
+    "many tabs are open."
+)
+
+
+def _browser_tabs_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run() -> str:
+        return _sb_post(exec_client, "/tabs", {})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_tabs", description=_BROWSER_TABS_DESC,
+        args_schema=_NoArgs, func=_run,
+    )
+
+
+_BROWSER_NEW_TAB_DESC = (
+    "Open a new browser tab to the given URL (default about:blank) and switch to "
+    "it. Returns the new tab's labeled screenshot. Use to open a link without "
+    "losing the current page, or to compare pages side-by-side."
+)
+
+
+class _BrowserNewTabArgs(BaseModel):
+    url: str = Field("about:blank", description="URL to open in the new tab")
+
+
+def _browser_new_tab_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(url: str = "about:blank") -> str:
+        return _sb_post(exec_client, "/new_tab", {"url": url})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_new_tab", description=_BROWSER_NEW_TAB_DESC,
+        args_schema=_BrowserNewTabArgs, func=_run,
+    )
+
+
+_BROWSER_SWITCH_TAB_DESC = (
+    "Switch to the browser tab at the given 0-based index. Returns that tab's "
+    "labeled screenshot with fresh SoM labels. Use browser_tabs first to learn "
+    "the index→url mapping."
+)
+
+
+class _BrowserSwitchTabArgs(BaseModel):
+    index: int = Field(0, description="0-based tab index (see browser_tabs)")
+
+
+def _browser_switch_tab_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(index: int = 0) -> str:
+        return _sb_post(exec_client, "/switch_tab", {"index": index})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_switch_tab", description=_BROWSER_SWITCH_TAB_DESC,
+        args_schema=_BrowserSwitchTabArgs, func=_run,
+    )
+
+
+_BROWSER_CLOSE_TAB_DESC = (
+    "Close the current browser tab and switch to the last remaining one (the "
+    "engine refuses to close the final tab). Returns the now-active tab's "
+    "labeled screenshot. Use to clean up after browser_new_tab."
+)
+
+
+def _browser_close_tab_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run() -> str:
+        return _sb_post(exec_client, "/close_tab", {})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_close_tab", description=_BROWSER_CLOSE_TAB_DESC,
+        args_schema=_NoArgs, func=_run,
+    )
+
+
+_BROWSER_DROPDOWN_OPTIONS_DESC = (
+    "Read the options of a <select> dropdown. Identify the select element by SoM "
+    "label (index) or CSS selector. Returns {selector, options, multiple, "
+    "selected_count}. Call BEFORE browser_select_dropdown to learn the available "
+    "option values and visible text."
+)
+
+
+class _BrowserDropdownOptionsArgs(BaseModel):
+    index: int | None = Field(None, description="SoM label of the <select> element")
+    selector: str | None = Field(None, description="CSS selector of the <select> element")
+
+
+def _browser_dropdown_options_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(index: int | None = None, selector: str | None = None) -> str:
+        if index is None and not selector:
+            return _result({"success": False, "error": "either index or selector is required"})
+        body: dict = {}
+        if index is not None:
+            body["index"] = index
+        if selector is not None:
+            body["selector"] = selector
+        return _sb_post(exec_client, "/dropdown_options", body)
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_dropdown_options", description=_BROWSER_DROPDOWN_OPTIONS_DESC,
+        args_schema=_BrowserDropdownOptionsArgs, func=_run,
+    )
+
+
+_BROWSER_SELECT_DROPDOWN_DESC = (
+    "Choose an option in a <select> dropdown. Identify the select by SoM label "
+    "(index) or CSS selector, then specify the option by its value attribute OR "
+    "its visible text (exactly one). Returns the post-selection labeled "
+    "screenshot. Use browser_dropdown_options first to discover the right value "
+    "or text."
+)
+
+
+class _BrowserSelectDropdownArgs(BaseModel):
+    index: int | None = Field(None, description="SoM label of the <select> element")
+    selector: str | None = Field(None, description="CSS selector of the <select> element")
+    value: str | None = Field(None, description="value attribute of the option to select (use XOR with text)")
+    text: str | None = Field(None, description="Visible text of the option to select (use XOR with value)")
+
+
+def _browser_select_dropdown_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(index: int | None = None, selector: str | None = None,
+             value: str | None = None, text: str | None = None) -> str:
+        if index is None and not selector:
+            return _result({"success": False, "error": "either index or selector is required"})
+        if value is None and text is None:
+            return _result({"success": False, "error": "either value or text is required"})
+        body: dict = {}
+        if index is not None:
+            body["index"] = index
+        if selector is not None:
+            body["selector"] = selector
+        if value is not None:
+            body["value"] = value
+        if text is not None:
+            body["text"] = text
+        return _sb_post(exec_client, "/select_dropdown", body)
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_select_dropdown", description=_BROWSER_SELECT_DROPDOWN_DESC,
+        args_schema=_BrowserSelectDropdownArgs, func=_run,
+    )
+
+
+_BROWSER_SAVE_SESSION_DESC = (
+    "Save the current browser session (cookies + localStorage) to a JSON file "
+    "(default /tmp/browser-session.json). Returns {saved, path, cookies, "
+    "storage_items}. Call AFTER logging into an auth-heavy site so a later run "
+    "can browser_restore_session without re-authenticating."
+)
+
+
+class _BrowserSaveSessionArgs(BaseModel):
+    path: str = Field("/tmp/browser-session.json", description="Absolute sandbox path to write the session JSON")
+
+
+def _browser_save_session_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(path: str = "/tmp/browser-session.json") -> str:
+        return _sb_post(exec_client, "/save_session", {"path": path})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_save_session", description=_BROWSER_SAVE_SESSION_DESC,
+        args_schema=_BrowserSaveSessionArgs, func=_run,
+    )
+
+
+_BROWSER_RESTORE_SESSION_DESC = (
+    "Restore a previously-saved browser session (cookies + localStorage) from a "
+    "JSON file (default /tmp/browser-session.json). Returns {restored, path, "
+    "cookies, storage_items}. Call right after browser_navigate to the site's "
+    "domain, BEFORE other actions, to reuse saved auth."
+)
+
+
+class _BrowserRestoreSessionArgs(BaseModel):
+    path: str = Field("/tmp/browser-session.json", description="Absolute sandbox path of a session JSON written by browser_save_session")
+
+
+def _browser_restore_session_tool(exec_client: DockerExecClient) -> StructuredTool:
+    def _run(path: str = "/tmp/browser-session.json") -> str:
+        return _sb_post(exec_client, "/restore_session", {"path": path})
+
+    return StructuredTool(
+        name=PUX_PREFIX + "browser_restore_session", description=_BROWSER_RESTORE_SESSION_DESC,
+        args_schema=_BrowserRestoreSessionArgs, func=_run,
+    )
+
+
 # --- desktop (8f) — X11 desktop via xdotool + desktop_observe.py ------------
 
 _DISPLAY_ENV = "DISPLAY=:99"  # the sandbox's Xvfb display; prefixed on every xdotool cmd
@@ -834,6 +1261,24 @@ def build_native_specialists(
         _browser_type_tool(exec_client),
         _browser_screenshot_tool(exec_client),
         _browser_evaluate_tool(exec_client),
+        _browser_search_tool(exec_client),
+        _browser_scroll_tool(exec_client),
+        _browser_go_back_tool(exec_client),
+        _browser_wait_tool(exec_client),
+        _browser_find_text_tool(exec_client),
+        _browser_extract_tool(exec_client),
+        _browser_extract_images_tool(exec_client),
+        _browser_save_screenshot_tool(exec_client),
+        _browser_download_tool(exec_client),
+        _browser_upload_tool(exec_client),
+        _browser_tabs_tool(exec_client),
+        _browser_new_tab_tool(exec_client),
+        _browser_switch_tab_tool(exec_client),
+        _browser_close_tab_tool(exec_client),
+        _browser_dropdown_options_tool(exec_client),
+        _browser_select_dropdown_tool(exec_client),
+        _browser_save_session_tool(exec_client),
+        _browser_restore_session_tool(exec_client),
         _desktop_screenshot_tool(exec_client),
         _desktop_click_tool(exec_client),
         _desktop_type_tool(exec_client),

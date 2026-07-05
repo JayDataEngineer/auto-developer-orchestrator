@@ -1,1 +1,1 @@
-agents: [researcher]
+agents: [researcher, browser]

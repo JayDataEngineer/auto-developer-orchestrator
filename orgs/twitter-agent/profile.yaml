@@ -1,0 +1,20 @@
+# Optional per-org harness profile (Phase 16.3b). Applied to the deepagents
+# stack the harness compiles for this org — org-wide: the CTO system prompt AND
+# every specialist subagent (so the shared browser agent inherits it too). See
+# harness/pux_harness/agent/profile.py for the schema + the why-not-registry
+# rationale, and AGENTS.md for the field reference.
+
+# Appended to the assembled CTO prompt + each subagent's system prompt.
+system_prompt_suffix: |
+  When drafting tweets, always save as a draft — never publish directly. Prefer
+  the logged-in x.com session (browser_save_session after login) over
+  re-authenticating each run.
+
+# Rewrite a specialist tool's description (keyed by its full pux_sandbox_* name).
+# Use this to nudge how the model calls a tool in THIS org's context.
+tool_description_overrides:
+  pux_sandbox_browser_save_session: "Persist the logged-in x.com session to the given /tmp path so the next run can browser_restore_session it without re-login."
+
+# Specialist tools to drop from this org's stack entirely (full pux_sandbox_*
+# names). Empty here — listed for completeness.
+excluded_tools: []

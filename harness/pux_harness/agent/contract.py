@@ -50,6 +50,7 @@ from typing import Any
 import yaml
 
 from pux_harness.sandbox import policy as policy_mod
+from pux_harness.agent import profile as profile_mod
 from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
 from pux_harness.agent.orgs import (
     PROJECT_ROOT,
@@ -249,6 +250,18 @@ def check_org(name: str) -> list[Violation]:
             v.append(Violation("error", "policy-shape",
                                f"{name}: policy.yaml top-level must be a "
                                f"mapping, got {type(parsed).__name__}"))
+
+    # Phase 16.3b: optional per-org harness profile. Off by default — most orgs
+    # ship none. If present, it must parse into HarnessProfileConfig (unknown
+    # keys -> TypeError; bad shapes -> TypeError; bad excluded_middleware
+    # grammar -> ValueError). Offline; no model/Docker.
+    profile_path = org_dir / "profile.yaml"
+    if profile_path.is_file():
+        try:
+            profile_mod.validate_profile(name)
+        except (TypeError, ValueError, yaml.YAMLError) as exc:
+            v.append(Violation("error", "profile-schema",
+                               f"{name}: profile.yaml invalid: {exc}"))
 
     return v
 

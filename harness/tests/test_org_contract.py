@@ -33,6 +33,7 @@ from pux_harness.agent.contract import (
     discover_orgs,
     orphan_agents,
 )
+from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
 
 
 # --- the green gate ------------------------------------------------------
@@ -539,3 +540,73 @@ def test_jobs_validator_valid_spec_passes(fake_tree, tmp_path):
     vs = check_org("cookbook")
     job_vs = [v for v in vs if v.rule.startswith("jobs")]
     assert not job_vs, f"unexpected job violations: {job_vs}"
+
+
+# --- Phase 16: browser agent + per-org profile ---------------------------
+
+def test_browser_agent_resolves_from_shared_on_real_repo():
+    """The shipped browser agent (orgs/_shared/agents/browser.md) is rostered by
+    `general` + `_demo`, resolves from `_shared`, and its full whitelist passes
+    rule 4 (every slug is a registered specialist or native fs tool)."""
+    for org in ("general", "_demo"):
+        vs = check_org(org)
+        # No structural violations (the green gate already parametrizes this,
+        # but this pins the browser addition explicitly).
+        assert vs == [], f"{org}: {vs}"
+        roster = orgs.org_agent_slugs(org)
+        assert "browser" in roster, f"{org} does not roster browser"
+
+
+def test_new_browser_slugs_are_registered_specialists():
+    """Every Phase-16 browser slug is in SPECIALIST_TOOL_NAMES (rule 4b valid)
+    — the agent whitelist would otherwise fail to resolve."""
+    new_slugs = [
+        "browser_search", "browser_scroll", "browser_go_back", "browser_wait",
+        "browser_find_text", "browser_extract", "browser_extract_images",
+        "browser_save_screenshot", "browser_download", "browser_upload",
+        "browser_tabs", "browser_new_tab", "browser_switch_tab",
+        "browser_close_tab", "browser_dropdown_options",
+        "browser_select_dropdown", "browser_save_session",
+        "browser_restore_session",
+    ]
+    for slug in new_slugs:
+        key = "pux_sandbox_" + slug
+        assert key in SPECIALIST_TOOL_NAMES, f"{key} not registered"
+
+
+def test_profile_yaml_valid_no_violation(fake_tree):
+    """A well-formed optional profile.yaml produces no contract violation."""
+    add_org, _ = fake_tree
+    add_org("o")
+    (contract._orgs_dir() / "o" / "profile.yaml").write_text(
+        "system_prompt_suffix: 'be concise'\n"
+        "tool_description_overrides:\n"
+        "  pux_sandbox_python: 'run python code'\n"
+        "excluded_tools: []\n"
+    )
+    vs = check_org("o")
+    assert not any(v.rule == "profile-schema" for v in vs), vs
+
+
+def test_profile_yaml_unknown_key_reports_violation(fake_tree):
+    """An unknown key in profile.yaml fails --check-contract (profile-schema)."""
+    add_org, _ = fake_tree
+    add_org("o")
+    (contract._orgs_dir() / "o" / "profile.yaml").write_text(
+        "bogus_field: 1\n"
+    )
+    vs = check_org("o")
+    assert any(v.rule == "profile-schema" and "Unknown keys" in v.message
+               for v in vs), vs
+
+
+def test_profile_yaml_non_mapping_reports_violation(fake_tree):
+    """A non-mapping top level in profile.yaml fails --check-contract."""
+    add_org, _ = fake_tree
+    add_org("o")
+    (contract._orgs_dir() / "o" / "profile.yaml").write_text(
+        "- just\n- a\n- list\n"
+    )
+    vs = check_org("o")
+    assert any(v.rule == "profile-schema" and "mapping" in v.message
+               for v in vs), vs
