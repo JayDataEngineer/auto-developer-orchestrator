@@ -90,7 +90,7 @@ def test_execute_no_rubric_for_ungated_org(monkeypatch):
 def _stub_run_deps(monkeypatch, graph: _CapturingGraph) -> None:
     """Stub _run's heavy deps: skip the graph build, the prep jobs, and Docker."""
     backend = types.SimpleNamespace(execute_log=[])
-    monkeypatch.setattr(main, "_build_agent", lambda org: (graph, backend))
+    monkeypatch.setattr(main, "_build_agent", lambda org, mcp_tools=None: (graph, backend))
     monkeypatch.setattr(main, "shared_exec", lambda: None)
     # `_run` does `from pux_harness.sandbox.container import prepare` at call
     # time, so patching the module attr is what reaches it.

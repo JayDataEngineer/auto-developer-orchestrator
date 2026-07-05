@@ -205,7 +205,7 @@ def test_run_wires_prepare_to_shared_exec(monkeypatch):
 
     fake_agent = SimpleNamespace(ainvoke=_fake_ainvoke)
     fake_backend = SimpleNamespace(execute_log=[])
-    monkeypatch.setattr(main, "_build_agent", lambda org: (fake_agent, fake_backend))
+    monkeypatch.setattr(main, "_build_agent", lambda org, mcp_tools=None: (fake_agent, fake_backend))
     monkeypatch.setattr(main, "shared_exec", lambda: sentinel)
 
     seen: dict = {}
