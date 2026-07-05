@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import random
 import shlex
+import time
 
 from pydantic import BaseModel, Field
 
@@ -16,11 +19,25 @@ from pux_harness.sandbox.tools._shared import PUX_PREFIX, _tail, _result, _NoArg
 _SB_SERVER_ADDR = "http://127.0.0.1:9876"
 _BROWSER_TIMEOUT = 60
 
+# Human-like pacing: random delay before each browser tool call so the
+# action cadence looks natural to antibot services. 250-700ms mimics
+# human reaction lag. Set PUX_BROWSER_MIN_PACING=0 to disable.
+_PACING_MIN_MS = int(os.environ.get("PUX_BROWSER_MIN_PACING", "250"))
+_PACING_MAX_MS = int(os.environ.get("PUX_BROWSER_MAX_PACING", "700"))
+
+
+def _pace():
+    """Sleep a random human-like amount before each browser tool call."""
+    if _PACING_MIN_MS > 0:
+        delay = random.uniform(_PACING_MIN_MS / 1000.0, _PACING_MAX_MS / 1000.0)
+        time.sleep(delay)
+
 
 def _sb_post(exec_client: DockerExecClient, endpoint: str, body_obj: dict | None,
              *, timeout: int = _BROWSER_TIMEOUT) -> str:
     """POST ``body_obj`` to the in-sandbox sb_server.py endpoint, return the
     parsed JSON re-serialized via ``_result``."""
+    _pace()
     max_time = max(1, timeout)
     parts = [
         "curl -s -S",
@@ -889,27 +906,36 @@ def _browser_a11y_tool(exec_client: DockerExecClient) -> StructuredTool:
 # --- iframe -----------------------------------------------------------------
 
 _BROWSER_IFRAME_DESC = (
-    "Traverse into and out of <iframe> elements on the current page. Many sites "
-    "embed CAPTCHAs, payment forms, rich-text editors, and third-party widgets "
-    "in iframes — their contents are invisible to browser_click/type until you "
-    "enter the frame. action='list' enumerates iframes (index/name/id/src/title); "
-    "action='enter' switches INTO a frame identified by SoM index or CSS "
-    "selector (subsequent browser_* calls then target the frame's contents); "
-    "action='exit' returns to the top-level page. Returns a labeled screenshot."
+    "Act on elements inside <iframe>s on the current page. Many sites embed "
+    "CAPTCHAs, payment forms, rich-text editors, and widgets in iframes — their "
+    "contents are invisible to browser_click/type on the top page. "
+    "action='list' enumerates iframes (index/name/id/src). "
+    "action='click' clicks an element INSIDE a same-origin iframe: pass the "
+    "iframe as index/selector and inner_selector for the in-frame target. "
+    "action='evaluate' runs JS inside a same-origin iframe (pass code). "
+    "Cross-origin iframes are blocked by same-origin policy — the tool returns a "
+    "clear error for those (they need provider-level handling). The legacy "
+    "'enter'/'exit' frame-switch actions are RETIRED (CDP has no global frame "
+    "context like WebDriver's switch_to); use 'click'/'evaluate' instead."
 )
 
 
 class _BrowserIframeArgs(BaseModel):
-    action: str = Field("list", description="'list' | 'enter' | 'exit'")
-    index: int | None = Field(None, description="SoM label of the iframe (action='enter')")
-    selector: str | None = Field(None, description="CSS selector of the iframe (action='enter')")
+    action: str = Field("list", description="'list' | 'click' | 'evaluate' (legacy 'enter'/'exit' retired)")
+    index: int | None = Field(None, description="SoM label of the iframe element")
+    selector: str | None = Field(None, description="CSS selector of the iframe element")
+    inner_selector: str | None = Field(None, description="action='click': CSS selector inside the iframe of the element to click")
+    code: str | None = Field(None, description="action='evaluate': JS to run inside the iframe (use 'return' for a value)")
 
 
 def _browser_iframe_tool(exec_client: DockerExecClient) -> StructuredTool:
-    def _run(action: str = "list", index: int | None = None, selector: str | None = None) -> str:
+    def _run(action: str = "list", index: int | None = None, selector: str | None = None,
+             inner_selector: str | None = None, code: str | None = None) -> str:
         body: dict = {"action": action}
         if index is not None: body["index"] = index
         if selector: body["selector"] = selector
+        if inner_selector: body["inner_selector"] = inner_selector
+        if code: body["code"] = code
         return _sb_post(exec_client, "/iframe", body)
 
     return StructuredTool(
