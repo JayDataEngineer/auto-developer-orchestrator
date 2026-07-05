@@ -177,7 +177,10 @@ except ImportError:
 
 def _get_graph(org: str) -> CompiledStateGraph:
     if org not in app.state.graphs:
-        app.state.graphs[org] = build_graph(org, checkpointer=app.state.saver)
+        # Pass an InMemoryStore so MemoryMiddleware has a working backend.
+        from langgraph.store.memory import InMemoryStore  # noqa: PLC0415
+        store = InMemoryStore()
+        app.state.graphs[org] = build_graph(org, checkpointer=app.state.saver, store=store)
     return app.state.graphs[org]
 
 
