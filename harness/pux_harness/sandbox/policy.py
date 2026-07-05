@@ -141,6 +141,7 @@ class SandboxSpec:
 @dataclass
 class BrowserSpec:
     cookies_env: str = ""
+    proxy: str = ""
 
 
 @dataclass
@@ -257,7 +258,10 @@ def _policy_from_dict(d: Mapping) -> Policy:
         build=build,
     )
     br = _section("browser")
-    pol.browser = BrowserSpec(cookies_env=str(br.get("cookies_env", "") or ""))
+    pol.browser = BrowserSpec(
+        cookies_env=str(br.get("cookies_env", "") or ""),
+        proxy=str(br.get("proxy", "") or ""),
+    )
     # host_setup: a list of host-side prep hooks (run before create(), produce
     # env exports that flow through credentials/cookies unchanged). Absent or
     # empty -> no hooks (today's behavior).
@@ -386,6 +390,8 @@ def env_vars(p: Policy | None, env: Mapping[str, str] | None = None) -> list[str
         if v:
             out.append(f"{p.browser.cookies_env}={v}")
             out.append(f"SEED_COOKIES_ENV={p.browser.cookies_env}")
+    if p.browser.proxy:
+        out.append(f"SB_SERVER_PROXY={p.browser.proxy}")
     return out
 
 

@@ -294,6 +294,8 @@ def _check_policy(org: str) -> int:
     if p.browser.cookies_env:
         state = "set" if os.environ.get(p.browser.cookies_env, "") else "UNSET"
         print(f"browser.cookies_env: {p.browser.cookies_env} ({state})")
+    if p.browser.proxy:
+        print(f"browser.proxy: {p.browser.proxy}")
 
     return 1 if missing else 0
 
