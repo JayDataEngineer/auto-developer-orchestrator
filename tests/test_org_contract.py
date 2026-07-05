@@ -68,7 +68,7 @@ def test_every_org_has_a_forcing_task():
     forcing task per org. Every discovered org must have a DEFAULT_TASKS entry —
     a missing entry would make ``--org <name>`` fail with a KeyError instead of
     running. (Phase 5: all 10 orgs ported to RUN on deepagents.)"""
-    from pux_harness.main import DEFAULT_TASKS
+    from tests.integration.default_tasks import DEFAULT_TASKS
 
     missing = set(discover_orgs()) - set(DEFAULT_TASKS)
     assert not missing, f"orgs without a DEFAULT_TASKS forcing task: {missing}"

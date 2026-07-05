@@ -2,8 +2,7 @@
 
   uv run python -m pux_harness.main --list                       # discovered orgs + agents
   uv run python -m pux_harness.main --check                      # docker-exec + native specialist smoke (no tokens)
-  uv run python -m pux_harness.main --org general                # default forcing task
-  uv run python -m pux_harness.main --org dev-bot --task "..."   # custom task
+  uv run python -m pux_harness.main --org general --task "..."   # one-shot run
 
 Proves per-org: deepagents drives the pux sandbox through ``PuxSandboxBackend``
 (native ``ls/read_file/write_file/edit_file/glob/grep/execute`` via docker
@@ -38,81 +37,7 @@ from pux_harness.agent.orgs import (
 )
 from pux_harness.sandbox.backend import PuxSandboxBackend
 
-# Per-org default forcing tasks. Each is UN-answerable from the system prompt
-# alone, so the agent must delegate to its specialist — the seam we're proving.
-# Tasks name the NATIVE `execute` tool (Phase 3); `pux_sandbox_bash` is gone.
-DEFAULT_TASKS: dict[str, str] = {
-    "general": (
-        "How many Python modules ship under /sandbox/workspace/harness/pux_harness/, "
-        "and what are their names? Delegate to the `researcher` subagent — do NOT "
-        "inspect the codebase yourself. Have it run, via the native `execute` tool: "
-        "`find /sandbox/workspace/harness/pux_harness -name '*.py'`. "
-        "Report the researcher's findings verbatim."
-    ),
-    "_demo": (
-        "List the top-level entries of the project root inside the sandbox. Delegate "
-        "to the `researcher` subagent — do NOT run tools yourself. Have it use the "
-        "native `execute` tool: `ls -1 /sandbox/workspace`. Report its findings verbatim."
-    ),
-    # `go` is not installed in the pux-sandbox image, so we exercise the
-    # read-only explorer specialist rather than the tester's run-tests path.
-    "dev-bot": (
-        "What does the dev-bot sample Go package export? Delegate to the "
-        "`dev-bot-explorer` subagent — do NOT inspect the code yourself. The package "
-        "is under /sandbox/workspace/orgs/dev-bot/. Have the explorer find every "
-        "exported identifier (names starting with an uppercase letter) and report "
-        "each with a file:line citation. Report its findings verbatim."
-    ),
-    # --- Phase 5: the remaining 7 orgs. Each forces delegation to a named
-    # specialist and drives a NATIVE tool against the org's OWN bundled content
-    # (no external keys/images needed). Answers are verifiable against the FS.
-    "invest": (
-        "How many Python modules are under /sandbox/workspace/orgs/invest/sandbox/? "
-        "Delegate to the `invest-researcher` subagent — do NOT inspect the code "
-        "yourself. Have it run, via the native `execute` tool: "
-        "`find /sandbox/workspace/orgs/invest/sandbox -name '*.py'`. "
-        "Report the count and the module filenames verbatim."
-    ),
-    "game-studio": (
-        "What playbook markdown docs ship under /sandbox/workspace/orgs/game-studio/skills/? "
-        "Delegate to the `game-studio-docs-writer` subagent — do NOT look yourself. "
-        "Have it use the native `glob` tool for "
-        "`/sandbox/workspace/orgs/game-studio/skills/*.md` and list each filename. "
-        "Report verbatim."
-    ),
-    "deep-research-engine": (
-        "How many Python modules are under /sandbox/workspace/orgs/deep-research-engine/sandbox/? "
-        "Delegate to the `dre-auditor` subagent — do NOT inspect yourself. Have it "
-        "run, via the native `execute` tool: "
-        "`find /sandbox/workspace/orgs/deep-research-engine/sandbox -name '*.py'`. "
-        "Report the count and module filenames verbatim."
-    ),
-    "social-media-pipeline": (
-        "Read the campaign-angles file at "
-        "/sandbox/workspace/orgs/social-media-pipeline/data/options.json. Delegate to "
-        "the `smp-writer` subagent — do NOT read it yourself. Have it use the native "
-        "`read_file` tool, then report how many angles there are and the id + angle "
-        "of each. Report verbatim."
-    ),
-    "twitter-agent": (
-        "What helper docs ship under /sandbox/workspace/orgs/twitter-agent/skills/? "
-        "Delegate to the `twitter-drafter` subagent — do NOT look yourself. Have it "
-        "use the native `glob` tool for `/sandbox/workspace/orgs/twitter-agent/skills/**`. "
-        "Report the filenames found."
-    ),
-    "telegram-agent": (
-        "Read the campaign file at /sandbox/workspace/orgs/telegram-agent/data/campaign.json. "
-        "Delegate to the `telegram-drafter` subagent — do NOT read it yourself. Have it "
-        "use the native `read_file` tool, then report how many messages the campaign "
-        "contains. Report the count verbatim."
-    ),
-    "video-production": (
-        "What ships under /sandbox/workspace/orgs/video-production/skills/? Delegate to "
-        "the `video-scriptwriter` subagent — do NOT look yourself. Have it use the "
-        "native `execute` tool: `ls -1 /sandbox/workspace/orgs/video-production/skills`. "
-        "Report the entries verbatim."
-    ),
-}
+
 
 
 def _build_agent(org: str):
@@ -449,7 +374,7 @@ def _check_contract() -> int:
 def main() -> None:
     ap = argparse.ArgumentParser(description="deepagents Pux harness")
     ap.add_argument("--org", default="general", help="org to run (default: general)")
-    ap.add_argument("--task", help="task string (default: per-org forcing task)")
+    ap.add_argument("--task", help="task string (required when running an agent)")
     ap.add_argument("--rubric", default=None,
                     help="override the org's shipped rubric (arms the RubricMiddleware "
                          "verify-gate for an opted-in org). Default: the org's "
@@ -510,8 +435,12 @@ def main() -> None:
         print(f"  backend.ls: {len(ls.entries or [])} entries, error={ls.error}")
         return
 
-    task = args.task or DEFAULT_TASKS[args.org]
-    asyncio.run(_run(args.org, task, args.recursion_limit, rubric=args.rubric))
+    if not args.task:
+        raise SystemExit(
+            f"--task is required for --org {args.org}. "
+            f"See tests/integration/default_tasks.py for per-org forcing tasks."
+        )
+    asyncio.run(_run(args.org, args.task, args.recursion_limit, rubric=args.rubric))
 
 
 if __name__ == "__main__":

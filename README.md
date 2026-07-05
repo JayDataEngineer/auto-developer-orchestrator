@@ -45,7 +45,7 @@ pux dispatch --org general "describe this project"   # one-shot run
 pux resume                         # list recent threads
 
 # No server? In-process runner for dev:
-pux direct --org general           # runs the graph directly, no HTTP
+pux direct --org general --task "describe this project"   # runs the graph directly, no HTTP
 ```
 
 The Agent Protocol server listens at `http://127.0.0.1:9988`; the `pux` client
@@ -57,7 +57,7 @@ harness drives the Docker sandbox directly over the SDK.
 | Subcommand | What it does |
 |------------|-------------|
 | `pux serve` | Start the Agent Protocol server (uvicorn on :9988). |
-| `pux direct --org <name> [--task "..."]` | In-process runner — no server. The verify/dev path. |
+| `pux direct --org <name> --task "..."` | In-process runner — no server. The verify/dev path. |
 | `pux sandbox <start\|stop\|status\|ensure>` | Docker sandbox lifecycle (harness-owned, 8g). Replaces the old `task start/stop/status`. |
 | `pux agents` | List orgs as Agent Protocol agents (+ their specialists). |
 | `pux dispatch --org <name> "task"` | Ephemeral blocking run; prints the answer + a resumable `thread_id`. |
@@ -155,8 +155,7 @@ cd harness && uv run pytest -q          # 260 tests: org contract + browser/prof
 
 The server tests use FastAPI's `TestClient` with a stub graph (no tokens, no
 Docker) to lock the REST envelope + thread/run CRUD; the real LLM-driven run
-is proven end-to-end in the Phase 8i verify log (`pux direct --org general`
-with no Go binary → 15 harness modules via the researcher subagent).
+is proven end-to-end in the Phase 8i verify log (`pux direct --org general --task "..."`).
 
 ## Architecture
 

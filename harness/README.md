@@ -53,8 +53,8 @@ cd harness && uv sync
 uv run python -m pux_harness.main --check
 # 3. validate all 10 orgs against the declarative contract (offline)
 uv run python -m pux_harness.main --check-contract
-# 4. full in-process run (general's forcing task via researcher subagent)
-set -a && . ../.env && set +a && uv run python -m pux_harness.main
+# 4. full in-process run (requires --task; see tests/integration/default_tasks.py for forcing tasks)
+set -a && . ../.env && set +a && uv run python -m pux_harness.main --org general --task "How many Python modules ship under /sandbox/workspace/harness/pux_harness/?"
 #    (mimo exhausts on rate limits; use PUX_MODEL=glm-5.2 if so)
 ```
 
