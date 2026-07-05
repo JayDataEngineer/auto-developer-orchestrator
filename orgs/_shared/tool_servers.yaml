@@ -1,0 +1,17 @@
+# Shared catalog of foreign MCP tool servers.
+# Schema: {name: {kind, transport, url (sse/http) or command (stdio),
+#                headers?, tools? (allowlist), credentials?}}
+#
+# An org opts in via policy.yaml tool_servers: [name, ...] and may narrow
+# tools: per entry. See harness/docs/tool_servers.md for the full spec.
+
+web_research:
+  kind: mcp
+  transport: http
+  url: https://cloud.tailb1e597.ts.net:10000/research/mcp
+  tools: [search, fetch, research]
+
+media:
+  kind: mcp
+  transport: sse
+  url: http://100.86.69.57:8101

@@ -42,6 +42,7 @@ backend/tmp/
 # Runtime data
 data/
 **/.pux/
+.deepagents/
 
 # Org runtime data (5G+ of model weights, venvs, parsed dumps, memos).
 # Org *templates* ship as AGENTS.md + agents/<slug>.md + skills/ + sandbox/ —
@@ -66,6 +67,7 @@ orgs/*/*
 !orgs/*/policy.yaml
 !orgs/*/org.yaml
 !orgs/*/profile.yaml
+!orgs/*/tool_servers.yaml
 !orgs/*/skills/
 !orgs/*/sandbox/
 !orgs/*/agents/
