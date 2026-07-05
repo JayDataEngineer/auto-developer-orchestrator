@@ -5,7 +5,7 @@
 //   last updated
 
 import { useCallback, useEffect, useState, type FC } from "react";
-import { getThread } from "../../../server/agent-protocol";
+import { getThread } from "@/lib/api.ts";
 
 interface MetricsFooterProps {
   threadId: string | null;

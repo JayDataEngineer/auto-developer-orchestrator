@@ -11,7 +11,7 @@ export default defineConfig({
   root: here,
   resolve: {
     alias: { "@": resolve(here, "src") },
-    dedupe: ["react", "react-dom", "@assistant-ui/react", "@assistant-ui/react-pi"],
+    dedupe: ["react", "react-dom"],
   },
   server: {
     port: 5176,

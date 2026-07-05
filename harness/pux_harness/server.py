@@ -143,6 +143,20 @@ async def lifespan(app: FastAPI):
         app.state.graphs: dict[str, CompiledStateGraph] = {}
         app.state.runs: dict[str, asyncio.Task] = {}
         app.state.run_meta: dict[str, dict[str, Any]] = {}
+
+        # Register AG-UI endpoints now that the checkpointer is ready.
+        if _HAS_AG_UI:
+            for org_name in discover_orgs():
+                add_langgraph_fastapi_endpoint(
+                    app=app,
+                    agent=LangGraphAGUIAgent(
+                        name=org_name,
+                        description=f"Pux org '{org_name}'",
+                        graph=_get_graph(org_name),
+                    ),
+                    path=f"/agui/{org_name}",
+                )
+
         try:
             yield
         finally:
@@ -151,49 +165,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Pux Agent Protocol", version="0.1.0", lifespan=lifespan)
 
-# ── AG-UI endpoint for CopilotKit ───────────────────────────────────────────
-# Exposes each org as an AG-UI agent so the CopilotKit frontend can connect
-# via LangGraphHttpAgent. The endpoint lives at /agui/<org_name>.
-
+# ── AG-UI support (lazy import, registered after lifespan starts) ─────────────
+_HAS_AG_UI = False
 try:
-    from ag_ui_langgraph import add_langgraph_fastapi_endpoint
-    from copilotkit import LangGraphAGUIAgent
-
-    def _register_agui_endpoints() -> None:
-        """Lazily register AG-UI endpoints for each discovered org."""
-        for org_name in discover_orgs():
-            # Each org gets its own graph lazily built on first access.
-            def _make_endpoint(org: str):
-                async def _get_graph():
-                    return _get_graph(org)
-                return _get_graph
-
-            add_langgraph_fastapi_endpoint(
-                app=app,
-                agent=LangGraphAGUIAgent(
-                    name=org_name,
-                    description=f"Pux org '{org_name}'",
-                    graph=_get_graph(org_name),
-                ),
-                path=f"/agui/{org_name}",
-            )
-
-    # Register at import time — orgs are discovered from the filesystem.
-    _register_agui_endpoints()
-except ImportError:
-    # ag-ui-langgraph or copilotkit not installed — AG-UI endpoints unavailable.
-    # The Agent Protocol endpoints still work fine.
-    pass
-
-# ── AG-UI endpoint for CopilotKit ──────────────────────────────────────────
-# Registered lazily after lifespan setup so the checkpointer is available.
-# Each org gets its own AG-UI path: /agents/<org>/ag-ui
-try:
-    from ag_ui_langgraph import add_langgraph_fastapi_endpoint
-    from copilotkit import LangGraphAGUIAgent
+    from ag_ui_langgraph import add_langgraph_fastapi_endpoint  # noqa: F401
+    from copilotkit import LangGraphAGUIAgent  # noqa: F401
     _HAS_AG_UI = True
 except ImportError:
-    _HAS_AG_UI = False
+    pass
 
 
 def _get_graph(org: str) -> CompiledStateGraph:
