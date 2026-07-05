@@ -1,18 +1,6 @@
 """The harness owns the Docker sandbox lifecycle (Phase 8g create/stop;
 Phase 13 host_setup + image build).
 
-A faithful 1:1 port of the Go binary's CLI-mode container lifecycle —
-``backend/cmd/mcpserver/main.go::runRun`` → ``sandbox.Manager.CreateSandbox``
-+ ``DestroySandbox`` — restricted to the slice deepagents actually exercises.
-The Go paths that are NOT ported carry nothing the harness needs:
-
-  - desktop sessions / port allocator / VNC / browser-mode-enable — the native
-    browser/desktop tools (``native_tools.py``) curl to the in-sandbox
-    ``sb_server.py`` / ``xdotool`` directly; the harness never calls
-    ``EnableBrowserMode``/``EnableDesktopMode``.
-  - ``CopyToSandbox``/``PipInstall``/``WriteEnvFile`` — the harness has native
-    ``write_file`` / ``execute`` equivalents.
-
 Phase 13 extended ``create()`` with two pre-Docker steps run BEFORE the live
 container is created: ``host_setup`` hooks run on the host first
 (``sandbox/host_setup.py`` — cached uv venv at ``<project>/.pux/venvs/<name>/``,

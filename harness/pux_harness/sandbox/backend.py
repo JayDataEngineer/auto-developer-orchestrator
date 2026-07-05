@@ -7,31 +7,11 @@ The inherited ``ls/read/write/edit/grep/glob`` (and all ``a*`` async variants)
 run small ``python3``/``grep`` scripts *through our* ``execute()``, so they work
 the moment ``execute()`` does.
 
-Phase 8a retargeted ``execute()`` from the Go MCP ``bash`` tool to a **direct
-``docker exec``** (``DockerExecClient``) — the same moby ``Exec`` the Go binary
-used, just called from Python. No JSON-RPC hop, no Go middleman, no
-``{"output": "..."}`` envelope to unwrap (the MCP-specific ``_content_text`` /
-``_unwrap`` helpers are gone). The inherited ``_build_*_cmd`` scripts run
-unchanged — they only ever cared about ``execute()``'s shell output, which is
-byte-identical to what the Go path produced (verified 2026-07-03).
-
-Why one ``execute()`` path for everything (incl. upload/download): the sandbox
-container ships ``python3`` + ``base64`` (it backs the ``python`` tool +
-``describe_image.py``). Moving bytes as base64 through that same path handles
-text **and** binary uniformly. ``upload_files``/``download_files`` are invoked
-by the skills/summarization/memory middleware (not just abstract baggage), so
-they must be real.
-
 The 13 specialist tools (``python``/``browser_*``/``desktop_*``/
-``describe_image``/skills) are also native Python now (``native_tools.py``,
-Phases 8b–8f) and run through this same ``DockerExecClient``. There is no Go
-bridge — the backend (fs/shell) and the specialists are two Python surfaces
-over one ``docker exec`` path into the container.
-
-PROVEN 2026-07-03 (8a): against the live ``orchestrator-sandbox-mcp-default``
-container, ``DockerExecClient.exec('echo pux-ok')`` → ``('pux-ok\\n', 0)``;
-``backend.execute`` + inherited ``backend.ls('/sandbox/workspace')`` + ``backend.read``
-return correct structured results via direct docker exec (no MCP hop).
+``describe_image``/skills) are also native Python (``native_tools.py``)
+and run through this same ``DockerExecClient``. The backend (fs/shell) and
+the specialists are two Python surfaces over one ``docker exec`` path into
+the container.
 """
 from __future__ import annotations
 

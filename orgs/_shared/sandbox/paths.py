@@ -23,10 +23,6 @@ USAGE
         print(json.dumps({"error": f"no browser session at {session}"}))
         sys.exit(1)
 
-    # Twitter-specific legacy helpers also exist (twitter_cookies(), etc.)
-    # for back-compat with older bootstraps. Prefer browser_session(domain)
-    # for new code — it's domain-keyed, not site-branded.
-
 LAYOUT
 ------
 - ``/sandbox/<name>.py`` — backbone scripts (chmod 0444, git-tracked)
@@ -108,40 +104,22 @@ def browser_session(domain: str) -> Path:
 
 
 def browser_session_search(domain: str) -> list[Path]:
-    """Return candidate session paths in fallback order for the given domain.
+    """Return candidate session paths for the given domain.
 
-    Used by code that wants to gracefully accept either the new
-    domain-keyed location or an org-specific legacy file (e.g.
-    twitter_session.py reads .twitter-session.json before browser_session).
+    Returns a single-element list with the canonical session path.
     """
     return [
         browser_session(domain),
-        data_dir() / f".{domain.split('.')[0]}-session.json",  # legacy per-site
     ]
 
 
 # --------------------------------------------------------------------- #
-# Twitter session + artifacts (legacy — prefer browser_session("x.com"))
+# Twitter session + artifacts
 # --------------------------------------------------------------------- #
 
 def twitter_cookies() -> Path:
-    """Twitter session cookies JSON. Project-scoped via data_dir.
-
-    Canonical home is ``data_dir() / .twitter-session.json``. Bootstraps
-    that write directly to ``/sandbox/.twitter-session.json`` (legacy
-    in-container root) are still read via ``twitter_cookies_legacy()``.
-    """
+    """Twitter session cookies JSON. Project-scoped via data_dir."""
     return _env_path("PUX_TWITTER_COOKIES", data_dir() / ".twitter-session.json")
-
-
-def twitter_cookies_legacy() -> Path:
-    """Legacy in-container root for Twitter cookies.
-
-    Kept as a fallback chain candidate so old bootstrap outputs (VNC login,
-    --cookies-from-browser writing directly to /sandbox/) keep working
-    after the path refactor.
-    """
-    return _env_path("PUX_TWITTER_COOKIES_LEGACY", sandbox_root() / ".twitter-session.json")
 
 
 def twitter_calendar() -> Path:
@@ -149,19 +127,9 @@ def twitter_calendar() -> Path:
     return _env_path("PUX_TWITTER_CALENDAR", workspace_root() / "calendar.json")
 
 
-def twitter_calendar_legacy() -> Path:
-    """Legacy in-container root for the posting calendar."""
-    return _env_path("PUX_TWITTER_CALENDAR_LEGACY", sandbox_root() / "calendar.json")
-
-
 def twitter_drafts() -> Path:
     """Draft tweets JSON. Project-scoped via workspace_root."""
     return _env_path("PUX_TWITTER_DRAFTS", workspace_root() / "drafts.json")
-
-
-def twitter_drafts_legacy() -> Path:
-    """Legacy in-container root for draft tweets."""
-    return _env_path("PUX_TWITTER_DRAFTS_LEGACY", sandbox_root() / "drafts.json")
 
 
 # --------------------------------------------------------------------- #
@@ -173,19 +141,10 @@ def telegram_credentials() -> Path:
     return _env_path("PUX_TELEGRAM_CREDENTIALS", data_dir() / ".telegram-credentials.json")
 
 
-def telegram_credentials_legacy() -> Path:
-    """Legacy in-container root for Telegram credentials."""
-    return _env_path("PUX_TELEGRAM_CREDENTIALS_LEGACY", sandbox_root() / ".telegram-credentials.json")
-
-
 def telegram_session() -> Path:
     """Telethon SQLite session file (auth state)."""
     return _env_path("PUX_TELEGRAM_SESSION", data_dir() / ".telegram-session.session")
 
-
-def telegram_session_legacy() -> Path:
-    """Legacy in-container root for Telethon session."""
-    return _env_path("PUX_TELEGRAM_SESSION_LEGACY", sandbox_root() / ".telegram-session.session")
 
 
 # --------------------------------------------------------------------- #

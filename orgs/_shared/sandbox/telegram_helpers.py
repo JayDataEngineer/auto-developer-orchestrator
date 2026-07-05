@@ -8,7 +8,7 @@ no cleverness, full docstrings.
 
 Unlike twitter_helpers (which injects cookies into a SeleniumBase session),
 Telegram uses MTProto via Telethon. The session state lives in a SQLite
-file at /sandbox/.telegram-session.session — populated once by
+file at /sandbox/workspace/data/.telegram-session.session — populated once by
 `python3 /sandbox/session.py --bootstrap` and reused forever.
 
 Usage in agent scripts:
@@ -43,38 +43,10 @@ from typing import Generator, Optional
 
 try:
     from paths import telegram_credentials as _credentials_path
-    from paths import telegram_credentials_legacy as _credentials_legacy_path
     from paths import telegram_session as _session_path
-    from paths import telegram_session_legacy as _session_legacy_path
 except ImportError:
     _credentials_path = None
-    _credentials_legacy_path = None
     _session_path = None
-    _session_legacy_path = None
-
-
-def _resolve_credentials_path():
-    candidates = []
-    if _credentials_path is not None:
-        candidates.append(_credentials_path())
-    if _credentials_legacy_path is not None:
-        candidates.append(_credentials_legacy_path())
-    for p in candidates:
-        if p.exists() and p.stat().st_size > 0:
-            return p
-    return candidates[0] if candidates else None
-
-
-def _resolve_session_path():
-    candidates = []
-    if _session_path is not None:
-        candidates.append(_session_path())
-    if _session_legacy_path is not None:
-        candidates.append(_session_legacy_path())
-    for p in candidates:
-        if p.exists() and p.stat().st_size > 0:
-            return p
-    return candidates[0] if candidates else None
 
 
 def load_credentials() -> dict:
@@ -83,7 +55,7 @@ def load_credentials() -> dict:
     Raises RuntimeError if file is missing. Call session.py --setup-credentials
     first to populate it.
     """
-    p = _resolve_credentials_path()
+    p = _credentials_path()
     if p is None or not p.exists():
         raise RuntimeError(
             f"No Telegram credentials at {p}. "
@@ -101,8 +73,8 @@ def has_valid_session() -> bool:
 
     For a real liveness check, use session.py --check (calls get_me).
     """
-    sp = _resolve_session_path()
-    cp = _resolve_credentials_path()
+    sp = _session_path()
+    cp = _credentials_path()
     return (
         sp is not None
         and sp.exists()
@@ -136,8 +108,8 @@ def telegram_session():
         ) from e
 
     if not has_valid_session():
-        sp = _resolve_session_path()
-        cp = _resolve_credentials_path()
+        sp = _session_path()
+        cp = _credentials_path()
         raise RuntimeError(
             f"Session not ready. Files missing:\n"
             f"  credentials: {cp} ({'ok' if cp and cp.exists() else 'MISSING'})\n"
@@ -146,7 +118,7 @@ def telegram_session():
         )
 
     creds = load_credentials()
-    client = TelegramClient(str(_resolve_session_path()), creds["api_id"], creds["api_hash"])
+    client = TelegramClient(str(_session_path()), creds["api_id"], creds["api_hash"])
     client.connect()
     try:
         if not client.is_user_authorized():

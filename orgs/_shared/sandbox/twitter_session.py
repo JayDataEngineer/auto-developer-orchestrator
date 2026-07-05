@@ -30,39 +30,21 @@ from datetime import datetime
 
 try:
     from paths import twitter_cookies as _cookies_path
-    from paths import twitter_cookies_legacy as _cookies_legacy_path
 except ImportError:
     _cookies_path = None
-    _cookies_legacy_path = None
-
-
-def _resolve_cookies_path():
-    """Walk the candidate chain: canonical (data_dir) → legacy (in-container root).
-
-    Returns the first existing non-empty file. Falls back to the canonical
-    path for error messages when neither exists (so users see the right
-    "expected at <canonical>" hint).
-    """
-    candidates = []
-    if _cookies_path is not None:
-        candidates.append(_cookies_path())
-    if _cookies_legacy_path is not None:
-        candidates.append(_cookies_legacy_path())
-    for p in candidates:
-        if p.exists() and p.stat().st_size > 0:
-            return p
-    return candidates[0] if candidates else None
 
 
 def cookies_exist():
-    p = _resolve_cookies_path()
-    return p is not None and p.exists() and p.stat().st_size > 0
+    if _cookies_path is None:
+        return False
+    p = _cookies_path()
+    return p.exists() and p.stat().st_size > 0
 
 
 def load_cookies():
     if not cookies_exist():
         return None
-    with open(_resolve_cookies_path()) as f:
+    with open(_cookies_path()) as f:
         return json.load(f)
 
 
@@ -347,7 +329,7 @@ def main():
     elif args.info:
         data = load_cookies()
         if data:
-            print(f"Session file: {_resolve_cookies_path()}")
+            print(f"Session file: {_cookies_path()}")
             print(f"Saved at: {data.get('saved_at', 'unknown')}")
             print(f"Source: {data.get('source', 'interactive')}")
             cookies = data.get("cookies", [])

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-describe_image.py — vision inference backbone for pux-mcpserver.
+describe_image.py — vision inference backbone for pux.
 
 Backbone script (System A — read-only at runtime, ships with the sandbox
-image at /usr/local/bin/describe_image.py). The Go describe_image tool
-in backend/internal/mcpserver/vision_tool.go shells out to this script.
+image at /usr/local/bin/describe_image.py). Called by the ``pux_sandbox_
+describe_image`` specialist tool via ``docker exec``.
 
 Loads Qwen3.5-2B-ONNX-OPT (fp16 vision) from
 /sandbox/workspace/.pux/models/Qwen3.5-2B-ONNX-OPT/, runs inference on the
@@ -12,7 +12,7 @@ given image, prints the description as JSON to stdout. Errors go to stderr
 with a non-zero exit code.
 
 The model is OPTIONAL. If the model directory is missing or incomplete,
-the script exits 2 with a friendly stderr message — the Go tool translates
+the script exits 2 with a friendly stderr message — the harness translates
 that into a "vision unavailable, run scripts/bootstrap-vision.sh" result.
 
 Usage:

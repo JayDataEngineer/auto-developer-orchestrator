@@ -4,13 +4,10 @@ Each tool is a LangChain StructuredTool named ``pux_sandbox_<name>``. This
 module is the SINGLE source of specialists: ``graph.py`` calls
 ``build_native_specialists`` for every specialist, and the org contract
 resolves agent ``tools:`` whitelists against ``SPECIALIST_TOOL_NAMES`` below.
-These tools were first ported from the Go MCP bridge (Phases 8b–8f) and the
-bridge was deleted in 8i — there is no longer a Go surface these mirror.
 
-Result contract fidelity: each tool returns the SAME JSON the Go MCP server
-marshaled into its tool-call text blocks (verified against the live bridge
-during the port — e.g. ``list_skills`` returns ``{"skills": [...], "count": N}``
-indented 2), so the agent-visible output is byte-equivalent pre/post port.
+Result contract fidelity: each tool returns the JSON envelope the agent
+expects (verified — e.g. ``list_skills`` returns
+``{"skills": [...], "count": N}`` indented 2).
 
 Batch 1 (8b/8c):
   - ``python``        — ``python3 -c <code>`` via docker exec (was Go's

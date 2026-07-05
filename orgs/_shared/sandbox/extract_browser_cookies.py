@@ -19,7 +19,7 @@ Availability
 ------------
 Lives at ``orgs/_shared/sandbox/extract_browser_cookies.py`` so every
 browser-using org can wire it up via ``[[sandbox.bootstrap.host_setup]]``
-in their ``org.toml``. Not specific to any one org — first shipped for
+in their ``org.yaml``. Not specific to any one org — first shipped for
 twitter-agent but the contract is generic. See the "Host-browser cookie
 extraction" recipe in ``config/capabilities/browser/SKILL.md``.
 

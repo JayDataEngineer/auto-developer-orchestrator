@@ -25,8 +25,8 @@ Getting API credentials:
   6. Run: python3 session.py --setup-credentials 12345 abcdef phone_here
 
 Files written:
-  /sandbox/.telegram-credentials.json   # api_id, api_hash, phone
-  /sandbox/.telegram-session.session    # Telethon SQLite session (auth state)
+  /sandbox/workspace/data/.telegram-credentials.json   # api_id, api_hash, phone
+  /sandbox/workspace/data/.telegram-session.session    # Telethon SQLite session (auth state)
 """
 import argparse
 import asyncio
@@ -37,47 +37,23 @@ from datetime import datetime
 
 try:
     from paths import telegram_credentials as _credentials_path
-    from paths import telegram_credentials_legacy as _credentials_legacy_path
     from paths import telegram_session as _session_path
-    from paths import telegram_session_legacy as _session_legacy_path
 except ImportError:
     _credentials_path = None
-    _credentials_legacy_path = None
     _session_path = None
-    _session_legacy_path = None
-
-
-def _resolve_credentials_path():
-    candidates = []
-    if _credentials_path is not None:
-        candidates.append(_credentials_path())
-    if _credentials_legacy_path is not None:
-        candidates.append(_credentials_legacy_path())
-    for p in candidates:
-        if p.exists() and p.stat().st_size > 0:
-            return p
-    return candidates[0] if candidates else None
-
-
-def _resolve_session_path():
-    candidates = []
-    if _session_path is not None:
-        candidates.append(_session_path())
-    if _session_legacy_path is not None:
-        candidates.append(_session_legacy_path())
-    for p in candidates:
-        if p.exists() and p.stat().st_size > 0:
-            return p
-    return candidates[0] if candidates else None
 
 
 def credentials_exist():
-    p = _resolve_credentials_path()
-    return p is not None and p.exists() and p.stat().st_size > 0
+    if _credentials_path is None:
+        return False
+    p = _credentials_path()
+    return p.exists() and p.stat().st_size > 0
 
 
 def session_exist():
-    p = _resolve_session_path()
+    if _session_path is None:
+        return False
+    p = _session_path()
     return p is not None and p.exists() and p.stat().st_size > 0
 
 
@@ -85,7 +61,7 @@ def load_credentials():
     """Return dict with api_id (int), api_hash (str), phone (str). None if missing."""
     if not credentials_exist():
         return None
-    with open(_resolve_credentials_path()) as f:
+    with open(_credentials_path()) as f:
         data = json.load(f)
     # api_id stored as JSON number — ensure int
     if isinstance(data.get("api_id"), str):
@@ -150,13 +126,13 @@ def _get_client():
     creds = load_credentials()
     if not creds:
         print(json.dumps({
-            "error": f"No credentials at {_resolve_credentials_path()}.",
+            "error": f"No credentials at {_credentials_path()}.",
             "hint": "Run: python3 /sandbox/telegram_session.py --setup-credentials API_ID API_HASH PHONE",
         }))
         sys.exit(4)
 
     return TelegramClient(
-        str(_resolve_session_path()),
+        str(_session_path()),
         creds["api_id"],
         creds["api_hash"],
     ), creds
@@ -184,7 +160,7 @@ def bootstrap_interactive():
                     "ok": True,
                     "already_authorized": True,
                     "user": _safe_user(me),
-                    "session_path": str(_resolve_session_path()),
+                    "session_path": str(_session_path()),
                     "hint": "Session is live. Use --check to verify, or just start using telegram_helpers.",
                 }, indent=2))
                 return
@@ -212,7 +188,7 @@ def bootstrap_interactive():
             "ok": True,
             "authorized": True,
             "user": _safe_user(me),
-            "session_path": str(_resolve_session_path()),
+            "session_path": str(_session_path()),
             "saved_at": datetime.now().isoformat(),
         }, indent=2))
     finally:
@@ -228,14 +204,14 @@ def check_session():
     if not credentials_exist():
         return {
             "valid": False,
-            "reason": f"No credentials at {_resolve_credentials_path()}",
+            "reason": f"No credentials at {_credentials_path()}",
             "next_step": "python3 /sandbox/telegram_session.py --setup-credentials API_ID API_HASH PHONE",
             "hint": "Get api_id + api_hash from https://my.telegram.org/apps",
         }
     if not session_exist():
         return {
             "valid": False,
-            "reason": f"No session file at {_resolve_session_path()}",
+            "reason": f"No session file at {_session_path()}",
             "next_step": "python3 /sandbox/telegram_session.py --bootstrap",
         }
 
@@ -253,7 +229,7 @@ def check_session():
         return {
             "valid": True,
             "user": _safe_user(me),
-            "session_path": str(_resolve_session_path()),
+            "session_path": str(_session_path()),
             "checked_at": datetime.now().isoformat(),
         }
     except Exception as e:
@@ -268,8 +244,8 @@ def check_session():
 def show_info():
     """Print session + credentials info without making API calls."""
     out = {
-        "credentials_path": str(_resolve_credentials_path()),
-        "session_path": str(_resolve_session_path()),
+        "credentials_path": str(_credentials_path()),
+        "session_path": str(_session_path()),
     }
     if credentials_exist():
         creds = load_credentials()
@@ -283,7 +259,7 @@ def show_info():
         out["credentials"] = None
     out["session_exists"] = session_exist()
     if session_exist():
-        out["session_size_bytes"] = os.path.getsize(_resolve_session_path())
+        out["session_size_bytes"] = os.path.getsize(_session_path())
     print(json.dumps(out, indent=2))
 
 
@@ -300,7 +276,7 @@ def logout():
     except Exception as e:
         # Fall back to just deleting the file
         try:
-            os.remove(_resolve_session_path())
+            os.remove(_session_path())
             print(json.dumps({"ok": True, "logged_out": True, "fallback": "file_deleted", "error": str(e)}))
         except Exception as e2:
             print(json.dumps({"ok": False, "error": str(e2)}))

@@ -1,9 +1,7 @@
-"""Direct Docker exec — the Python-native sandbox execution path (Phase 8a).
+"""Direct Docker exec — the Python-native sandbox execution path.
 
-Replaces the ``execute() → MCP bash → Go → moby Exec`` chain with a single
-``docker exec`` over the Docker SDK. The harness now reaches the pux-sandbox
-container the same way the Go binary did (moby ``ExecCreate``/``ExecAttach``),
-just from Python — no JSON-RPC hop, no Go middleman.
+The harness reaches the pux-sandbox container via the Docker SDK's
+``ExecCreate``/``ExecAttach``, with no JSON-RPC hop or middleman.
 
 The container is discovered by its ``openshell.project-path`` label, decoupled
 from the Go binary's ``orchestrator-sandbox-<id>`` naming convention. Phase 8g
@@ -55,7 +53,7 @@ _EXEC_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROJECT_LABEL = "openshell.project-path"
-_DEFAULT_TIMEOUT = 300  # 5min socket ceiling (carried over from the Go bridge)
+_DEFAULT_TIMEOUT = 300  # 5min socket ceiling
 
 
 def _resolve_project() -> str:

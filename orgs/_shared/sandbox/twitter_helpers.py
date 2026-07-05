@@ -18,7 +18,7 @@ Usage in agent scripts:
             print(f"{author}: {text}")
 
 Cookie source:
-    /sandbox/.twitter-session.json — populated by session.py
+    /sandbox/workspace/data/.twitter-session.json — populated by session.py
     (use `session.py --cookies-from-browser brave` first).
 """
 import json
@@ -28,23 +28,8 @@ from typing import Generator
 
 try:
     from paths import twitter_cookies as _cookies_path
-    from paths import twitter_cookies_legacy as _cookies_legacy_path
 except ImportError:
     _cookies_path = None
-    _cookies_legacy_path = None
-
-
-def _resolve_cookies_path():
-    """Canonical (data_dir) → legacy (in-container root) fallback chain."""
-    candidates = []
-    if _cookies_path is not None:
-        candidates.append(_cookies_path())
-    if _cookies_legacy_path is not None:
-        candidates.append(_cookies_legacy_path())
-    for p in candidates:
-        if p.exists() and p.stat().st_size > 0:
-            return p
-    return candidates[0] if candidates else None
 
 
 def load_cookies() -> list[dict]:
@@ -53,8 +38,10 @@ def load_cookies() -> list[dict]:
     Run `python3 /sandbox/session.py --cookies-from-browser brave` first
     if this returns empty — that pulls fresh cookies from the host browser.
     """
-    p = _resolve_cookies_path()
-    if p is None or not p.exists():
+    if _cookies_path is None:
+        return []
+    p = _cookies_path()
+    if not p.exists():
         return []
     with open(p) as f:
         data = json.load(f)
@@ -99,7 +86,7 @@ def twitter_session(headless: bool = True, wait_seconds: int = 3) -> Generator:
 
     cookies = load_cookies()
     if not cookies:
-        cookies_file = _resolve_cookies_path()
+        cookies_file = _cookies_path() if _cookies_path else "unknown"
         raise RuntimeError(
             f"No Twitter session at {cookies_file}. "
             f"Run: python3 /sandbox/session.py --cookies-from-browser brave"

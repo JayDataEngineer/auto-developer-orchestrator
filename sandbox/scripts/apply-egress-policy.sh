@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # apply-egress-policy.sh — deny-by-default egress firewall for sandbox containers.
 #
-# Activation contract: when the Go MCP server creates a sandbox with a
+# Activation contract: when the harness creates a sandbox with a
 # policy.yaml that declares an `egress.allow` block, it stages a flat-file
 # allowlist at <project>/.pux/egress.conf. The project dir is bind-mounted
 # at /sandbox/workspace, so the file shows up here. Each non-empty line in
 # the conf is "<ip> <port>" — one host:port pair. "<ip>" is normally a
-# literal IP (the Go side pre-resolves DNS hostnames at sandbox-create time
+# literal IP (the harness pre-resolves DNS hostnames at sandbox-create time
 # since DNS may not work inside the container after the firewall drops OUTPUT),
 # but may be a container-resolved name like "host.docker.internal" — a
 # Docker-internal name that can't be resolved on the host but IS in the
