@@ -15,9 +15,20 @@ Two tool surfaces, all running **inside the Docker container**:
   subagent regardless of its `tools:` whitelist.
 - **Specialist capabilities** (`pux_sandbox_*`):
   - **python** — `python3 -c` inside the sandbox.
-  - **describe_image** — local ONNX vision (Qwen3.5-2B). Graceful-degradation:
-    returns `success:false, reason:"unavailable"` when the model isn't
-    downloaded; surface the `scripts/bootstrap-vision.sh` hint to the operator.
+  - **describe_image** — image-only: **multimodal-model PRIMARY** (mimo-v2.5) →
+    in-sandbox ONNX (Qwen3.5-2B) FALLBACK. Graceful-degradation: returns
+    `success:false, reason:"unavailable"` when the model isn't downloaded;
+    surface the `scripts/bootstrap-vision.sh` hint to the operator.
+  - **multimodal** — image OR audio OR video + a PROMPT → the multimodal model's
+    reasoning, or an HONEST error. **No silent fallback** — the value is the
+    prompt-conditioned judgment (e.g. "is this audio intelligible?", "does this
+    chart trend up?") that a generic describer can't give. If the model can't,
+    you get `reason:"model_failed"` + `primary_error`; retry, switch to
+    `multimodal_mega`, or use `describe_image`.
+  - **multimodal_mega** — resilient sibling: model first, then a per-type
+    WATERFALL (image→ONNX, audio→honest `audio_unavailable_offline`, video→ffmpeg
+    keyframes→per-frame image waterfall). `source` reports which tier produced
+    the answer. Use when resilience beats a guaranteed-LLM judgment.
   - **browser_\*** — wrap the sandbox's persistent SeleniumBase Chrome session
     on `:9876`. The core five (`browser_navigate` / `_click` / `_type` /
     `_screenshot` / `_evaluate`) plus the Phase-16 autopilot action set

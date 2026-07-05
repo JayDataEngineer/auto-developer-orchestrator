@@ -76,6 +76,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     x11vnc \
     x11-xserver-utils \
     imagemagick \
+    ffmpeg \
     scrot \
     tesseract-ocr \
     tesseract-ocr-eng \

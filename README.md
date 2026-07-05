@@ -12,7 +12,7 @@ Two pieces, one each:
   graphs (a CTO + specialist subagents), serves them over the Agent Protocol
   REST API, and ships a thin `pux` client. Native fs/shell tools (`ls` /
   `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute`) run
-  through a `PuxSandboxBackend`; the 31 specialist tools (`browser_*`,
+  through a `PuxSandboxBackend`; the 33 specialist tools (`browser_*`,
   `desktop_*`, `describe_image`, `python`, skills) are native Python too
   (Phase 8a–8f). `container.py` owns the Docker sandbox lifecycle +
   declarative policy enforcement (Phase 8g). The harness boots its own
@@ -70,7 +70,7 @@ harness drives the Docker sandbox directly over the SDK.
 ## Tool surface
 
 fs/shell is **deepagents-native** (via `PuxSandboxBackend.execute()` → docker
-exec inside the container); all 31 specialists are **`pux_sandbox_*`** native
+exec inside the container); all 33 specialists are **`pux_sandbox_*`** native
 Python tools too (Phase 8b–8f). Phase 8g moved the container lifecycle into
 `container.py`; Phase 8i deleted the Go bridge — every model-visible path is
 Python:
@@ -81,6 +81,8 @@ Python:
 | `python` | native — docker exec `python3 -c` (8b) |
 | `list_skills` / `load_skill` | native — host FS `orgs/_shared/skills/` + each `orgs/<name>/skills/` (8c) |
 | `describe_image` | native — **driving-model PRIMARY** (mimo-v2.5 multimodal) → in-sandbox ONNX fallback (8d) |
+| `multimodal` | native — image **or** audio **or** video + a PROMPT → multimodal model (18.B). Returns the model's reasoning or an HONEST error; **no silent fallback** (the value is the prompt-conditioned judgment — e.g. "is this audio intelligible?" — that a generic describer can't give). |
+| `multimodal_mega` | native — resilient sibling of `multimodal`: model first, then a per-type WATERFALL on failure (image→ONNX, audio→honest-unavailable, video→ffmpeg keyframes→per-frame image waterfall) (18.B). Use when you want SOMETHING back even if the model is down. |
 | `browser_*` (autopilot surface) | native — `curl` to in-sandbox `sb_server.py` via docker exec (8e). Navigate/click/type/screenshot/evaluate PLUS the Phase-16 action set: `search`/`scroll`/`go_back`/`wait`/`find_text`/`extract`/`extract_images`/`save_screenshot`/`download`/`upload`/`tabs`/`new_tab`/`switch_tab`/`close_tab`/`dropdown_options`/`select_dropdown`/`save_session`/`restore_session`. Each tool's docstring carries the autopilot knowledge; the shared `browser` agent is a lean loop over them. |
 | `desktop_screenshot` / `_click` / `_type` / `_key` | native — `xdotool` + `desktop_observe.py` via docker exec (8f) |
 
@@ -169,7 +171,7 @@ with no Go binary → 15 harness modules via the researcher subagent).
 └──────────────┬───────────────────────────┘
                │ deepagents graph + PuxSandboxBackend
 ┌──────────────▼───────────────────────────┐
-│ harness (Python, deepagents)             │  31 specialists NATIVE; no MCP hop
+│ harness (Python, deepagents)             │  33 specialists NATIVE; no MCP hop
 │  container.py (lifecycle + policy) +     │  for fs/shell OR specialists
 │  docker_exec.py (docker exec)            │
 └──────────────┬───────────────────────────┘
@@ -182,7 +184,7 @@ with no Go binary → 15 harness modules via the researcher subagent).
 ```
 
 There is no Go server on this branch. The Go MCP tree + JSON-RPC bridge were
-deleted in Phase 8i — every model-visible path (fs, shell, the 31 specialists,
+deleted in Phase 8i — every model-visible path (fs, shell, the 33 specialists,
 and the container lifecycle) lives in the Python harness and drives the sandbox
 directly over the Docker SDK.
 
@@ -193,7 +195,7 @@ directly over the Docker SDK.
   server + client, all 10 orgs ported to RUN on deepagents, the policy engine
   ported Go→Python + its enforcement wired into `container.py`, proactive
   context-offload, the entire Go sandbox re-hosted in Python — fs/shell + all
-  31 specialists via direct `docker exec`, container lifecycle + policy
+  33 specialists via direct `docker exec`, container lifecycle + policy
   enforcement harness-owned — and the Go MCP server + JSON-RPC bridge deleted).
   **Phase 9** (TUI as Agent Protocol consumer + SSE) remains.
 - **`master`** — pre-pivot MVP. Slim Go MCP server with in-process agent loop.

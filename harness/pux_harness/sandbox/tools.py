@@ -99,7 +99,7 @@ def _skills_dirs(org: str | None = None) -> list[Path]:
 # ``SPECIALIST_TOOL_NAMES`` is the prefixed form the org contract resolves
 # ``tools:`` whitelists against.
 SPECIALISTS: frozenset[str] = frozenset({
-    "python", "list_skills", "load_skill", "describe_image",
+    "python", "list_skills", "load_skill", "describe_image", "multimodal", "multimodal_mega",
     "browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_evaluate",
     "browser_search", "browser_scroll", "browser_go_back", "browser_wait", "browser_find_text",
     "browser_extract", "browser_extract_images", "browser_save_screenshot", "browser_download",
@@ -353,6 +353,56 @@ def _invoke_primary_vision(model: object, b64: str, mime: str, prompt: str | Non
     return text
 
 
+def _onnx_describe(
+    exec_client: DockerExecClient, *,
+    image_path: str | None, image_url: str | None,
+    prompt: str | None, primary_error: str | None = None,
+) -> dict:
+    """The in-sandbox ONNX fallback (Qwen3.5-2B-ONNX-OPT via
+    ``describe_image.py``). Returns a RESULT DICT (caller wraps with
+    ``_result``). Shared by ``describe_image`` and the ``multimodal`` tool's
+    image tier so the two stay byte-equivalent on the ONNX path.
+
+    Exit-code dispatch is faithful 1:1 with the Go DescribeImageTool:
+    0=success, 1=inference error, 2=model missing (NOT an error — the model is
+    optional), 3=onnxruntime-genai absent. ``primary_error`` (set when the
+    driving model was tried and failed) flips ``source`` from ``onnx`` to
+    ``fallback`` and is echoed back so the fallback is observable."""
+    pe = {"primary_error": _tail(primary_error, 300)} if primary_error else {}
+    parts = [f"python3 {_DESCRIBE_IMAGE_SCRIPT}"]
+    parts += ["--image", shlex.quote(image_path)] if image_path else ["--image-url", shlex.quote(image_url)]
+    if prompt:
+        parts += ["--prompt", shlex.quote(prompt)]
+    cmd = " ".join(parts)
+    try:
+        out, exit_code = exec_client.exec(cmd, timeout=_DESCRIBE_IMAGE_TIMEOUT)
+    except ExecTimeout:
+        return {"success": False, "reason": "timeout",
+                "error": f"describe_image timed out after {_DESCRIBE_IMAGE_TIMEOUT}s",
+                **pe}
+    except Exception as exc:  # container vanished / docker API error
+        return {"success": False, "reason": "exec_failed", "error": str(exc), **pe}
+    if exit_code == 0:
+        try:
+            parsed = json.loads(out)
+        except json.JSONDecodeError:
+            return {"success": False, "reason": "malformed_output",
+                    "error": f"describe_image returned non-JSON: {_tail(out, 400)}",
+                    **pe}
+        return {"success": True,
+                "description": parsed.get("description", ""),
+                "model": parsed.get("model", ""),
+                "source": "fallback" if primary_error else "onnx",
+                **pe}
+    if exit_code == 2:
+        return {"success": False, "reason": "unavailable",
+                "explanation": _VISION_UNAVAILABLE, "detail": _tail(out), **pe}
+    if exit_code == 3:
+        return {"success": False, "reason": "deps_missing",
+                "explanation": _VISION_DEPS_MISSING, "detail": _tail(out), **pe}
+    return {"success": False, "reason": "inference_failed", "error": _tail(out), **pe}
+
+
 class _DescribeImageArgs(BaseModel):
     image_path: str | None = Field(
         None, description="Absolute path to image file inside the sandbox "
@@ -412,64 +462,422 @@ def _describe_image_tool(exec_client: DockerExecClient, vision_model: object | N
         pe = {"primary_error": _tail(primary_error, 300)} if primary_error else {}
 
         # FALLBACK: in-sandbox ONNX (Qwen3.5-2B-ONNX-OPT) via describe_image.py.
-        # describe_image.py takes --image XOR --image-url; shlex.quote is safe
-        # for paths/URLs carrying spaces or quotes (Go used its shQ helper).
-        parts = [f"python3 {_DESCRIBE_IMAGE_SCRIPT}"]
-        parts += ["--image", shlex.quote(image_path)] if image_path else ["--image-url", shlex.quote(image_url)]
-        if prompt:
-            parts += ["--prompt", shlex.quote(prompt)]
-        cmd = " ".join(parts)
-        try:
-            out, exit_code = exec_client.exec(cmd, timeout=_DESCRIBE_IMAGE_TIMEOUT)
-        except ExecTimeout:
-            return _result({
-                "success": False, "reason": "timeout",
-                "error": f"describe_image timed out after {_DESCRIBE_IMAGE_TIMEOUT}s",
-                **pe,
-            })
-        except Exception as exc:  # container vanished / docker API error
-            return _result({"success": False, "reason": "exec_failed", "error": str(exc), **pe})
-
-        # Exit-code dispatch — describe_image.py contract (faithful 1:1 with the
-        # Go DescribeImageTool): 0=success, 1=inference error, 2=model missing,
-        # 3=onnxruntime-genai absent. Model-missing is NOT an error (the model
-        # is optional); the others are real failures the agent can react to.
-        if exit_code == 0:
-            try:
-                parsed = json.loads(out)
-            except json.JSONDecodeError:
-                return _result({
-                    "success": False, "reason": "malformed_output",
-                    "error": f"describe_image returned non-JSON: {_tail(out, 400)}",
-                    **pe,
-                })
-            # source distinguishes "model couldn't do it, ONNX saved it"
-            # (fallback) from "no model threaded, ONNX only" (onnx — the
-            # --check / offline path).
-            return _result({
-                "success": True,
-                "description": parsed.get("description", ""),
-                "model": parsed.get("model", ""),
-                "source": "fallback" if primary_error else "onnx",
-                **pe,
-            })
-        if exit_code == 2:
-            return _result({
-                "success": False, "reason": "unavailable",
-                "explanation": _VISION_UNAVAILABLE, "detail": _tail(out),
-                **pe,
-            })
-        if exit_code == 3:
-            return _result({
-                "success": False, "reason": "deps_missing",
-                "explanation": _VISION_DEPS_MISSING, "detail": _tail(out),
-                **pe,
-            })
-        return _result({"success": False, "reason": "inference_failed", "error": _tail(out), **pe})
+        # Shared with the ``multimodal`` tool's image tier (``_onnx_describe``)
+        # so the two paths stay byte-equivalent; the helper carries the full
+        # exit-code dispatch (0=ok, 1=inference error, 2=model missing,
+        # 3=onnxruntime-genai absent) + the ``source`` flip (onnx vs fallback).
+        return _result(_onnx_describe(
+            exec_client, image_path=image_path, image_url=image_url,
+            prompt=prompt, primary_error=primary_error,
+        ))
 
     return StructuredTool(
         name=PUX_PREFIX + "describe_image", description=_DESCRIBE_IMAGE_DESC,
         args_schema=_DescribeImageArgs, func=_run,
+    )
+
+
+# --- multimodal mega-tool (Phase 18.B) -------------------------------------
+# One entry point for image / audio / video, powered by the ``multimodal`` role
+# model, with a per-type WATERFALL fallback (the user's "mega tool with
+# waterfall fallback"). COEXISTS with ``describe_image`` (the lean image-only
+# specialist) — this is the generalist sibling that adds audio + video and a
+# multi-tier chain. Every result carries ``source`` (``primary`` |
+# ``fallback:onnx`` | ``fallback:keyframes``) + ``primary_error`` when a
+# fallback fired, so the waterfall is observable — same discipline as
+# ``describe_image``.
+
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+_AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
+_VIDEO_EXTS = {".mp4", ".webm", ".avi", ".mov", ".mkv"}
+
+# Extends ``_MIME_BY_EXT`` (image-only) with audio + video MIME types for the
+# data: URL / input_audio.format sent to the model.
+_MEDIA_MIME_BY_EXT = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+    ".wav": "audio/wav", ".mp3": "audio/mpeg", ".flac": "audio/flac",
+    ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
+    ".mp4": "video/mp4", ".webm": "video/webm", ".avi": "video/x-msvideo",
+    ".mov": "video/quicktime", ".mkv": "video/x-matroska",
+}
+
+# OpenAI ``input_audio.format`` accepts a fixed set (wav, mp3). Map the MIME
+# subtype onto it; anything else passes through (the model rejects → Tier 2).
+_AUDIO_FMT_FROM_MIME = {
+    "wav": "wav", "mpeg": "mp3", "mp3": "mp3", "flac": "flac",
+    "ogg": "ogg", "mp4": "mp4", "aac": "aac", "x-m4a": "mp4",
+    "x-wav": "wav",
+}
+
+_VIDEO_KEYFRAMES = 8        # caps per-clip cost: one image call per frame
+_KEYFRAME_TIMEOUT = 120     # ffmpeg probe + extract round-trip
+
+
+def _media_kind(path: str) -> str:
+    """``image`` | ``audio`` | ``video`` | ``unknown`` by extension."""
+    ext = Path(path).suffix.lower()
+    if ext in _IMAGE_EXTS:
+        return "image"
+    if ext in _AUDIO_EXTS:
+        return "audio"
+    if ext in _VIDEO_EXTS:
+        return "video"
+    return "unknown"
+
+
+def _media_mime(name: str) -> str:
+    return _MEDIA_MIME_BY_EXT.get(Path(name).suffix.lower(), "application/octet-stream")
+
+
+def _default_media_prompt(kind: str) -> str:
+    if kind == "audio":
+        return ("Transcribe and describe this audio clip. Note any speech "
+                "(quote it), music, and key sounds.")
+    if kind == "video":
+        return "Describe what happens in this video clip, moment by moment."
+    if kind == "video_frame":
+        return ("Describe this video frame concisely — the action, any text, "
+                "and key visual features.")
+    return ("Describe this media concisely. Focus on text, key elements, and "
+            "notable features.")
+
+
+def _acquire_media_b64(
+    exec_client: DockerExecClient, media_path: str | None, media_url: str | None,
+) -> tuple[str, str]:
+    """Fetch media bytes from the sandbox (path or URL) → ``(base64, mime)``.
+    Generalizes ``_acquire_image_b64`` to any MIME via ``_media_mime``."""
+    if media_path:
+        cmd = f"base64 -w0 {shlex.quote(media_path)}"
+        mime = _media_mime(media_path)
+    else:
+        cmd = f"curl -s -L --max-time 30 {shlex.quote(media_url or '')} | base64 -w0"
+        mime = _media_mime(media_url or "")
+    out, exit_code = exec_client.exec(cmd, timeout=_IMAGE_FETCH_TIMEOUT)
+    b64 = (out or "").strip()
+    if exit_code != 0 or not b64:
+        raise RuntimeError(f"media fetch exit {exit_code}: {_tail(out, 200)}")
+    return b64, mime
+
+
+def _invoke_primary_media(
+    model: object, b64: str, mime: str, prompt: str | None, kind: str,
+) -> str:
+    """Send the media to the multimodal model as a TYPE-CORRECT native content
+    block + return its text. Raises on any failure (caller falls back).
+
+    - image → ``image_url`` (proven path, same as ``_invoke_primary_vision``).
+    - audio → ``input_audio`` (format derived from MIME; OpenAI accepts
+      wav/mp3 — other subtypes pass through and the model rejects → Tier 2).
+    - video → ``video_url`` (no provider standardizes raw video; if the endpoint
+      rejects it, the caller falls back to ffmpeg keyframes). This is the
+    ``try, then fall back`` contract — never an assumption it succeeded."""
+    text = prompt or _default_media_prompt(kind)
+    if kind in ("image", "video_frame"):
+        # A keyframe IS an image — send it as ``image_url``, never ``video_url``
+        # (the latter is for a raw clip and would re-trigger the video reject
+        # that sent us into the keyframe path in the first place).
+        block = {"type": "image_url",
+                 "image_url": {"url": f"data:{mime};base64,{b64}"}}
+    elif kind == "audio":
+        subtype = mime.rsplit("/", 1)[-1].lower()
+        fmt = _AUDIO_FMT_FROM_MIME.get(subtype, subtype)
+        block = {"type": "input_audio",
+                 "input_audio": {"data": b64, "format": fmt}}
+    else:  # video
+        block = {"type": "video_url",
+                 "video_url": {"url": f"data:{mime};base64,{b64}"}}
+    msg = HumanMessage(content=[{"type": "text", "text": text}, block])
+    resp = model.invoke([msg])
+    content = getattr(resp, "content", None)
+    if isinstance(content, list):
+        content = "".join(
+            b.get("text", "") for b in content if isinstance(b, dict))
+    out = (content or "").strip() if isinstance(content, str) else ""
+    if not out:
+        raise RuntimeError("primary model returned empty content")
+    return out
+
+
+def _extract_video_keyframes(
+    exec_client: DockerExecClient, video_path: str, n: int = _VIDEO_KEYFRAMES,
+) -> tuple[list[str], str | None]:
+    """Probe ``video_path`` (in-sandbox) and extract up to ``n`` evenly-spaced
+    frames to ``/tmp/pux_multimodal_kf/kf_*.png`` via ffmpeg. Returns
+    ``(frame_paths, None)`` on success or ``([], reason)`` on failure.
+
+    ``reason`` is one of: ``ffmpeg_missing`` (ffprobe/ffmpeg not installed → the
+    image bump is the fix), ``no_duration`` / ``empty_video`` (unparseable
+    clip), ``ffmpeg_extract_failed``, ``no_keyframes_extracted``. Probed at
+    tool-call time — a stale image degrades ONLY the video tier."""
+    kf_dir = "/tmp/pux_multimodal_kf"
+    exec_client.exec(f"rm -rf {kf_dir} && mkdir -p {kf_dir}", timeout=30)
+    probe = ("ffprobe -v error -show_entries format=duration "
+             "-of default=noprint_wrappers=1:nokey=1 " + shlex.quote(video_path))
+    out, exit_code = exec_client.exec(probe, timeout=_KEYFRAME_TIMEOUT)
+    if exit_code != 0:
+        # exit 127 = command not found (ffmpeg/ffprobe absent from the image).
+        return [], "ffmpeg_missing" if exit_code == 127 else f"ffprobe_failed: {_tail(out, 200)}"
+    try:
+        duration = float((out or "").strip())
+    except ValueError:
+        return [], f"no_duration: {_tail(out, 120)}"
+    if duration <= 0:
+        return [], "empty_video"
+    interval = max(1.0, duration / max(1, n))
+    extract = (
+        f"ffmpeg -hide_banner -loglevel error -i {shlex.quote(video_path)} "
+        f"-vf fps={1 / interval:.4f} -frames:v {n} -y {kf_dir}/kf_%03d.png"
+    )
+    out, exit_code = exec_client.exec(extract, timeout=_KEYFRAME_TIMEOUT)
+    if exit_code != 0:
+        return [], "ffmpeg_extract_failed" if exit_code == 127 else f"ffmpeg_extract_failed: {_tail(out, 200)}"
+    ls, _ = exec_client.exec(f"ls -1 {kf_dir}/*.png 2>/dev/null | sort", timeout=30)
+    frames = [ln.strip() for ln in (ls or "").splitlines() if ln.strip()]
+    if not frames:
+        return [], "no_keyframes_extracted"
+    return frames, None
+
+
+class _MultimodalArgs(BaseModel):
+    media_path: str | None = Field(
+        None, description="Absolute path to a media file inside the sandbox "
+        "(image: png/jpg/jpeg/gif/webp/bmp, audio: wav/mp3/flac/ogg/m4a/aac, "
+        "video: mp4/webm/avi/mov/mkv)."
+    )
+    media_url: str | None = Field(
+        None, description="URL of a media file to download + analyze. Mutually "
+        "exclusive with media_path."
+    )
+    prompt: str | None = Field(
+        None, description="Optional instruction for the model (default: generic "
+        "description / transcription / moment-by-moment). e.g. 'what is the "
+        "person saying?' or 'read the text on the sign in this frame'."
+    )
+
+
+_MULTIMODAL_DESC = (
+    "Send an image, audio clip, OR video clip plus a PROMPT to the multimodal "
+    "model and get its reasoning back. The PROMPT is the point — this tool "
+    "exists for questions a dedicated transcriber/describer can't answer: 'is "
+    "this audio intelligible?', 'does this chart show an upward trend?', 'is "
+    "anything in this frame unsafe for work?'. The model judges; you get its "
+    "answer. It does NOT silently fall back to ONNX/whisper/keyframes — a "
+    "silent downgrade would hand you a generic description in place of the "
+    "judgment you asked for, indistinguishable from the real answer. If the "
+    "model can't (no multimodal model configured, API error, empty output) you "
+    "get an HONEST error with `reason` + `primary_error`; retry, switch to "
+    "`multimodal_mega` for an offline-capable waterfall, or `describe_image` "
+    "for an image-only ONNX path. Pass either an in-sandbox media path OR a URL."
+)
+
+
+_MULTIMODAL_MEGA_DESC = (
+    "Resilient sibling of `multimodal`: same media + prompt → multimodal model "
+    "first, but on any model failure it falls back per media type (a WATERFALL). "
+    "image -> in-sandbox ONNX vision (describe_image.py); audio -> NO offline "
+    "audio fallback exists, so it returns success:false audio_unavailable_offline "
+    "(honest — we don't fabricate a transcript); video -> ffmpeg extracts up to 8 "
+    "keyframes, each analyzed through the image waterfall, and the per-frame "
+    "descriptions are stitched. The result's `source` field reports which tier "
+    "produced it (`primary` | `fallback:onnx` | `fallback:keyframes`); "
+    "`primary_error` is echoed when a fallback fired. Use this when you want "
+    "SOMETHING back even if the model is down — but prefer `multimodal` when you "
+    "need the model's prompt-conditioned JUDGMENT (the fallbacks describe, they "
+    "don't reason about your prompt)."
+)
+
+
+def _multimodal_validate(media_path: str | None, media_url: str | None) -> dict | None:
+    """Shared arg validation for both multimodal tools. Returns an error envelope
+    dict if invalid, else ``None``."""
+    if not media_path and not media_url:
+        return {"success": False,
+                "error": "one of media_path or media_url is required"}
+    if media_path and media_url:
+        return {"success": False,
+                "error": "media_path and media_url are mutually exclusive"}
+    return None
+
+
+def _multimodal_unsupported(name: str) -> dict:
+    return {
+        "success": False,
+        "error": f"unsupported media type: {Path(name).suffix!r}",
+        "supported": ("image (png/jpg/jpeg/gif/webp/bmp), "
+                      "audio (wav/mp3/flac/ogg/m4a/aac), "
+                      "video (mp4/webm/avi/mov/mkv)"),
+    }
+
+
+def _multimodal_tool(
+    exec_client: DockerExecClient, vision_model: object | None = None,
+) -> StructuredTool:
+    """The DEFAULT multimodal surface: media + prompt → multimodal model, end of
+    story. Returns the model's reasoning or an HONEST error. NEVER silently
+    falls back — the value of this tool is the model's PROMPT-CONDITIONED
+    judgment, and a silent downgrade to a generic describer would return a worse
+    answer the caller can't distinguish from the real one."""
+    def _run(
+        media_path: str | None = None,
+        media_url: str | None = None,
+        prompt: str | None = None,
+    ) -> str:
+        bad = _multimodal_validate(media_path, media_url)
+        if bad is not None:
+            return _result(bad)
+        kind = _media_kind(media_path or media_url or "")
+        if kind == "unknown":
+            return _result(_multimodal_unsupported(media_path or media_url or ""))
+
+        if vision_model is None:
+            return _result({
+                "success": False, "media_type": kind, "reason": "no_model",
+                "explanation": (
+                    "No multimodal model is configured, and this tool does not "
+                    "fall back. Use `multimodal_mega` for an offline-capable "
+                    "waterfall, or `describe_image` for an image-only ONNX path."),
+            })
+        try:
+            b64, mime = _acquire_media_b64(exec_client, media_path, media_url)
+            desc = _invoke_primary_media(vision_model, b64, mime, prompt, kind)
+        except Exception as exc:
+            return _result({
+                "success": False, "media_type": kind, "reason": "model_failed",
+                "primary_error": _tail(str(exc), 300),
+            })
+        return _result({
+            "success": True, "description": desc,
+            "model": _model_name(vision_model),
+            "media_type": kind, "source": "primary",
+        })
+
+    return StructuredTool(
+        name=PUX_PREFIX + "multimodal", description=_MULTIMODAL_DESC,
+        args_schema=_MultimodalArgs, func=_run,
+    )
+
+
+def _multimodal_mega_tool(
+    exec_client: DockerExecClient, vision_model: object | None = None,
+) -> StructuredTool:
+    """The opt-in resilient variant: model first, then a per-type offline
+    waterfall on failure. Same args as ``multimodal``; the difference is this one
+    returns SOMETHING when the model is down (image→ONNX, video→keyframes,
+    audio→honest unavailable). Use when resilience beats guaranteed-LLM-judgment."""
+    def _run(
+        media_path: str | None = None,
+        media_url: str | None = None,
+        prompt: str | None = None,
+    ) -> str:
+        bad = _multimodal_validate(media_path, media_url)
+        if bad is not None:
+            return _result(bad)
+        source_name = media_path or media_url or ""
+        kind = _media_kind(source_name)
+        if kind == "unknown":
+            return _result(_multimodal_unsupported(source_name))
+
+        # TIER 1 — the multimodal model's native input for this media type. Any
+        # failure here (non-multimodal model, API error, empty output, fetch
+        # error) is caught and falls through to the per-type Tier-2 fallback.
+        primary_error: str | None = None
+        if vision_model is not None:
+            try:
+                b64, mime = _acquire_media_b64(exec_client, media_path, media_url)
+                desc = _invoke_primary_media(vision_model, b64, mime, prompt, kind)
+                return _result({
+                    "success": True, "description": desc,
+                    "model": _model_name(vision_model),
+                    "media_type": kind, "source": "primary",
+                })
+            except Exception as exc:
+                primary_error = str(exc)
+        pe = {"primary_error": _tail(primary_error, 300)} if primary_error else {}
+
+        # TIER 2 — per-type offline fallback.
+        if kind == "image":
+            # Reuses the SAME ONNX path as describe_image (byte-equivalent),
+            # then normalizes ``source`` to ``fallback:onnx`` so the mega-tool's
+            # source is distinguishable from ``describe_image``'s plain
+            # ``fallback``/``onnx`` and from the video tier's ``fallback:keyframes``.
+            d = _onnx_describe(
+                exec_client, image_path=media_path, image_url=media_url,
+                prompt=prompt, primary_error=primary_error,
+            )
+            d["media_type"] = "image"
+            if d.get("success"):
+                d["source"] = "fallback:onnx"
+            return _result(d)
+
+        if kind == "audio":
+            # No offline audio tooling ships in the sandbox. Be honest: the
+            # operator gets a truthful "unavailable", not a fake transcript.
+            # (mimo handles audio at Tier 1 when it works; this fires only when
+            # it can't.) Adding whisper is a separate, deferred decision.
+            return _result({
+                "success": False, "media_type": "audio",
+                "reason": "audio_unavailable_offline",
+                "explanation": (
+                    "The multimodal model could not process this audio clip, "
+                    "and no offline audio fallback (e.g. whisper) is installed "
+                    "in the sandbox. Retry if the failure looked transient; "
+                    "otherwise point a model at it that accepts audio."),
+                **pe,
+            })
+
+        # video — ffmpeg keyframe extraction → per-frame image waterfall.
+        if media_url and not media_path:
+            dl = (f"curl -s -L --max-time 60 -o /tmp/pux_mm_video "
+                  + shlex.quote(media_url))
+            out, exit_code = exec_client.exec(dl, timeout=_IMAGE_FETCH_TIMEOUT)
+            if exit_code != 0:
+                return _result({"success": False, "media_type": "video",
+                                "reason": "video_download_failed",
+                                "error": _tail(out, 200), **pe})
+            video_file = "/tmp/pux_mm_video"
+        else:
+            video_file = media_path or ""
+
+        frames, ferr = _extract_video_keyframes(exec_client, video_file)
+        if ferr:
+            return _result({"success": False, "media_type": "video",
+                            "reason": ferr, **pe})
+
+        per_frame: list[dict] = []
+        for fp in frames:
+            frame_error: str | None = None
+            if vision_model is not None:
+                try:
+                    b64, _ = _acquire_media_b64(exec_client, fp, None)
+                    desc = _invoke_primary_media(
+                        vision_model, b64, "image/png", prompt, "video_frame")
+                    per_frame.append({"frame": fp, "success": True,
+                                      "description": desc, "source": "primary"})
+                    continue
+                except Exception as exc:
+                    frame_error = str(exc)
+            # per-frame ONNX fallback
+            d = _onnx_describe(exec_client, image_path=fp, image_url=None,
+                               prompt=prompt, primary_error=frame_error)
+            d["frame"] = fp
+            per_frame.append(d)
+
+        stitched = "\n\n".join(
+            f"[frame {i + 1}] {pf.get('description', '')}"
+            for i, pf in enumerate(per_frame) if pf.get("description")
+        )
+        any_success = any(pf.get("description") for pf in per_frame)
+        return _result({
+            "success": bool(any_success), "media_type": "video",
+            "source": "fallback:keyframes", "frame_count": len(per_frame),
+            "frames": per_frame, "description": stitched, **pe,
+        })
+
+    return StructuredTool(
+        name=PUX_PREFIX + "multimodal_mega", description=_MULTIMODAL_MEGA_DESC,
+        args_schema=_MultimodalArgs, func=_run,
     )
 
 
@@ -1258,6 +1666,8 @@ def build_native_specialists(
         _list_skills_tool(org),
         _load_skill_tool(org),
         _describe_image_tool(exec_client, vision_model),
+        _multimodal_tool(exec_client, vision_model),
+        _multimodal_mega_tool(exec_client, vision_model),
         _browser_navigate_tool(exec_client),
         _browser_click_tool(exec_client),
         _browser_type_tool(exec_client),
