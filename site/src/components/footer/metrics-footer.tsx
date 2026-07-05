@@ -1,24 +1,20 @@
 // Metrics footer — small status strip across the bottom of the chat panel.
-// Polls the active thread's snapshot every few seconds and shows:
-//   ● running | idle | failed
-//   N msgs
-//   provider/model
-//   last updated X ago
-//
-// Lives outside the workbench so it's visible no matter which tab is open.
+// Polls the active thread's state from the Agent Protocol harness and shows:
+//   ● running | idle | finished | error
+//   org name
+//   last updated
 
 import { useCallback, useEffect, useState, type FC } from "react";
+import { getThread } from "../../../server/agent-protocol";
 
 interface MetricsFooterProps {
   threadId: string | null;
 }
 
 interface ThreadMeta {
-  id: string;
+  thread_id: string;
+  agent_id?: string;
   status?: string;
-  messageCount?: number;
-  updatedAt?: string;
-  config?: { provider?: string; modelId?: string };
 }
 
 function timeAgo(iso?: string): string {
@@ -35,11 +31,13 @@ function timeAgo(iso?: string): string {
 const STATUS_COLOR: Record<string, string> = {
   running: "text-emerald-500",
   idle: "text-muted-foreground/50",
-  failed: "text-destructive",
+  finished: "text-muted-foreground/50",
+  error: "text-destructive",
 };
 
 export const MetricsFooter: FC<MetricsFooterProps> = ({ threadId }) => {
   const [meta, setMeta] = useState<ThreadMeta | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!threadId) {
@@ -47,10 +45,9 @@ export const MetricsFooter: FC<MetricsFooterProps> = ({ threadId }) => {
       return;
     }
     try {
-      const r = await fetch(`/api/pi/threads/${threadId}`);
-      if (!r.ok) return;
-      const snap = (await r.json()) as { metadata?: ThreadMeta };
-      setMeta(snap.metadata ?? null);
+      const snap = await getThread(threadId);
+      setMeta(snap);
+      setUpdatedAt(new Date().toISOString());
     } catch {
       // best-effort
     }
@@ -71,7 +68,6 @@ export const MetricsFooter: FC<MetricsFooterProps> = ({ threadId }) => {
   }
 
   const status = meta.status ?? "idle";
-  const cfg = meta.config ?? null;
 
   return (
     <footer className="flex h-6 items-center gap-4 border-t border-border bg-muted/30 px-3 text-[10px] text-muted-foreground">
@@ -79,13 +75,10 @@ export const MetricsFooter: FC<MetricsFooterProps> = ({ threadId }) => {
         <span className={(STATUS_COLOR[status] ?? "") + " text-base leading-none"}>●</span>
         <span>{status}</span>
       </span>
-      <span>{meta.messageCount ?? 0} msgs</span>
-      {cfg?.provider && cfg?.modelId && (
-        <span className="font-mono">
-          {cfg.provider}/{cfg.modelId}
-        </span>
+      {meta.agent_id && (
+        <span className="font-mono">{meta.agent_id}</span>
       )}
-      {meta.updatedAt && <span className="ml-auto">updated {timeAgo(meta.updatedAt)} ago</span>}
+      {updatedAt && <span className="ml-auto">updated {timeAgo(updatedAt)} ago</span>}
     </footer>
   );
 };

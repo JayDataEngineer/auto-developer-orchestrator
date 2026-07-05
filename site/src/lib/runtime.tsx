@@ -1,24 +1,27 @@
-// Wire createPiHttpClient to the backend route layer at /api/pi/**.
-// Vite proxy forwards to the Node backend during dev; production serves both.
+// Pux runtime provider — bridges the Agent Protocol harness to CopilotKit.
+//
+// Uses LangGraphHttpAgent to connect to the harness's AG-UI endpoint.
+// CopilotKit handles all the streaming, state management, and UI primitives.
 
-import { useMemo } from "react";
-import { AssistantRuntimeProvider } from "@assistant-ui/react";
-import { createPiHttpClient, usePiRuntime } from "@assistant-ui/react-pi";
+import { type ReactNode } from "react";
+import {
+  CopilotKit,
+} from "@copilotkit/react-core";
 
-export function PiRuntimeProvider({
-  threadId,
-  onThreadIdChange,
+const HARNES_URL = import.meta.env.VITE_PUX_HARNESS_URL ?? "http://127.0.0.1:9988";
+const SITE_URL = import.meta.env.VITE_PUX_SITE_URL ?? "http://127.0.0.1:3001";
+
+export function PuxRuntimeProvider({
   children,
 }: {
-  threadId?: string;
-  onThreadIdChange?: (id: string | undefined) => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
-  const client = useMemo(() => createPiHttpClient({ baseUrl: "/api/pi" }), []);
-  const runtime = usePiRuntime({ client, threadId, onThreadIdChange });
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
+    <CopilotKit
+      runtimeUrl={`${SITE_URL}/api/copilotkit`}
+      agent="general"
+    >
       {children}
-    </AssistantRuntimeProvider>
+    </CopilotKit>
   );
 }

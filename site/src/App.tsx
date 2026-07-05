@@ -1,9 +1,8 @@
-// Pux site shell — sidebar thread list + chat thread + workbench (editor/...).
+// Pux site shell — CopilotKit sidebar + workbench (editor/terminal/sandbox/vnc).
 
 import { useCallback, useEffect, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import {
-  Menu,
   Code2Icon,
   TerminalIcon,
   MonitorIcon,
@@ -11,16 +10,14 @@ import {
   SettingsIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { PiRuntimeProvider } from "./lib/runtime.tsx";
-import { Thread } from "./components/thread.tsx";
-import { ThreadList } from "./components/sidebar/thread-list.tsx";
-import { HostUiDialog } from "./components/host-ui-dialog.tsx";
+import { PuxRuntimeProvider } from "./lib/runtime.tsx";
+import { CopilotSidebar } from "@copilotkit/react-core/v2";
+import "@copilotkit/react-core/v2/styles.css";
 import { EditorPanel } from "./components/workbench/editor-panel.tsx";
 import { TerminalPanel } from "./components/workbench/terminal-panel.tsx";
 import { SandboxPanel } from "./components/workbench/sandbox-panel.tsx";
 import { SettingsPanel } from "./components/workbench/settings-panel.tsx";
 import { VncViewer } from "./components/workbench/vnc-viewer.tsx";
-import { MetricsFooter } from "./components/footer/metrics-footer.tsx";
 import { cn } from "./lib/utils";
 
 type WorkbenchTab = "files" | "terminal" | "sandbox" | "vnc" | "settings";
@@ -47,24 +44,12 @@ export function App() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(
     readThreadFromUrl,
   );
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [workbenchOpen, setWorkbenchOpen] = useState(false);
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>("files");
 
-  // keep URL in sync so reload preserves the active thread
   useEffect(() => {
     writeThreadToUrl(activeThreadId);
   }, [activeThreadId]);
-
-  const onSelect = useCallback((id: string) => {
-    setActiveThreadId(id || null);
-  }, []);
-  const onCreated = useCallback((id: string) => {
-    setActiveThreadId(id);
-  }, []);
-  const onThreadIdChange = useCallback((id: string | undefined) => {
-    if (id) setActiveThreadId(id);
-  }, []);
 
   const openTab = useCallback((tab: WorkbenchTab) => {
     setWorkbenchTab(tab);
@@ -72,21 +57,9 @@ export function App() {
   }, []);
 
   return (
-    <PiRuntimeProvider
-      threadId={activeThreadId ?? undefined}
-      onThreadIdChange={onThreadIdChange}
-    >
+    <PuxRuntimeProvider>
       <div className="flex h-full flex-col bg-background text-foreground">
         <header className="flex h-10 items-center gap-2 border-b border-border px-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-7"
-            onClick={() => setSidebarOpen((v) => !v)}
-            title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-          >
-            <Menu className="size-4" />
-          </Button>
           <div className="text-sm font-semibold tracking-tight">
             <span className="text-muted-foreground">π</span> pux site
           </div>
@@ -148,37 +121,20 @@ export function App() {
           <Group
             orientation="horizontal"
             id="pux-site-shell"
-            // Re-mount when panel count changes so react-resizable-panels
-            // recomputes default sizes instead of squishing the new panel.
-            key={`s${sidebarOpen ? 1 : 0}-w${workbenchOpen ? 1 : 0}`}
+            key={`w${workbenchOpen ? 1 : 0}`}
             className="h-full"
           >
-            {sidebarOpen && (
-              <>
-                <Panel
-                  id="sidebar"
-                  defaultSize="18%"
-                  minSize="12%"
-                  maxSize="30%"
-                >
-                  <aside className="h-full border-r border-border bg-muted/30">
-                    <ThreadList
-                      activeThreadId={activeThreadId}
-                      onSelect={onSelect}
-                      onCreated={onCreated}
-                    />
-                  </aside>
-                </Panel>
-                <Separator className="w-px bg-border" />
-              </>
-            )}
             <Panel id="chat">
-              <main className="flex h-full flex-col">
-                <div className="min-h-0 flex-1">
-                  <Thread />
-                </div>
-                <MetricsFooter threadId={activeThreadId} />
-              </main>
+              <CopilotSidebar
+                agentId="general"
+                defaultOpen={true}
+                labels={{
+                  modalHeaderTitle: "Pux",
+                }}
+                className="h-full"
+              >
+                {/* CopilotKit renders the chat UI here */}
+              </CopilotSidebar>
             </Panel>
             {workbenchOpen && (
               <>
@@ -217,9 +173,7 @@ export function App() {
             )}
           </Group>
         </div>
-
-        <HostUiDialog />
       </div>
-    </PiRuntimeProvider>
+    </PuxRuntimeProvider>
   );
 }
