@@ -27,7 +27,6 @@ from pux_harness.agent.profile import (
 from pux_harness.context.event_middleware import EventCaptureMiddleware
 from pux_harness.context.event_tools import build_event_tools
 from pux_harness.context.offload import ContextOffloadMiddleware, build_ctx_tools
-from pux_harness.memory import MEMORY_SOURCES, build_memory_backend
 from pux_harness.sandbox.backend import PuxSandboxBackend
 from pux_harness.sandbox.docker_exec import DockerExecClient, get_exec_client
 from pux_harness.sandbox.tools import build_grader_tools, build_native_specialists
@@ -144,25 +143,12 @@ def build_graph(
             )
         )
 
-    # Phase 18: agent-managed persistent memory. The composite backend routes
-    # /memories/ to a StoreBackend (namespace=(org,)) and everything else to
-    # the existing PuxSandboxBackend. MemoryMiddleware loads /memories/AGENTS.md
-    # at startup and injects it into the system prompt. The agent updates memory
-    # via edit_file — the model does the work, not the harness.
-    memory_backend, memory_store = build_memory_backend(
-        org=org,
-        default_backend=shared_backend(),
-        store=store,
-    )
-
     return create_deep_agent(
         model=base_model,
         system_prompt=prompt,
         tools=main_tools,
-        memory=MEMORY_SOURCES,
         subagents=load_subagents(org, specialists, profile=cfg),
         middleware=middleware,
-        backend=memory_backend,
-        store=memory_store,
+        backend=shared_backend(),
         checkpointer=checkpointer,
     )
