@@ -5,6 +5,9 @@ valid offline. This module proves the loader *resolves* them into the shapes
 deepagents consumes: ``model`` -> a ``ChatOpenAI`` instance via our router,
 ``skills`` -> absolute dirs that exist, and (critically) NO ``middleware`` key.
 
+Agents are frontmatter+body ``.md`` files resolved org-local first, then
+``orgs/_shared/agents/`` — this module covers both paths.
+
 Token- and Docker-free: ``load_subagents`` only uses the tool list to resolve
 *names* (it builds a ``{name: tool}`` map and never invokes them), so we pass a
 minimal fake tool rather than constructing a ``DockerExecClient``. ``get_model``
@@ -13,6 +16,7 @@ happens.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -35,40 +39,46 @@ def _specialists() -> list[_FakeTool]:
 
 @pytest.fixture
 def fake_tree(tmp_path: Path, monkeypatch):
-    """A scratch orgs/.pi tree patched onto the ``orgs`` module (the loader's
-    own path helpers, not contract's)."""
+    """A scratch orgs/ tree patched onto the ``orgs`` module (the loader's own
+    path helpers, not contract's). ``_shared`` carries the cross-shared agent +
+    skills roots; each test's org is created by ``_org_yaml``."""
     (tmp_path / "orgs").mkdir()
-    (tmp_path / ".pi" / "agents").mkdir(parents=True)
-    (tmp_path / ".pi" / "skills").mkdir(parents=True)
+    (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
+    (tmp_path / "orgs" / "_shared" / "skills").mkdir(parents=True)
     monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
-    monkeypatch.setattr(orgs, "_agents_dir", lambda: tmp_path / ".pi" / "agents")
     monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
     return tmp_path
 
 
-def _agent_py(
+def _agent_md(
     slug: str,
     root: Path,
     *,
+    org: str = "o",
     tools: list[str] | None = None,
     skills: list[str] | None = None,
-    prose: str = "prose body",
+    model: str | None = None,
+    body: str = "prose body",
     description: str | None = None,
 ) -> None:
-    """Write the NEW-form ``.pi/agents/<slug>.py`` + prose ``<slug>.md``."""
-    agents_dir = root / ".pi" / "agents"
+    """Write a frontmatter+body ``orgs/<org>/agents/<slug>.md``.
+
+    ``org="_shared"`` writes a cross-shared agent (resolved when no org-local
+    file exists). List fields are emitted as YAML flow sequences (JSON is a
+    valid YAML subset)."""
+    agents_dir = root / "orgs" / org / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
     desc = description or f"{slug} subagent"
-    lines = ["from pathlib import Path", "", "SUBAGENT = {",
-             f'    "name": "{slug}",',
-             f'    "description": "{desc}",']
+    fm = ["---", f'name: "{slug}"', f'description: "{desc}"']
     if tools:
-        lines.append(f'    "tools": {tools!r},')
+        fm.append(f"tools: {json.dumps(tools)}")
     if skills:
-        lines.append(f'    "skills": {skills!r},')
-    lines.append('    "system_prompt": Path(__file__).with_suffix(".md").read_text(),')
-    lines.append("}")
-    (agents_dir / f"{slug}.py").write_text("\n".join(lines) + "\n")
-    (agents_dir / f"{slug}.md").write_text(prose)
+        fm.append(f"skills: {json.dumps(skills)}")
+    if model:
+        fm.append(f'model: "{model}"')
+    fm.append("---")
+    content = "\n".join(fm) + "\n\n" + body + "\n"
+    (agents_dir / f"{slug}.md").write_text(content)
 
 
 def _org_yaml(name: str, agents_list: list[str], root: Path) -> None:
@@ -82,7 +92,7 @@ def _org_yaml(name: str, agents_list: list[str], root: Path) -> None:
 def test_tools_resolved_to_specialist_surface(fake_tree):
     """Tools (bare slugs) resolve to pux_sandbox_* StructuredTools."""
     root = fake_tree
-    _agent_py("t", root, tools=["python"])
+    _agent_md("t", root, tools=["python"])
     _org_yaml("o", ["t"], root)
 
     subs = orgs.load_subagents("o", _specialists())
@@ -96,21 +106,11 @@ def test_tools_resolved_to_specialist_surface(fake_tree):
 
 
 def test_model_resolved_via_get_model(fake_tree):
-    """``model`` in SUBAGENT dict resolves through our router (bare shorthand
+    """``model`` in frontmatter resolves through our router (bare shorthand
     routed via get_model, NOT a provider:string that init_chat_model would
     choke on)."""
     root = fake_tree
-    agents_dir = root / ".pi" / "agents"
-    (agents_dir / "m.py").write_text(
-        "from pathlib import Path\n"
-        "SUBAGENT = {\n"
-        '    "name": "m",\n'
-        '    "description": "m subagent",\n'
-        '    "model": "glm-5.2",\n'
-        '    "system_prompt": Path(__file__).with_suffix(".md").read_text(),\n'
-        "}\n"
-    )
-    (agents_dir / "m.md").write_text("body")
+    _agent_md("m", root, model="glm-5.2", body="body")
     _org_yaml("o", ["m"], root)
 
     sub = orgs.load_subagents("o", _specialists())[0]
@@ -122,7 +122,7 @@ def test_model_omitted_means_inherit(fake_tree):
     """No ``model`` field -> the dict has no ``model`` key, so deepagents
     injects the parent model (``spec.get("model", model)``)."""
     root = fake_tree
-    _agent_py("bare", root, tools=["python"])
+    _agent_md("bare", root, tools=["python"])
     _org_yaml("o", ["bare"], root)
 
     sub = orgs.load_subagents("o", _specialists())[0]
@@ -132,18 +132,18 @@ def test_model_omitted_means_inherit(fake_tree):
 def test_skills_resolved_to_container_paths(fake_tree):
     """``skills`` source roots map to container-absolute paths."""
     root = fake_tree
-    _agent_py("sk", root, skills=[".pi/skills"])
+    _agent_md("sk", root, skills=["orgs/_shared/skills"])
     _org_yaml("o", ["sk"], root)
 
     sub = orgs.load_subagents("o", _specialists())[0]
-    assert sub["skills"] == ["/sandbox/workspace/.pi/skills"]
+    assert sub["skills"] == ["/sandbox/workspace/orgs/_shared/skills"]
 
 
 def test_unknown_skills_source_raises(fake_tree):
     """A skills source dir that doesn't exist under the project root fails loud
     (deepagents would otherwise silently load nothing from it)."""
     root = fake_tree
-    _agent_py("bad", root, skills=["ghost"])
+    _agent_md("bad", root, skills=["ghost"])
     _org_yaml("o", ["bad"], root)
 
     with pytest.raises(KeyError, match="ghost"):
@@ -154,43 +154,67 @@ def test_skills_accepts_yaml_list(fake_tree):
     """``skills`` accepts a YAML list of source roots; each maps to a
     container-absolute path."""
     root = fake_tree
-    _agent_py("multi", root, skills=[".pi/skills"])
+    (root / "orgs" / "o" / "skills").mkdir(parents=True)
+    _agent_md("multi", root, skills=["orgs/_shared/skills", "orgs/o/skills"])
     _org_yaml("o", ["multi"], root)
 
     sub = orgs.load_subagents("o", _specialists())[0]
-    assert sub["skills"] == ["/sandbox/workspace/.pi/skills"]
+    assert sub["skills"] == [
+        "/sandbox/workspace/orgs/_shared/skills",
+        "/sandbox/workspace/orgs/o/skills",
+    ]
 
 
-def test_py_module_loads(fake_tree):
-    """The .py path: a SUBAGENT dict loads with tools + skills resolved."""
+def test_md_agent_loads(fake_tree):
+    """A frontmatter+body .md loads with tools + skills resolved."""
     root = fake_tree
-    _agent_py("pyagent", root, tools=["python"], skills=[".pi/skills"])
-    _org_yaml("o", ["pyagent"], root)
+    _agent_md("mdagent", root, tools=["python"], skills=["orgs/_shared/skills"])
+    _org_yaml("o", ["mdagent"], root)
 
     subs = orgs.load_subagents("o", _specialists())
     assert len(subs) == 1
     sub = subs[0]
-    assert sub["name"] == "pyagent"
-    assert sub["description"] == "pyagent subagent"
+    assert sub["name"] == "mdagent"
+    assert sub["description"] == "mdagent subagent"
     assert sub["system_prompt"] == "prose body"
     assert [t.name for t in sub["tools"]] == ["pux_sandbox_python"]
-    assert sub["skills"] == ["/sandbox/workspace/.pi/skills"]
+    assert sub["skills"] == ["/sandbox/workspace/orgs/_shared/skills"]
     assert "model" not in sub
     assert "middleware" not in sub
 
 
-def test_py_module_missing_sibling_md_raises(fake_tree):
-    """A ``.py`` whose ``system_prompt`` reads a missing sibling ``.md`` fails
-    loud at load (``exec_module`` raises) — no silent empty prompt."""
+def test_shared_agent_resolves(fake_tree):
+    """An agent absent from the org's own ``agents/`` dir resolves from
+    ``orgs/_shared/agents/``."""
     root = fake_tree
-    (root / ".pi" / "agents" / "orphan.py").write_text(
-        "from pathlib import Path\n"
-        "SUBAGENT = {'name': 'orphan', 'description': 'd', "
-        "'system_prompt': Path(__file__).with_suffix('.md').read_text()}\n"
-    )
-    _org_yaml("o", ["orphan"], root)
+    _agent_md("sharedone", root, org="_shared", tools=["python"])
+    _org_yaml("o", ["sharedone"], root)
 
-    with pytest.raises(FileNotFoundError):
+    sub = orgs.load_subagents("o", _specialists())[0]
+    assert sub["name"] == "sharedone"
+    assert sub["system_prompt"] == "prose body"
+
+
+def test_org_local_overrides_shared(fake_tree):
+    """A same-named agent in the org's own ``agents/`` dir wins over the
+    ``_shared`` one (specialization)."""
+    root = fake_tree
+    _agent_md("dup", root, org="_shared", body="shared body", description="shared")
+    _agent_md("dup", root, org="o", body="org body", description="org")
+    _org_yaml("o", ["dup"], root)
+
+    sub = orgs.load_subagents("o", _specialists())[0]
+    assert sub["system_prompt"] == "org body"
+    assert sub["description"] == "org"
+
+
+def test_missing_agent_md_raises(fake_tree):
+    """A roster slug with no ``<slug>.md`` in org-local or ``_shared`` fails
+    loud — no silent empty agent."""
+    root = fake_tree
+    _org_yaml("o", ["ghost"], root)
+
+    with pytest.raises(FileNotFoundError, match="ghost"):
         orgs.load_subagents("o", _specialists())
 
 

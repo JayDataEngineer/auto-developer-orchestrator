@@ -18,12 +18,12 @@ surface — no Go server, no Docker, no tokens.
 """
 from __future__ import annotations
 
-import importlib.util
+import json
 from pathlib import Path
 
 import pytest
 
-from pux_harness.agent import contract
+from pux_harness.agent import contract, orgs
 from pux_harness.agent.contract import (
     KNOWN_POLICY_SECTIONS,
     NATIVE_FS_TOOLS,
@@ -113,36 +113,40 @@ def test_rule4_native_fs_tool_always_allowed(fake_tree):
 
 @pytest.fixture
 def fake_tree(tmp_path: Path, monkeypatch):
-    """A scratch orgs/.pi tree. Returns helpers to build orgs + agents, with
-    contract's path helpers patched onto it."""
+    """A scratch orgs/ tree (no .pi/). Returns helpers to build orgs + agents.
+
+    Both ``contract._orgs_dir`` AND ``orgs._orgs_dir`` are patched: rule-3
+    resolution delegates into ``orgs._load_agent_spec`` (which reads
+    ``orgs._orgs_dir`` via ``_agent_search_dirs``), while the contract's own
+    path helpers read ``contract._orgs_dir`` — patching only one lets the two
+    halves see different trees. ``_shared/{agents,skills}`` are pre-created
+    (the shared agent search dir + the default skills root)."""
     (tmp_path / "orgs").mkdir()
-    (tmp_path / ".pi" / "agents").mkdir(parents=True)
-    (tmp_path / ".pi" / "skills").mkdir(parents=True)
+    (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
+    (tmp_path / "orgs" / "_shared" / "skills").mkdir(parents=True)
     monkeypatch.setattr(contract, "_orgs_dir", lambda: tmp_path / "orgs")
-    monkeypatch.setattr(contract, "_agents_dir", lambda: tmp_path / ".pi" / "agents")
+    monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
 
     def add_agent(slug: str, tools: list[str] | None = None,
                   desc: str = "a specialist",
-                  skills: list[str] | None = None) -> None:
-        """Write the NEW-form .pi/agents/<slug>.py + prose-only <slug>.md."""
-        agents_dir = tmp_path / ".pi" / "agents"
-        lines = ["from pathlib import Path", "",
-                 "SUBAGENT = {"]
-        lines.append(f'    "name": "{slug}",')
-        lines.append(f'    "description": "{desc}",')
+                  skills: list[str] | None = None,
+                  org: str = "o") -> None:
+        """Write a frontmatter+body ``orgs/<org>/agents/<slug>.md`` — the ONE
+        file per agent (mirrors the SKILL.md convention). List fields are
+        emitted as YAML flow sequences (JSON is a valid YAML subset)."""
+        agents_dir = tmp_path / "orgs" / org / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+        fm = ["---", f'name: "{slug}"', f'description: "{desc}"']
         if tools is not None:
-            lines.append(f'    "tools": {tools!r},')
+            fm.append(f"tools: {json.dumps(tools)}")
         if skills is not None:
-            lines.append(f'    "skills": {skills!r},')
-        lines.append('    "system_prompt": Path(__file__).with_suffix(".md").read_text(),')
-        lines.append("}")
-        lines.append("")
-        (agents_dir / f"{slug}.py").write_text("\n".join(lines))
-        (agents_dir / f"{slug}.md").write_text("prose body\n")
+            fm.append(f"skills: {json.dumps(skills)}")
+        fm.append("---")
+        (agents_dir / f"{slug}.md").write_text("\n".join(fm) + "\n\nprose body\n")
 
     def add_org(org: str, agents: list[str] | None = None, body: str = "# Org\n",
                 policy: str | None = None) -> None:
-        """Write the NEW-form org.yaml + prose-only AGENTS.md."""
+        """Write org.yaml (roster) + prose-only AGENTS.md (+ optional policy)."""
         d = tmp_path / "orgs" / org
         d.mkdir(exist_ok=True)
         if agents is not None:
@@ -181,31 +185,30 @@ def test_rule3_unresolvable_slug(fake_tree):
 
 
 def test_rule3_agent_missing_required_key(fake_tree):
-    add_org, add_agent = fake_tree
-    # Write a .py SUBAGENT dict missing 'description'
-    agents_dir = contract._agents_dir()
-    (agents_dir / "nodesc.py").write_text(
-        "from pathlib import Path\n"
-        "SUBAGENT = {\n"
-        '    "name": "nodesc",\n'
-        '    "system_prompt": Path(__file__).with_suffix(".md").read_text(),\n'
-        "}\n"
-    )
-    (agents_dir / "nodesc.md").write_text("prose\n")
+    add_org, _ = fake_tree
+    # Write an agent .md whose frontmatter is missing 'description'
+    agents_dir = contract._orgs_dir() / "o" / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    (agents_dir / "nodesc.md").write_text("---\nname: nodesc\n---\n\nprose\n")
     add_org("o", agents=["nodesc"])
     vs = check_org("o")
-    assert any(v.rule == "agent-missing-keys" for v in vs)
+    assert any(v.rule == "agent-missing-keys" for v in vs), vs
 
 
-def test_rule3_agent_import_error(fake_tree):
-    """A .py that fails to import is caught as agent-resolves."""
+def test_rule3_agent_frontmatter_parse_error(fake_tree):
+    """A roster agent .md whose frontmatter doesn't parse is caught as
+    agent-resolves — the loader fails loud (yaml.safe_load raises) rather than
+    yielding a junk spec. (.py agents are forbidden, so the old import-error
+    path is gone; the equivalent failure mode is a malformed .md.)"""
     add_org, _ = fake_tree
-    agents_dir = contract._agents_dir()
-    (agents_dir / "broken.py").write_text("raise RuntimeError('boom')\n")
-    (agents_dir / "broken.md").write_text("prose\n")
+    agents_dir = contract._orgs_dir() / "o" / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    # colon-space in an unquoted scalar is a YAML parse error
+    (agents_dir / "broken.md").write_text(
+        "---\nname: broken\ndescription: bad: value\n---\n\nprose\n")
     add_org("o", agents=["broken"])
     vs = check_org("o")
-    assert any(v.rule == "agent-resolves" for v in vs)
+    assert any(v.rule == "agent-resolves" for v in vs), vs
 
 
 def test_rule3_unknown_agent_key_warned(fake_tree):
@@ -369,7 +372,7 @@ def test_check_skill_roots_flags_loose_md(fake_tree, monkeypatch):
     """A loose .md directly under a skills root warns — it's invisible to
     SkillsMiddleware (the stranded-playbook regression)."""
     monkeypatch.setattr(contract, "PROJECT_ROOT", contract._orgs_dir().parent)
-    root = contract._orgs_dir().parent / ".pi" / "skills"
+    root = contract._orgs_dir() / "_shared" / "skills"
     _write_skill(root, "good-one")
     (root / "STRAY_PLAYBOOK.md").write_text("# a loose playbook\n")
     vs = contract.check_skill_roots()
@@ -382,7 +385,7 @@ def test_check_skill_roots_flags_loose_md(fake_tree, monkeypatch):
 def test_check_skill_roots_flags_malformed_skill(fake_tree, monkeypatch):
     """A malformed skill anywhere under a root surfaces as skill-well-formed."""
     monkeypatch.setattr(contract, "PROJECT_ROOT", contract._orgs_dir().parent)
-    root = contract._orgs_dir().parent / ".pi" / "skills"
+    root = contract._orgs_dir() / "_shared" / "skills"
     _write_skill(root, "mismatch", name="not-the-dir-name")  # name mismatch
     vs = contract.check_skill_roots()
     assert any(v.rule == "skill-well-formed" for v in vs), vs
@@ -394,10 +397,12 @@ def test_check_skill_roots_clean_on_real_repo():
     assert contract.check_skill_roots() == [], contract.check_skill_roots()
 
 
-def test_no_legacy_agent_frontmatter_on_real_repo():
-    """No .pi/agents/*.md carries YAML frontmatter — prose-only after migration."""
+def test_no_legacy_agent_py_on_real_repo():
+    """No .py agents ship + every agent .md carries frontmatter (name +
+    description) + a non-empty body — the FLIPPED tripwire (Phase 15). The
+    old ``.pi/agents/<slug>.py`` SUBAGENT-dict form is permanently forbidden."""
     vs = [v for v in check_harness()
-          if v.rule == "no-legacy-agent-frontmatter"]
+          if v.rule == "no-legacy-agent-py"]
     assert vs == [], vs
 
 
@@ -412,7 +417,7 @@ def test_no_legacy_org_roster_on_real_repo():
 def test_no_legacy_sandbox_artifacts_rejected(fake_tree):
     """A bootstrap.sh / docker-compose.yml under any org is a HARD contract
     failure — the harness owns the full sandbox lifecycle now (no bash/compose
-    shadow). Mirrors no-legacy-org-roster / no-legacy-agent-frontmatter."""
+    shadow). Mirrors no-legacy-org-roster / no-legacy-agent-py."""
     add_org, _ = fake_tree
     add_org("badorg")
     (contract._orgs_dir() / "badorg" / "bootstrap.sh").write_text("#!/bin/sh\n")

@@ -12,13 +12,13 @@ Two validation tiers:
   1. ``AGENTS.md`` present.
   2. ``AGENTS.md`` carries no frontmatter (prose-only); roster lives in
      ``org.yaml``.
-  3. Every ``org.yaml`` slug resolves to a valid ``.pi/agents/<slug>.py``
-     exporting a ``SUBAGENT`` dict with ``name``, ``description``, and
-     ``system_prompt``.
+  3. Every ``org.yaml`` slug resolves to a ``orgs/<org>/agents/<slug>.md`` (or
+     ``orgs/_shared/agents/<slug>.md``) whose frontmatter carries ``name`` +
+     ``description`` and whose body (the system prompt) is non-empty.
   5. Optional ``policy.yaml`` parses and uses known sections.
 
 * **Tool-resolution** (rule 4 — always on, no server): every entry in an
-  agent's ``SUBAGENT["tools"]`` list resolves to a native fs tool OR a name in
+  agent's frontmatter ``tools`` list resolves to a native fs tool OR a name in
   the static specialist surface (``SPECIALIST_TOOL_NAMES`` from ``native_tools``).
   Both surfaces are Python constants, so this runs offline in pytest and in
   ``--check-contract`` with no container or Go server.
@@ -29,10 +29,12 @@ Two validation tiers:
   8. Skill hygiene: every ``SKILL.md`` is Agent-Spec well-formed, and no ``.md``
      sits loose directly under a skills root (``check_skill_roots``).
 
-* **Permanent legacy tripwires** (no-legacy-agent-frontmatter,
-  no-legacy-org-roster): the legacy ``.md``-with-frontmatter agent form and
-  the ``agents:``-key-on-AGENTS.md org form are structurally forbidden —
-  ``--check-contract`` blocks any commit that reintroduces them.
+* **Permanent legacy tripwires** (``no-legacy-agent-py``,
+  ``no-legacy-org-roster``): the legacy ``.pi/agents/<slug>.py`` SUBAGENT-dict
+  module form and the ``agents:``-key-on-AGENTS.md org form are structurally
+  forbidden — ``--check-contract`` blocks any commit that reintroduces them.
+  Agents are now one frontmatter+body ``<slug>.md`` per org (org-local first,
+  then ``orgs/_shared/agents/``).
 
 Rule 4 resolves against the *static* native surface: the specialist names are
 a Python frozenset (the single source of truth shared with ``graph.py``), so a
@@ -40,7 +42,6 @@ stale ``tools:`` reference fails loud here without any process to probe.
 """
 from __future__ import annotations
 
-import importlib.util
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,20 +53,22 @@ from pux_harness.sandbox import policy as policy_mod
 from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
 from pux_harness.agent.orgs import (
     PROJECT_ROOT,
-    _agents_dir,
+    _agent_search_dirs,
+    _load_agent_spec,
     _orgs_dir,
     _parse_list,
     _split_frontmatter,
     discover_orgs,
     org_agent_slugs,
 )
-# ``_orgs_dir`` / ``_agents_dir`` are re-exported here (bound into THIS
-# module's namespace by the import) so the contract tests can monkeypatch
-# ``contract._orgs_dir`` / ``_agents_dir`` at the existing call sites.
+# ``_orgs_dir`` / ``_agent_search_dirs`` / ``_load_agent_spec`` are re-exported
+# here (bound into THIS module's namespace by the import) so the contract tests
+# can monkeypatch them at the existing call sites.
 
 # --- the contract vocabulary ----------------------------------------------
 
-# ``.pi/agents/<slug>.py`` SUBAGENT dict must contain these keys.
+# Every agent ``<slug>.md`` must carry these (name + description from
+# frontmatter; system_prompt = the body).
 _REQUIRED_AGENT_KEYS: frozenset[str] = frozenset({
     "name", "description", "system_prompt",
 })
@@ -104,8 +107,8 @@ class Violation:
 
 
 # --- discovery (orgs + agent-slugs live in the low-level orgs module) ----
-# ``_orgs_dir`` / ``_agents_dir`` / ``_skills_dir`` / ``_parse_list`` /
-# ``_split_frontmatter`` are all imported from ``orgs`` (re-exported above) —
+# ``_orgs_dir`` / ``_agent_search_dirs`` / ``_load_agent_spec`` / ``_parse_list``
+# / ``_split_frontmatter`` are all imported from ``orgs`` (re-exported above) —
 # single source of truth. The contract tests monkeypatch them at
 # ``contract._orgs_dir`` etc., which still works because the import binds the
 # names into THIS module's namespace.
@@ -114,21 +117,15 @@ class Violation:
 # --- per-org checks (rules 1-5) ------------------------------------------
 
 
-def _load_agent_subagent(slug: str) -> dict[str, Any] | None:
-    """Import ``.pi/agents/<slug>.py`` and return its ``SUBAGENT`` dict.
+def _load_agent_subagent(slug: str, org: str) -> dict[str, Any] | None:
+    """Read ``<slug>.md`` (org-local then ``_shared``) -> spec dict, or ``None``.
 
-    Path-loaded (``importlib.util.spec_from_file_location``) — ``.pi/`` is NOT
-    on ``sys.path`` and this never adds it. Returns ``None`` if no ``.py``
-    exists; raises on import error or missing ``SUBAGENT`` (fail loud — a
-    broken agent is a contract violation, not a silent skip).
-    """
-    path = _agents_dir() / f"{slug}.py"
-    if not path.is_file():
-        return None
-    spec = importlib.util.spec_from_file_location(f"_pi_agent_{slug}", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[union-attr]
-    return mod.SUBAGENT  # type: ignore[attr-defined]
+    Delegates to ``orgs._load_agent_spec`` (single source of truth — the runtime
+    loader and the contract read the SAME file). Returns ``None`` if no
+    ``<slug>.md`` exists in either search dir; the caller (``check_org``)
+    reports an ``agent-resolves`` violation. A malformed frontmatter raises
+    ``ValueError`` (caught + reported by the caller)."""
+    return _load_agent_spec(slug, org)
 
 
 def check_org(name: str) -> list[Violation]:
@@ -177,29 +174,31 @@ def check_org(name: str) -> list[Violation]:
         # No org.yaml but AGENTS.md has frontmatter — already reported above.
         slugs = _parse_list(fm.get("agents", ""))
 
-    # Rule 3: every slug resolves to a valid .py agent with required keys.
+    # Rule 3: every slug resolves to a valid agent .md (org-local or _shared)
+    # with required frontmatter keys + a non-empty body (system_prompt).
     agent_subagents: dict[str, dict[str, Any]] = {}
     for slug in slugs:
         try:
-            sub = _load_agent_subagent(slug)
+            sub = _load_agent_subagent(slug, name)
         except Exception as exc:
             v.append(Violation(
                 "error", "agent-resolves",
-                f"{name}: agents: {slug!r} -> .pi/agents/{slug}.py "
-                f"failed to import: {exc}"))
+                f"{name}: agents: {slug!r} -> failed to read agent .md: {exc}"))
             continue
         if sub is None:
+            looked = ", ".join(
+                str(d / f"{slug}.md") for d in _agent_search_dirs(name))
             v.append(Violation(
                 "error", "agent-resolves",
-                f"{name}: agents: {slug!r} -> "
-                f"no .pi/agents/{slug}.py"))
+                f"{name}: agents: {slug!r} -> no agent .md found "
+                f"(searched: {looked})"))
             continue
         agent_subagents[slug] = sub
         missing = sorted(_REQUIRED_AGENT_KEYS - sub.keys())
         if missing:
             v.append(Violation(
                 "error", "agent-missing-keys",
-                f"{name}/{slug}: SUBAGENT dict missing required "
+                f"{name}/{slug}: agent .md frontmatter missing required "
                 f"keys: {missing}"))
 
     # Rule 4: tool whitelist resolves against the static native surface
@@ -371,31 +370,66 @@ def _validate_jobs(name: str, pol: policy_mod.Policy) -> list[Violation]:
 _MANIFEST_RE = re.compile(r"^\s*ORG_AGENTS\s*[:=]", re.MULTILINE)
 
 
+def _agent_dirs() -> list[Path]:
+    """Every directory that ships agent definitions: each org's ``agents/``
+    plus ``orgs/_shared/agents/`` (shared agents — ``_shared`` is not itself an
+    org, so it is not returned by ``discover_orgs``)."""
+    orgs = _orgs_dir()
+    dirs = [orgs / "_shared" / "agents"]
+    dirs += [orgs / org / "agents" for org in discover_orgs()]
+    return [d for d in dirs if d.is_dir()]
+
+
 def orphan_agents() -> list[str]:
     """Agent slugs owned by no org (not listed in any ``org.yaml``).
-    Rule 7 — SHOULD (warn), not blocking."""
+    Rule 7 — SHOULD (warn), not blocking. Scans every org's ``agents/`` dir
+    plus ``orgs/_shared/agents/`` — a shared agent is "owned" if >=1 org lists
+    it in its roster."""
     owned: set[str] = set()
     for org in discover_orgs():
         owned.update(org_agent_slugs(org))
-    all_agents = {p.stem for p in _agents_dir().glob("*.py")}
+    all_agents = {p.stem for d in _agent_dirs() for p in d.glob("*.md")}
     return sorted(all_agents - owned)
 
 
-def _no_legacy_agent_frontmatter() -> list[Violation]:
-    """No .pi/agents/*.md may carry YAML frontmatter — prose-only.
+def _no_legacy_agent_py() -> list[Violation]:
+    """No ``.py`` agent may ship, and every agent ``.md`` must be well-formed.
 
-    Permanent tripwire (Phase 2). A new agent added as .md-with-frontmatter is
-    a HARD contract failure, not a silent dual-read. The .py form is the only
-    valid agent config path.
+    Permanent tripwire (Phase 15 flipped the Phase-2 form). The legacy
+    ``.pi/agents/<slug>.py`` SUBAGENT-dict module was replaced by ONE
+    frontmatter+body ``<slug>.md`` per org (``orgs/<org>/agents/`` +
+    ``orgs/_shared/agents/``). A re-introduced ``.py`` agent, an agent ``.md``
+    whose frontmatter is missing a required key (``name``/``description``),
+    or an empty body (no system prompt) is a HARD contract failure — not a
+    silent dual-read.
     """
     v: list[Violation] = []
-    for md in sorted(_agents_dir().glob("*.md")):
-        text = md.read_text()
-        if text.startswith("---"):
-            v.append(Violation(
-                "error", "no-legacy-agent-frontmatter",
-                f".pi/agents/{md.name}: carries YAML frontmatter — agents "
-                f"must be .py (SUBAGENT dict) + prose-only .md"))
+    for d in _agent_dirs():
+        for path in sorted(d.iterdir()):
+            if path.suffix == ".py":
+                v.append(Violation(
+                    "error", "no-legacy-agent-py",
+                    f"{path}: .py agents are the forbidden legacy form — use a "
+                    f"frontmatter+body .md (see "
+                    f"orgs/_shared/agents/researcher.md for the shape)"))
+            elif path.suffix == ".md":
+                try:
+                    fm, body = _split_frontmatter(path.read_text())
+                except ValueError as exc:
+                    v.append(Violation(
+                        "error", "no-legacy-agent-py",
+                        f"{path}: frontmatter does not parse: {exc}"))
+                    continue
+                spec = {**fm, "system_prompt": body}
+                missing = sorted(_REQUIRED_AGENT_KEYS - spec.keys())
+                if missing:
+                    v.append(Violation(
+                        "error", "no-legacy-agent-py",
+                        f"{path}: missing required frontmatter keys: {missing}"))
+                if not body.strip():
+                    v.append(Violation(
+                        "error", "no-legacy-agent-py",
+                        f"{path}: empty body — the agent has no system prompt"))
     return v
 
 
@@ -404,7 +438,7 @@ def _no_legacy_sandbox_artifacts() -> list[Violation]:
     may ship — the harness owns the full sandbox lifecycle now (Phase 13; the
     frozen bash/compose shadow lifecycle was deleted). Permanent tripwire
     (no-legacy-left-behind): a future re-introduction is a HARD failure, not a
-    silent regression — mirroring ``no-legacy-agent-frontmatter`` /
+    silent regression — mirroring ``no-legacy-agent-py`` /
     ``no-legacy-org-roster``."""
     v: list[Violation] = []
     orgs = _orgs_dir()
@@ -437,7 +471,7 @@ def check_harness() -> list[Violation]:
         v.append(Violation("warn", "no-orphan-agents",
                            f"agent {orphan!r} is owned by no org (not in any "
                            f"`agents:` frontmatter)"))
-    v.extend(_no_legacy_agent_frontmatter())
+    v.extend(_no_legacy_agent_py())
     v.extend(_no_legacy_sandbox_artifacts())
     return v
 
@@ -497,14 +531,12 @@ def _well_formed_skill_dirs(source: Path) -> list[Path]:
 
 
 def _skill_roots() -> list[Path]:
-    """Every skills-ROOT directory in the project: the global ``.pi/skills``
-    plus each ``orgs/<name>/skills``. Scanned regardless of whether any agent
-    declares the root — a loose playbook or malformed skill is a regression
-    even if undeclared."""
+    """Every skills-ROOT directory in the project: each ``orgs/<name>/skills``
+    (the ``*/skills`` glob matches ``_shared`` too, so ``orgs/_shared/skills``
+    is covered). Scanned regardless of whether any agent declares the root — a
+    loose playbook or malformed skill is a regression even if undeclared."""
     orgs = _orgs_dir()
-    roots = [PROJECT_ROOT / ".pi" / "skills"]
-    roots += sorted(p for p in orgs.glob("*/skills") if p.is_dir())
-    return [r for r in roots if r.is_dir()]
+    return [p for p in sorted(orgs.glob("*/skills")) if p.is_dir()]
 
 
 def check_skill_roots() -> list[Violation]:

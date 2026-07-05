@@ -20,8 +20,8 @@ pux_harness/
   main.py             # [entry] in-process runner (`pux direct`) + sandbox lifecycle
   agent/              # assembly layer — builds the deepagents graph
     graph.py          # build_graph(org) -> compiled graph (1 DockerExecClient + backend/process)
-    orgs.py           # system-prompt builder + subagent loader (.pi/agents/<slug>.py
-                      # SUBAGENT dicts + org.yaml rosters; resolves tools/skills/model)
+    orgs.py           # system-prompt builder + subagent loader (orgs/<org>/agents/<slug>.md
+                      # frontmatter+body + orgs/_shared/agents + org.yaml rosters; resolves tools/skills/model)
     model.py          # provider/model factory (PUX_MODEL)
     contract.py       # declarative org-contract enforcer (rules 1-8 + legacy tripwires)
   sandbox/            # Docker sandbox layer — self-contained (no agent/context import)

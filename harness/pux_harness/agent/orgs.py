@@ -1,27 +1,27 @@
 """Org + specialist-agent loading for the deepagents harness.
 
 System prompt = root AGENTS.md + orgs/<name>/AGENTS.md + harness addendum.
-Subagents come from ``.pi/agents/<slug>`` — a Python module (``<slug>.py``
-exporting a ``SUBAGENT`` dict, the deepagents-idiomatic form) plus a sibling
-``<slug>.md`` holding the system-prompt prose. The org roster is
-``orgs/<name>/org.yaml`` (``agents: [slug, ...]``); ``AGENTS.md`` is pure
-CTO-prompt prose (no frontmatter) — restored to its conventional role as agent
-*context* rather than a config vehicle.
+Each org is a self-contained bundle: ``orgs/<name>/agents/<slug>.md`` is ONE
+file — YAML frontmatter (``name``/``description`` + optional ``tools``/
+``skills``/``model``) + a markdown body that IS the system prompt (mirrors the
+``SKILL.md`` convention). The org roster is ``orgs/<name>/org.yaml``
+(``agents: [slug, ...]``); ``AGENTS.md`` is pure CTO-prompt prose (no
+frontmatter). Cross-org agents (e.g. ``researcher``) live in
+``orgs/_shared/agents/``; resolution is **org-local first, then _shared**, so
+an org can specialize a shared agent by dropping a same-named ``<slug>.md`` in
+its own ``agents/`` dir.
 
 The harness addendum corrects the one terminology drift between pi-mono and
 deepagents: pi-mono delegates via ``subagent(agent, task)``; deepagents
 delegates via the ``task`` tool with ``subagent_type=<name>``.
 
-**Subagent modules (``.pi/agents/*.py``) MUST import only the stdlib** — no
-``pux_harness.*`` / Docker — so they stay loadable under ``--check-contract``
-(offline, no Docker/tokens). Tool + skills resolution stays CENTRAL (here, via
-``_resolve_tools`` / ``_resolve_skills``) precisely so the modules stay
-decoupled and CI-safe. ``importlib`` loads each module by path (``.pi/`` is NOT
-on ``sys.path`` and stays off); each module's body reads its sibling ``.md``.
+Agent definitions are pure data (frontmatter + prose) — no executable module,
+no ``importlib``. Tool + skills resolution stays CENTRAL (here, via
+``_resolve_tools`` / ``_resolve_skills``) so the contract checker
+(``--check-contract``, offline) reads the same files the runtime does.
 """
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 from typing import Any
 
@@ -46,8 +46,13 @@ def _orgs_dir() -> Path:
     return PROJECT_ROOT / "orgs"
 
 
-def _agents_dir() -> Path:
-    return PROJECT_ROOT / ".pi" / "agents"
+def _agent_search_dirs(org: str) -> list[Path]:
+    """Directories searched for an agent ``<slug>.md``, org-local first then
+    shared. Single source of truth — ``contract.py`` re-exports / monkeypatches
+    this at its call sites. An org specializes a shared agent by placing a
+    same-named ``<slug>.md`` in its own ``agents/`` dir (first hit wins)."""
+    orgs = _orgs_dir()
+    return [orgs / org / "agents", orgs / "_shared" / "agents"]
 
 
 def _read(rel: str) -> str:
@@ -133,9 +138,9 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     or a YAML syntax error raises ``ValueError`` (fail loud — the old parser
     silently produced junk values).
 
-    Still used for the root ``AGENTS.md`` + SKILL.md (contract rule 8) —
-    the migrated ``.pi/agents/*.md`` (prose only) and ``org.yaml`` paths
-    no longer go through it.
+    Still used for the root ``AGENTS.md`` + every ``SKILL.md`` + every agent
+    ``<slug>.md`` (contract rule 8 + the agent well-formedness tripwire); only
+    ``org.yaml`` (a bare YAML doc with no markdown body) bypasses it.
     """
     if not text.startswith("---"):
         return {}, text.strip()
@@ -201,11 +206,12 @@ def _resolve_skills(raw: Any, slug: str) -> list[str]:
     beneath it — a source is a skills **root** directory, not an individual
     skill (passing an individual skill dir loads nothing: its only child is the
     SKILL.md *file*). So a value is a **project-relative** directory (e.g.
-    ``.pi/skills``); we validate it exists on the host (the project is
+    ``orgs/_shared/skills`` or ``orgs/<org>/skills``); we validate it exists on
+    the host (the project is
     bind-mounted 1:1 at ``/sandbox/workspace``, so host existence == container
     existence) and map it to a container-absolute path for deepagents.
 
-    E2E-proven: ``backend.ls('/sandbox/workspace/.pi/skills')`` lists
+    E2E-proven: ``backend.ls('/sandbox/workspace/orgs/_shared/skills')`` lists
     ``source-citation``; the middleware then reads its ``SKILL.md``.
     """
     out: list[str] = []
@@ -225,26 +231,22 @@ def _resolve_skills(raw: Any, slug: str) -> list[str]:
     return out
 
 
-def _load_agent_module(slug: str) -> Any:
-    """Load ``.pi/agents/<slug>.py`` by path and return its module object, or
-    ``None`` if no ``.py`` exists (the caller, ``load_subagents``, raises —
-    there is NO legacy ``.md`` fallback; the ``no-legacy-agent-frontmatter``
-    contract tripwire guarantees every roster slug has a ``.py``).
+def _load_agent_spec(slug: str, org: str) -> dict[str, Any] | None:
+    """Read ``<slug>.md`` from the org-local then ``_shared`` agent dir and
+    return a spec dict (``name``/``description`` + optional ``tools``/
+    ``skills``/``model`` from frontmatter; ``system_prompt`` = the body).
 
-    Path-loaded (``importlib.util.spec_from_file_location``) — ``.pi/`` is NOT
-    on ``sys.path`` and this never adds it; the module's ``__file__`` is set so
-    its body can read the sibling ``<slug>.md`` for the system-prompt prose.
-    The module MUST export a ``SUBAGENT`` dict and import only the stdlib (no
-    ``pux_harness.*`` / Docker) so it stays loadable under ``--check-contract``
-    (offline). A missing sibling ``.md`` raises at ``exec_module`` (fail loud).
+    Returns ``None`` if no ``<slug>.md`` exists in either search dir — the
+    caller (``load_subagents`` / the contract checker) raises. There is NO
+    legacy ``.py`` fallback; the ``no-legacy-agent-py`` contract tripwire
+    guarantees every roster slug resolves to a frontmatter ``.md``.
     """
-    path = _agents_dir() / f"{slug}.py"
-    if not path.is_file():
-        return None
-    spec = importlib.util.spec_from_file_location(f"_pi_agent_{slug}", path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    for d in _agent_search_dirs(org):
+        path = d / f"{slug}.md"
+        if path.is_file():
+            fm, body = _split_frontmatter(path.read_text())
+            return {**fm, "system_prompt": body}
+    return None
 
 
 def _build_sub(
@@ -273,9 +275,8 @@ def _build_sub(
 def load_subagents(org: str, all_tools: list[BaseTool]) -> list[dict[str, Any]]:
     """Build deepagents SubAgent dicts for ``org``'s specialists.
 
-    For each slug in ``org.yaml``, load ``.pi/agents/<slug>.py`` and build
-    from its ``SUBAGENT`` dict. The module reads its sibling ``.md`` for the
-    system-prompt prose.
+    For each slug in ``org.yaml``, load ``orgs/<org>/agents/<slug>.md`` (or
+    ``orgs/_shared/agents/<slug>.md``) and build from its frontmatter + body.
 
     No ``middleware`` key: deepagents' ``SubAgentMiddleware`` does not forward a
     raw spec's ``middleware`` key into the compiled specialist (verified in the
@@ -288,11 +289,11 @@ def load_subagents(org: str, all_tools: list[BaseTool]) -> list[dict[str, Any]]:
     tool_map: dict[str, BaseTool] = {t.name: t for t in all_tools}
     subs: list[dict[str, Any]] = []
     for slug in org_agent_slugs(org):
-        mod = _load_agent_module(slug)
-        if mod is None:
+        spec = _load_agent_spec(slug, org)
+        if spec is None:
+            searched = [str(p / f"{slug}.md") for p in _agent_search_dirs(org)]
             raise FileNotFoundError(
-                f".pi/agents/{slug}.py not found — agents must be .py modules")
-        spec = mod.SUBAGENT
+                f"no agent {slug!r} for org {org!r} — searched {searched}")
         sub = _build_sub(slug, spec, tool_map, spec["system_prompt"])
         subs.append(sub)
     return subs

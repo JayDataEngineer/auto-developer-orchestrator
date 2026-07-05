@@ -15,8 +15,11 @@ indented 2), so the agent-visible output is byte-equivalent pre/post port.
 Batch 1 (8b/8c):
   - ``python``        — ``python3 -c <code>`` via docker exec (was Go's
                         SandboxPythonTool; 96 LOC).
-  - ``list_skills``   — host FS walk of ``<project>/.pi/skills/``.
-  - ``load_skill``    — host FS read of one ``SKILL.md`` body.
+  - ``list_skills``   — host FS walk of every skills root (the active org's
+                        ``skills/`` first, then ``orgs/_shared/skills/``, then
+                        other orgs'); org-local wins on name collision.
+  - ``load_skill``    — host FS read of one ``SKILL.md`` body, resolved against
+                        the same root order.
 
 Batch 2 (8d):
   - ``describe_image`` — **driving-model-primary** (mimo-v2.5 native multimodal
@@ -39,9 +42,11 @@ Batch 4 (8f):
     exec (was Go's DesktopTool spec family; pixel-coord contract — OCR drifts).
 
 **Bug fixed by the port:** the Go skills package read ``<root>/skills/`` which
-does not exist in this repo (skills live at ``.pi/skills/`` per the pi-mono
-layout); the live ``list_skills`` returned ``count: 0``. Probed before porting
-(2026-07-03); the Python port reads the correct path.
+does not exist in this repo; the live ``list_skills`` returned ``count: 0``.
+Probed before porting (2026-07-03); the Python port reads the real roots
+(``orgs/_shared/skills`` + each ``orgs/<name>/skills``). Phase 15 retired the
+old single ``.pi/skills`` root entirely — skills now follow the same org-local
++ ``_shared`` shape as agents.
 
 Timeout note: the Go ``describe_image`` tool enforced a 120s deadline. The
 shared ``DockerExecClient.exec(timeout=120)`` now enforces it (Phase 8d) and
@@ -51,6 +56,7 @@ raises ``ExecTimeout``, which this tool maps to ``reason:"timeout"``. The Go
 from __future__ import annotations
 
 import json
+import logging
 import shlex
 from pathlib import Path
 
@@ -60,10 +66,31 @@ from pydantic import BaseModel, Field
 
 from pux_harness.sandbox.docker_exec import DockerExecClient, ExecTimeout
 
+log = logging.getLogger(__name__)
+
 PUX_PREFIX = "pux_sandbox_"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SKILLS_DIR = PROJECT_ROOT / ".pi" / "skills"
 SKILL_FILE = "SKILL.md"
+
+
+def _skills_dirs(org: str | None = None) -> list[Path]:
+    """Skills-ROOT directories to search, highest-priority first.
+
+    With an ``org``: that org's ``skills/`` wins, then ``orgs/_shared/skills``,
+    then every other org's skills (so a cross-org skill is still discoverable).
+    Without an ``org`` (the offline ``--check`` smoke path): all roots in stable
+    sorted order, no priority. Non-existent dirs are filtered out."""
+    orgs = PROJECT_ROOT / "orgs"
+    roots: list[Path] = []
+    if org:
+        roots.append(orgs / org / "skills")
+    roots.append(orgs / "_shared" / "skills")
+    seen = {str(r) for r in roots}
+    for p in sorted(orgs.glob("*/skills")):
+        if str(p) not in seen:
+            roots.append(p)
+            seen.add(str(p))
+    return [r for r in roots if r.is_dir()]
 
 # The complete set of unprefixed specialist names the harness implements
 # natively (Phase 8i renamed this from the transitional ``PORTED_SPECIALISTS`` —
@@ -137,7 +164,7 @@ def _python_tool(exec_client: DockerExecClient) -> StructuredTool:
     )
 
 
-# --- skills (8c) — host FS at <project>/.pi/skills/ ------------------------
+# --- skills (8c) — host FS at <project>/orgs/{_shared,<org>}/skills/ -------
 
 def _parse_skill(raw: str) -> tuple[str, str]:
     """Pull (name, description) from SKILL.md frontmatter. Mirrors the Go
@@ -164,24 +191,27 @@ def _parse_skill(raw: str) -> tuple[str, str]:
 
 
 _LIST_SKILLS_DESC = (
-    "List SKILL.md files under the project's .pi/skills/ directory. Each skill "
-    "is operator-authored markdown with model-facing instructions (debugging "
-    "recipes, codebase conventions, domain knowledge). Call this when starting "
-    "work on a project to see what specialized guidance is available; then call "
-    "load_skill to read the ones that apply."
+    "List SKILL.md files under the project's skills roots (the active org's "
+    "skills first, then orgs/_shared/skills). Each skill is operator-authored "
+    "markdown with model-facing instructions (debugging recipes, codebase "
+    "conventions, domain knowledge). Call this when starting work on a project "
+    "to see what specialized guidance is available; then call load_skill to "
+    "read the ones that apply."
 )
 
 
-def _list_skills_tool() -> StructuredTool:
+def _list_skills_tool(org: str | None = None) -> StructuredTool:
     def _run() -> str:
         items: list[dict] = []
-        if SKILLS_DIR.is_dir():
-            for child in sorted(SKILLS_DIR.iterdir()):
-                if not child.is_dir():
+        seen: set[str] = set()
+        for root in _skills_dirs(org):
+            for child in sorted(root.iterdir()):
+                if not child.is_dir() or child.name in seen:
                     continue
                 md = child / SKILL_FILE
                 if not md.is_file():
                     continue
+                seen.add(child.name)
                 name, desc = _parse_skill(md.read_text())
                 items.append({"name": name or child.name, "description": desc, "path": str(md)})
         return _result({"skills": items, "count": len(items)})
@@ -204,12 +234,17 @@ _LOAD_SKILL_DESC = (
 )
 
 
-def _load_skill_tool() -> StructuredTool:
+def _load_skill_tool(org: str | None = None) -> StructuredTool:
     def _run(name: str) -> str:
         if not name:
             return _result({"success": False, "error": "missing required parameter 'name'"})
-        md = SKILLS_DIR / name / SKILL_FILE
-        if not md.is_file():
+        md: Path | None = None
+        for root in _skills_dirs(org):
+            candidate = root / name / SKILL_FILE
+            if candidate.is_file():
+                md = candidate
+                break
+        if md is None:
             # Match the Go tool's isError contract: a missing skill is an error
             # (not a silent empty body) so the model doesn't hallucinate content.
             return _result({"success": False, "error": f"skill {name!r} not found"})
@@ -774,6 +809,7 @@ def _desktop_key_tool(exec_client: DockerExecClient) -> StructuredTool:
 
 def build_native_specialists(
     exec_client: DockerExecClient, model: object | None = None,
+    org: str | None = None,
 ) -> list[StructuredTool]:
     """Every native ``pux_sandbox_*`` specialist. ``exec_client`` is shared with
     the backend (one Docker client per process). Host-FS-only tools (skills)
@@ -782,11 +818,16 @@ def build_native_specialists(
     ``model`` threads the driving LLM into ``describe_image`` so it can use the
     model's native multimodal vision as the PRIMARY path (ONNX fallback). The
     offline ``--check`` smoke passes ``model=None`` → ``describe_image`` is
-    ONNX-only and spends no tokens."""
+    ONNX-only and spends no tokens.
+
+    ``org`` scopes the skills tools: ``list_skills`` / ``load_skill`` search the
+    active org's skills first, then ``_shared``, then other orgs' (org-local
+    wins on collision). ``None`` (the ``--check`` path) searches all roots with
+    no priority."""
     return [
         _python_tool(exec_client),
-        _list_skills_tool(),
-        _load_skill_tool(),
+        _list_skills_tool(org),
+        _load_skill_tool(org),
         _describe_image_tool(exec_client, model),
         _browser_navigate_tool(exec_client),
         _browser_click_tool(exec_client),

@@ -26,13 +26,12 @@ Two tool surfaces, all running **inside the Docker container**:
     xdotool + the sandbox's Xvfb desktop (DISPLAY=:99). Pixel coordinates are
     the contract; click the `(cx, cy)` of an element from the latest
     desktop_screenshot.
-  - **list_skills / load_skill** — discover and load the **global** project
-    skills under `.pi/skills/` (the only tree these imperative tools scan).
-    Per-org skills under `orgs/<name>/skills/` are NOT browsable here — they
-    are scoped, progressive-disclosure skills attached to a specialist via the
-    `skills:` field in its `.pi/agents/<slug>.py` `SUBAGENT` dict (deepagents
-    `SkillsMiddleware` loads their index at startup and their bodies on
-    demand). You see those only if your subagent declared the root.
+  - **list_skills / load_skill** — discover and load skills from every skills
+    root in the project: `orgs/_shared/skills/` + each `orgs/<name>/skills/`
+    (org-local wins on a name collision). Subagents may additionally scope
+    themselves to specific roots via the `skills:` field in their
+    `orgs/<name>/agents/<slug>.md` frontmatter (deepagents `SkillsMiddleware`
+    loads the index at startup, bodies on demand).
 
 All paths the tools report are **inside the sandbox container**. The project
 is bind-mounted at `/sandbox/workspace/`.
@@ -86,18 +85,20 @@ When pux is launched with `--org <name>`, `orgs/<name>/AGENTS.md` is appended
 to this system prompt. You become the CTO of that org — the body in that file
 carries the role.
 
-Subagent delegation is deepagents-native. Available specialists live under
-`.pi/agents/<slug>.py` (a `SUBAGENT` config dict: name, description, optional
-`tools`/`skills`) with a sibling `<slug>.md` holding the system-prompt prose.
-An org's roster — which specialists it delegates to — lives in
-`orgs/<name>/org.yaml`. Spawn one via the `task` tool:
+Subagent delegation is deepagents-native. Available specialists are ONE file
+each — `orgs/<name>/agents/<slug>.md` (YAML frontmatter: `name`,
+`description`, optional `tools`/`skills`/`model`; body = the system-prompt
+prose). Cross-org agents live under `orgs/_shared/agents/` (an org specializes
+one by dropping a same-named `<slug>.md` in its own `agents/` dir). An org's
+roster — which specialists it delegates to — lives in `orgs/<name>/org.yaml`.
+Spawn one via the `task` tool:
 `task(subagent_type="researcher", description="...")`. The subagent sees only
 your `description`, not your conversation — give it enough context (relevant
 paths, the question, the expected output shape).
 
 Without `--org`, you are the operator — drive tasks directly.
 The live specialist roster is whatever `task` tool lists at runtime (built
-from `.pi/agents/*.py` + each org's `org.yaml`). Do not maintain a static
+from each org's `agents/*.md` + its `org.yaml`). Do not maintain a static
 copy here — it goes stale (the table that lived here named specialists that
 no longer exist).
 

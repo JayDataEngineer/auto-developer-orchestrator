@@ -180,3 +180,45 @@ def test_unexpected_exception_captured() -> None:
     assert len(results) == 1
     assert results[0].status == "failed"
     assert "docker daemon gone" in (results[0].error or "")
+
+
+def test_run_wires_prepare_to_shared_exec(monkeypatch):
+    """Regression: ``_run`` must pass a real exec client to ``prepare``.
+
+    Phase 14.2 shipped ``_run`` reaching for ``backend.exec_client`` — a
+    nonexistent attribute on ``PuxSandboxBackend`` (which stores it as
+    ``_exec``). Every ``pux direct`` invocation crashed at the prepare line
+    before the agent even ran; the bug slipped past because ``prepare`` was
+    only unit-tested in isolation, never driven through ``_run``. This test
+    stubs the three Docker/model touch-points (``_build_agent``,
+    ``shared_exec``, ``prepare``) and proves the wiring hands ``prepare`` the
+    shared exec client — no AttributeError, no second client constructed.
+    """
+    import asyncio
+
+    from pux_harness import main
+
+    sentinel = object()  # stands in for the shared DockerExecClient
+
+    async def _fake_ainvoke(*a, **k):
+        return {"messages": [SimpleNamespace(type="ai", content="ok")]}
+
+    fake_agent = SimpleNamespace(ainvoke=_fake_ainvoke)
+    fake_backend = SimpleNamespace(execute_log=[])
+    monkeypatch.setattr(main, "_build_agent", lambda org: (fake_agent, fake_backend))
+    monkeypatch.setattr(main, "shared_exec", lambda: sentinel)
+
+    seen: dict = {}
+
+    def fake_prepare(org, *, exec_client=None, **kw):
+        seen["org"] = org
+        seen["exec_client"] = exec_client
+        return []
+
+    monkeypatch.setattr("pux_harness.sandbox.container.prepare", fake_prepare)
+
+    asyncio.run(main._run("general", "harmless stubbed task", recursion_limit=5))
+
+    assert seen["org"] == "general"
+    # The fix: prepare receives the shared exec client, not a backend attribute.
+    assert seen["exec_client"] is sentinel

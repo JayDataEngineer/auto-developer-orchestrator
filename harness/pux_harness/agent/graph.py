@@ -54,7 +54,7 @@ def build_graph(org: str, *, checkpointer: Any) -> CompiledStateGraph:
     ``AsyncSqliteSaver``.
     """
     model = get_model()
-    specialists = build_native_specialists(shared_exec(), model)
+    specialists = build_native_specialists(shared_exec(), model, org=org)
     # Phase 7: ctx_recall/ctx_search ride on the MAIN agent only (they're not in
     # any subagent ``tools:`` whitelist, so excluding them from the subagent-
     # resolution ``tools`` keeps specialist whitelists clean). The offload

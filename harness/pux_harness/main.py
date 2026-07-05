@@ -29,7 +29,7 @@ from pux_harness.agent.contract import (
     has_errors,
 )
 from pux_harness.sandbox.docker_exec import get_exec_client
-from pux_harness.agent.graph import build_graph, shared_backend
+from pux_harness.agent.graph import build_graph, shared_backend, shared_exec
 from pux_harness.sandbox.tools import build_native_specialists
 from pux_harness.agent.orgs import (
     discover_orgs,
@@ -156,7 +156,7 @@ async def _run(org: str, task: str, recursion_limit: int) -> None:
     agent, backend = _build_agent(org)
     # Run prep jobs after container is up, before the agent loop.
     from pux_harness.sandbox.container import prepare  # noqa: PLC0415
-    job_results = prepare(org, exec_client=backend.exec_client)
+    job_results = prepare(org, exec_client=shared_exec())
     if job_results:
         failed = [r for r in job_results if r["status"] != "ok"]
         for r in job_results:
@@ -485,7 +485,7 @@ def main() -> None:
     if args.check:
         exec_client = get_exec_client()
         backend = PuxSandboxBackend(exec_client)
-        specialists = build_native_specialists(exec_client)
+        specialists = build_native_specialists(exec_client, org=args.org)
         print(f"backend(docker exec) OK: {len(specialists)} native pux_sandbox_* specialists + "
               f"native fs (ls/read_file/write_file/edit_file/glob/grep/execute)")
         ex = backend.execute("echo pux-ok")

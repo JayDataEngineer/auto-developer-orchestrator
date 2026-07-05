@@ -20,13 +20,6 @@ coverage/
 # Environment / secrets
 .env*
 !.env.example
-# Pi runtime data (sessions, package installs, cache). Project-shipped
-# extensions + settings ARE source — un-ignore them explicitly.
-.pi/sessions/
-.pi/npm/
-.pi/git/
-.pi/cache.json
-.pi/mcp-cache.json
 **/auth.json
 
 # Logs
@@ -51,9 +44,9 @@ data/
 **/.pux/
 
 # Org runtime data (5G+ of model weights, venvs, parsed dumps, memos).
-# Org *templates* ship as AGENTS.md + .pi/agents/*.md — those ARE source.
-# Use orgs/* (not orgs/) so per-org negations can win, then exclude
-# everything inside each org except AGENTS.md.
+# Org *templates* ship as AGENTS.md + agents/<slug>.md + skills/ + sandbox/ —
+# those ARE source. Use orgs/* (not orgs/) so per-org negations can win, then
+# exclude everything inside each org except the source files re-negated below.
 orgs/*
 !orgs/_demo/
 !orgs/dev-bot/
@@ -65,6 +58,10 @@ orgs/*
 !orgs/telegram-agent/
 !orgs/twitter-agent/
 !orgs/video-production/
+# _shared is not an org (no AGENTS.md/CTO overlay; discover_orgs skips it) but
+# holds cross-org SOURCE: agents/ (e.g. researcher) + skills/ + sandbox/ +
+# clients/. Must un-ignore the parent or git won't descend into it.
+!orgs/_shared/
 orgs/*/*
 !orgs/*/AGENTS.md
 !orgs/*/policy.yaml
@@ -80,6 +77,11 @@ orgs/*/*
 # deep-research-engine/sandbox/audio_client.py referenced by jobs:) are SOURCE
 # too — ship the whole sandbox/ tree, same re-negation rationale as skills/.
 !orgs/*/sandbox/
+# Per-org specialist agents are SOURCE — one <slug>.md each (YAML frontmatter +
+# prose body = system prompt). Same re-negation rationale as skills/. The *
+# also matches _shared, covering orgs/_shared/agents/ once its parent is
+# un-ignored. See feedback_orgs_gitignore_source_trap.
+!orgs/*/agents/
 
 # Org-scoped runtime artifacts (article bodies, backtest outputs, parsed
 # chat dumps, memos, etc.) — written by the agent during runs, not source.

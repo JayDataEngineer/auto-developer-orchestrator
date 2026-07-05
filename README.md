@@ -79,7 +79,7 @@ Python:
 |------|----------|
 | `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute` | native — `PuxSandboxBackend.execute()` → docker exec (8a) |
 | `python` | native — docker exec `python3 -c` (8b) |
-| `list_skills` / `load_skill` | native — host FS `.pi/skills/` (8c) |
+| `list_skills` / `load_skill` | native — host FS `orgs/_shared/skills/` + each `orgs/<name>/skills/` (8c) |
 | `describe_image` | native — **driving-model PRIMARY** (mimo-v2.5 multimodal) → in-sandbox ONNX fallback (8d) |
 | `browser_navigate` / `_click` / `_type` / `_screenshot` / `_evaluate` | native — `curl` to in-sandbox `sb_server.py` via docker exec (8e) |
 | `desktop_screenshot` / `_click` / `_type` / `_key` | native — `xdotool` + `desktop_observe.py` via docker exec (8f) |
@@ -105,11 +105,14 @@ orgs/<name>/
 body to the base system prompt — the main agent becomes that org's CTO and
 delegates to its declared specialists via the `task` tool.
 
-Specialist subagents live under `.pi/agents/<slug>.py` (a `SUBAGENT` dict:
-`name`, `description`, `system_prompt`, optional `tools`/`skills`/`model`)
-with a sibling prose-only `<slug>.md` holding the prompt. The org contract
-enforces that every `org.yaml` slug resolves to a `.py` that imports cleanly,
-every `tools:` entry is a real tool (native fs or a `pux_sandbox_*`
+Specialist subagents are ONE file each — `orgs/<name>/agents/<slug>.md` (YAML
+frontmatter: `name`, `description`, optional `tools`/`skills`/`model`; body =
+the system-prompt prose). Cross-org agents live under `orgs/_shared/agents/`
+(an org specializes one by dropping a same-named `<slug>.md` in its own
+`agents/` dir). The org contract enforces that every `org.yaml` slug resolves
+to a `.md` with the required frontmatter keys + a non-empty body (the
+`no-legacy-agent-py` tripwire permanently forbids the old `.pi/agents/*.py`
+form), every `tools:` entry is a real tool (native fs or a `pux_sandbox_*`
 specialist), and any `policy.yaml` is schema-valid:
 
 ```bash
