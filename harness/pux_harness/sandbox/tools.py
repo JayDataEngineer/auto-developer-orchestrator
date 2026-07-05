@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import shlex
 from pathlib import Path
 
@@ -62,6 +63,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from pux_harness.sandbox.docker_exec import DockerExecClient, ExecTimeout
+from pux_harness.sandbox.backend import PuxSandboxBackend
 
 log = logging.getLogger(__name__)
 
@@ -274,15 +276,9 @@ _DEFAULT_VISION_PROMPT = (
     "Describe this image concisely. Focus on text, UI elements, and key visual features."
 )
 
-# Map common image extensions → MIME for the data: URL sent to the model.
-_MIME_BY_EXT = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".bmp": "image/bmp",
-}
+def _guess_mime(path: str) -> str:
+    """MIME type for any file path — single source of truth via stdlib."""
+    return mimetypes.guess_type(path)[0] or "application/octet-stream"
 
 _VISION_UNAVAILABLE = (
     "Vision model is not downloaded. Run scripts/bootstrap-vision.sh from the "
@@ -296,58 +292,9 @@ _VISION_DEPS_MISSING = (
 )
 
 
-def _image_mime(name: str) -> str:
-    """MIME for an image path/URL by extension (default ``image/png``)."""
-    return _MIME_BY_EXT.get(Path(name).suffix.lower(), "image/png")
-
-
 def _model_name(model: object) -> str:
     """The model id of a ChatOpenAI instance (``.model_name`` / ``.model``)."""
     return getattr(model, "model_name", None) or getattr(model, "model", None) or "model"
-
-
-def _acquire_image_b64(
-    exec_client: DockerExecClient, image_path: str | None, image_url: str | None,
-) -> tuple[str, str]:
-    """Fetch image bytes from the sandbox (path or URL) → ``(base64, mime)``.
-
-    Routed through ``docker exec`` so the sandbox fs + egress policy apply
-    uniformly to both the model-primary path (here) and the ONNX fallback
-    (``describe_image.py`` re-reads the same source). Raises on any failure —
-    the caller (primary path) catches and falls back to ONNX."""
-    if image_path:
-        cmd = f"base64 -w0 {shlex.quote(image_path)}"
-        mime = _image_mime(image_path)
-    else:
-        # -L follows redirects; egress ACLs in the sandbox apply.
-        cmd = f"curl -s -L --max-time 30 {shlex.quote(image_url or '')} | base64 -w0"
-        mime = _image_mime(image_url or "")
-    out, exit_code = exec_client.exec(cmd, timeout=_IMAGE_FETCH_TIMEOUT)
-    b64 = (out or "").strip()
-    if exit_code != 0 or not b64:
-        raise RuntimeError(f"image fetch exit {exit_code}: {_tail(out, 200)}")
-    return b64, mime
-
-
-def _invoke_primary_vision(model: object, b64: str, mime: str, prompt: str | None) -> str:
-    """Send the image to the driving model as a native multimodal message and
-    return its description text. Raises on any failure (empty/null content,
-    API error, non-multimodal model) — the caller falls back to ONNX."""
-    msg = HumanMessage(content=[
-        {"type": "text", "text": prompt or _DEFAULT_VISION_PROMPT},
-        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-    ])
-    resp = model.invoke([msg])
-    content = getattr(resp, "content", None)
-    # Some providers return a list of content blocks rather than a bare string.
-    if isinstance(content, list):
-        content = "".join(
-            block.get("text", "") for block in content if isinstance(block, dict)
-        )
-    text = (content or "").strip() if isinstance(content, str) else ""
-    if not text:
-        raise RuntimeError("primary model returned empty content")
-    return text
 
 
 def _onnx_describe(
@@ -426,7 +373,11 @@ _DESCRIBE_IMAGE_DESC = (
 )
 
 
-def _describe_image_tool(exec_client: DockerExecClient, vision_model: object | None = None) -> StructuredTool:
+def _describe_image_tool(
+    backend: PuxSandboxBackend,
+    exec_client: DockerExecClient,
+    vision_model: object | None = None,
+) -> StructuredTool:
     def _run(
         image_path: str | None = None,
         image_url: str | None = None,
@@ -446,8 +397,8 @@ def _describe_image_tool(exec_client: DockerExecClient, vision_model: object | N
         primary_error: str | None = None
         if vision_model is not None:
             try:
-                b64, mime = _acquire_image_b64(exec_client, image_path, image_url)
-                desc = _invoke_primary_vision(vision_model, b64, mime, prompt)
+                b64, mime = _read_media(backend, exec_client, image_path, image_url)
+                desc = _invoke_primary_media(vision_model, b64, mime, prompt, "image")
                 return _result({
                     "success": True,
                     "description": desc,
@@ -484,19 +435,14 @@ def _describe_image_tool(exec_client: DockerExecClient, vision_model: object | N
 # fallback fired, so the waterfall is observable — same discipline as
 # ``describe_image``.
 
-_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-_AUDIO_EXTS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
-_VIDEO_EXTS = {".mp4", ".webm", ".avi", ".mov", ".mkv"}
-
-# Extends ``_MIME_BY_EXT`` (image-only) with audio + video MIME types for the
-# data: URL / input_audio.format sent to the model.
-_MEDIA_MIME_BY_EXT = {
-    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
-    ".wav": "audio/wav", ".mp3": "audio/mpeg", ".flac": "audio/flac",
-    ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
-    ".mp4": "video/mp4", ".webm": "video/webm", ".avi": "video/x-msvideo",
-    ".mov": "video/quicktime", ".mkv": "video/x-matroska",
+_MEDIA_KIND_BY_EXT: dict[str, str] = {
+    ".png": "image", ".jpg": "image", ".jpeg": "image", ".gif": "image",
+    ".webp": "image", ".heic": "image", ".heif": "image", ".bmp": "image",
+    ".wav": "audio", ".mp3": "audio", ".aiff": "audio", ".aac": "audio",
+    ".ogg": "audio", ".flac": "audio", ".m4a": "audio",
+    ".mp4": "video", ".mpeg": "video", ".mov": "video", ".avi": "video",
+    ".flv": "video", ".mpg": "video", ".webm": "video", ".wmv": "video",
+    ".3gpp": "video", ".mkv": "video",
 }
 
 # OpenAI ``input_audio.format`` accepts a fixed set (wav, mp3). Map the MIME
@@ -513,18 +459,7 @@ _KEYFRAME_TIMEOUT = 120     # ffmpeg probe + extract round-trip
 
 def _media_kind(path: str) -> str:
     """``image`` | ``audio`` | ``video`` | ``unknown`` by extension."""
-    ext = Path(path).suffix.lower()
-    if ext in _IMAGE_EXTS:
-        return "image"
-    if ext in _AUDIO_EXTS:
-        return "audio"
-    if ext in _VIDEO_EXTS:
-        return "video"
-    return "unknown"
-
-
-def _media_mime(name: str) -> str:
-    return _MEDIA_MIME_BY_EXT.get(Path(name).suffix.lower(), "application/octet-stream")
+    return _MEDIA_KIND_BY_EXT.get(Path(path).suffix.lower(), "unknown")
 
 
 def _default_media_prompt(kind: str) -> str:
@@ -540,22 +475,29 @@ def _default_media_prompt(kind: str) -> str:
             "notable features.")
 
 
-def _acquire_media_b64(
-    exec_client: DockerExecClient, media_path: str | None, media_url: str | None,
+def _read_media(
+    backend: PuxSandboxBackend,
+    exec_client: DockerExecClient,
+    path: str | None,
+    url: str | None,
 ) -> tuple[str, str]:
-    """Fetch media bytes from the sandbox (path or URL) → ``(base64, mime)``.
-    Generalizes ``_acquire_image_b64`` to any MIME via ``_media_mime``."""
-    if media_path:
-        cmd = f"base64 -w0 {shlex.quote(media_path)}"
-        mime = _media_mime(media_path)
-    else:
-        cmd = f"curl -s -L --max-time 30 {shlex.quote(media_url or '')} | base64 -w0"
-        mime = _media_mime(media_url or "")
+    """Acquire media bytes → ``(base64, mime)``. Uses ``backend.read()`` for
+    sandbox paths (delegates to deepagents' native base64 encoding) and curl
+    for URLs (sandbox egress policy applies)."""
+    if path:
+        rr = backend.read(path)
+        if rr.error:
+            raise RuntimeError(rr.error)
+        if rr.file_data is None:
+            raise RuntimeError(f"no data for {path}")
+        return rr.file_data["content"], _guess_mime(path)
+    # URL: curl through exec (sandbox egress policy applies).
+    cmd = f"curl -s -L --max-time 30 {shlex.quote(url or '')} | base64 -w0"
     out, exit_code = exec_client.exec(cmd, timeout=_IMAGE_FETCH_TIMEOUT)
     b64 = (out or "").strip()
     if exit_code != 0 or not b64:
-        raise RuntimeError(f"media fetch exit {exit_code}: {_tail(out, 200)}")
-    return b64, mime
+        raise RuntimeError(f"url fetch exit {exit_code}: {_tail(out, 200)}")
+    return b64, _guess_mime(url or "")
 
 
 def _invoke_primary_media(
@@ -564,12 +506,10 @@ def _invoke_primary_media(
     """Send the media to the multimodal model as a TYPE-CORRECT native content
     block + return its text. Raises on any failure (caller falls back).
 
-    - image → ``image_url`` (proven path, same as ``_invoke_primary_vision``).
-    - audio → ``input_audio`` (format derived from MIME; OpenAI accepts
-      wav/mp3 — other subtypes pass through and the model rejects → Tier 2).
-    - video → ``video_url`` (no provider standardizes raw video; if the endpoint
-      rejects it, the caller falls back to ffmpeg keyframes). This is the
-    ``try, then fall back`` contract — never an assumption it succeeded."""
+    - image/video_frame → ``image_url`` (data: URI).
+    - audio → ``input_audio`` (format derived from MIME subtype).
+    - video → ``video_url`` (raw clip; caller falls back to keyframes if
+      the endpoint rejects it)."""
     text = prompt or _default_media_prompt(kind)
     if kind in ("image", "video_frame"):
         # A keyframe IS an image — send it as ``image_url``, never ``video_url``
@@ -709,7 +649,9 @@ def _multimodal_unsupported(name: str) -> dict:
 
 
 def _multimodal_tool(
-    exec_client: DockerExecClient, vision_model: object | None = None,
+    backend: PuxSandboxBackend,
+    exec_client: DockerExecClient,
+    vision_model: object | None = None,
 ) -> StructuredTool:
     """The DEFAULT multimodal surface: media + prompt → multimodal model, end of
     story. Returns the model's reasoning or an HONEST error. NEVER silently
@@ -737,7 +679,7 @@ def _multimodal_tool(
                     "waterfall, or `describe_image` for an image-only ONNX path."),
             })
         try:
-            b64, mime = _acquire_media_b64(exec_client, media_path, media_url)
+            b64, mime = _read_media(backend, exec_client, media_path, media_url)
             desc = _invoke_primary_media(vision_model, b64, mime, prompt, kind)
         except Exception as exc:
             return _result({
@@ -757,7 +699,9 @@ def _multimodal_tool(
 
 
 def _multimodal_mega_tool(
-    exec_client: DockerExecClient, vision_model: object | None = None,
+    backend: PuxSandboxBackend,
+    exec_client: DockerExecClient,
+    vision_model: object | None = None,
 ) -> StructuredTool:
     """The opt-in resilient variant: model first, then a per-type offline
     waterfall on failure. Same args as ``multimodal``; the difference is this one
@@ -782,7 +726,7 @@ def _multimodal_mega_tool(
         primary_error: str | None = None
         if vision_model is not None:
             try:
-                b64, mime = _acquire_media_b64(exec_client, media_path, media_url)
+                b64, mime = _read_media(backend, exec_client, media_path, media_url)
                 desc = _invoke_primary_media(vision_model, b64, mime, prompt, kind)
                 return _result({
                     "success": True, "description": desc,
@@ -847,7 +791,7 @@ def _multimodal_mega_tool(
             frame_error: str | None = None
             if vision_model is not None:
                 try:
-                    b64, _ = _acquire_media_b64(exec_client, fp, None)
+                    b64, _ = _read_media(backend, exec_client, fp, None)
                     desc = _invoke_primary_media(
                         vision_model, b64, "image/png", prompt, "video_frame")
                     per_frame.append({"frame": fp, "success": True,
@@ -1642,7 +1586,7 @@ def _desktop_key_tool(exec_client: DockerExecClient) -> StructuredTool:
 
 def build_native_specialists(
     exec_client: DockerExecClient, vision_model: object | None = None,
-    org: str | None = None,
+    org: str | None = None, backend: PuxSandboxBackend | None = None,
 ) -> list[StructuredTool]:
     """Every native ``pux_sandbox_*`` specialist. ``exec_client`` is shared with
     the backend (one Docker client per process). Host-FS-only tools (skills)
@@ -1657,14 +1601,18 @@ def build_native_specialists(
     ``org`` scopes the skills tools: ``list_skills`` / ``load_skill`` search the
     active org's skills first, then ``_shared``, then other orgs' (org-local
     wins on collision). ``None`` (the ``--check`` path) searches all roots with
-    no priority."""
+    no priority.
+
+    ``backend`` is the ``PuxSandboxBackend`` used by ``_read_media`` for sandbox
+    file reads (replaces hand-rolled base64 acquisition). The three multimodal
+    tools (``describe_image``, ``multimodal``, ``multimodal_mega``) require it."""
     return [
         _python_tool(exec_client),
         _list_skills_tool(org),
         _load_skill_tool(org),
-        _describe_image_tool(exec_client, vision_model),
-        _multimodal_tool(exec_client, vision_model),
-        _multimodal_mega_tool(exec_client, vision_model),
+        _describe_image_tool(backend, exec_client, vision_model),
+        _multimodal_tool(backend, exec_client, vision_model),
+        _multimodal_mega_tool(backend, exec_client, vision_model),
         _browser_navigate_tool(exec_client),
         _browser_click_tool(exec_client),
         _browser_type_tool(exec_client),
