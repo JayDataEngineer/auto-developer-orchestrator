@@ -250,13 +250,18 @@ def _load_agent_spec(slug: str, org: str) -> dict[str, Any] | None:
 
 
 def _build_sub(
-    slug: str, spec: dict[str, Any], tool_map: dict[str, BaseTool], system_prompt: str
+    slug: str, spec: dict[str, Any], tool_map: dict[str, BaseTool], system_prompt: str,
+    org: str,
 ) -> dict[str, Any]:
     """Build a deepagents SubAgent dict from a spec mapping (the module's
     ``SUBAGENT`` dict). ``system_prompt`` is passed in explicitly.
 
-    Omitted ``tools`` -> inherit the main agent's tools; omitted ``model`` ->
-    inherit the parent model (``create_deep_agent`` injects it).
+    Omitted ``tools`` -> inherit the main agent's tools. Model resolution
+    (Phase 17.B.0): a frontmatter ``model:`` is the agent-level override (a
+    literal id); otherwise the subagent runs on the ``worker`` role — resolved
+    through models.yaml + the org profile + env, decoupled from the base/CTO
+    model so an org can set base!=worker. (Worker defaults to the same id as
+    base, so today's orgs are byte-identical; the seam is what's new.)
     """
     sub: dict[str, Any] = {
         "name": spec.get("name", slug),
@@ -265,8 +270,10 @@ def _build_sub(
     }
     if spec.get("tools"):
         sub["tools"] = _resolve_tools(spec["tools"], tool_map)
-    if "model" in spec:
-        sub["model"] = get_model(spec["model"])
+    if spec.get("model"):
+        sub["model"] = get_model(model=spec["model"])
+    else:
+        sub["model"] = get_model(role="worker", org=org)
     if "skills" in spec:
         sub["skills"] = _resolve_skills(spec["skills"], slug)
     return sub
@@ -312,7 +319,7 @@ def load_subagents(
             searched = [str(p / f"{slug}.md") for p in _agent_search_dirs(org)]
             raise FileNotFoundError(
                 f"no agent {slug!r} for org {org!r} — searched {searched}")
-        sub = _build_sub(slug, spec, tool_map, spec["system_prompt"])
+        sub = _build_sub(slug, spec, tool_map, spec["system_prompt"], org)
         if profile is not None:
             if profile.system_prompt_suffix:
                 sub["system_prompt"] = (

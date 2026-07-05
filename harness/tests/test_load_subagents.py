@@ -118,15 +118,32 @@ def test_model_resolved_via_get_model(fake_tree):
     assert sub["model"].model_name == "glm-5.2"
 
 
-def test_model_omitted_means_inherit(fake_tree):
-    """No ``model`` field -> the dict has no ``model`` key, so deepagents
-    injects the parent model (``spec.get("model", model)``)."""
+def test_model_omitted_uses_worker_role(fake_tree):
+    """No ``model`` field -> the subagent runs on the WORKER role (Phase
+    17.B.0), resolved through models.yaml + org profile + env. The shipped
+    worker default is mimo-v2.5; an org can override it via the top-level
+    ``models:`` map without touching the agent file."""
     root = fake_tree
     _agent_md("bare", root, tools=["python"])
     _org_yaml("o", ["bare"], root)
 
     sub = orgs.load_subagents("o", _specialists())[0]
-    assert "model" not in sub
+    assert isinstance(sub["model"], ChatOpenAI)
+    assert sub["model"].model_name == "mimo-v2.5"
+
+
+def test_model_omitted_worker_role_org_override(fake_tree):
+    """The worker role picks up an org-level ``models: worker_model:`` override
+    from profile.yaml (the spec's per-org override seam)."""
+    root = fake_tree
+    _agent_md("bare", root, tools=["python"])
+    _org_yaml("o", ["bare"], root)
+    (root / "orgs" / "o" / "profile.yaml").write_text(
+        "models:\n  worker_model: glm-5.2\n"
+    )
+
+    sub = orgs.load_subagents("o", _specialists())[0]
+    assert sub["model"].model_name == "glm-5.2"
 
 
 def test_skills_resolved_to_container_paths(fake_tree):
@@ -179,7 +196,7 @@ def test_md_agent_loads(fake_tree):
     assert sub["system_prompt"] == "prose body"
     assert [t.name for t in sub["tools"]] == ["pux_sandbox_python"]
     assert sub["skills"] == ["/sandbox/workspace/orgs/_shared/skills"]
-    assert "model" not in sub
+    assert sub["model"].model_name == "mimo-v2.5"
     assert "middleware" not in sub
 
 
@@ -247,6 +264,7 @@ def test_real_browser_whitelist_resolves(monkeypatch):
     proves the whole whitelist binds."""
     from pux_harness.sandbox.tools import build_native_specialists
 
+    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")  # worker-role model build
     specialists = build_native_specialists("DUMMY", None, None)
     subs = orgs.load_subagents("general", specialists)
     browser = next(s for s in subs if s["name"] == "browser")

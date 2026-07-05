@@ -99,11 +99,11 @@ def captured_build(monkeypatch):
     ``create_deep_agent``. Returns the capture dict."""
     cap: dict[str, Any] = {}
 
-    monkeypatch.setattr(graph, "get_model", lambda: "MODEL")
+    monkeypatch.setattr(graph, "get_model", lambda *a, **k: "MODEL")
     monkeypatch.setattr(graph, "shared_exec", lambda: "EXEC")
     monkeypatch.setattr(graph, "shared_backend", lambda: "BACKEND")
     monkeypatch.setattr(graph, "build_native_specialists",
-                        lambda exec_client, model, org: list(_SPECIALISTS))
+                        lambda *a, **k: list(_SPECIALISTS))
     monkeypatch.setattr(graph, "build_ctx_tools", lambda: [])
     monkeypatch.setattr(graph, "ContextOffloadMiddleware", lambda: "OFFLOAD")
     monkeypatch.setattr(
@@ -208,6 +208,39 @@ def test_no_profile_is_byte_identical(fake_tree, captured_build):
     main = next(t for t in captured_build["tools"]
                 if t.name == "pux_sandbox_browser_save_session")
     assert main.description == "save session (original desc)"
+
+
+def test_build_graph_requests_base_and_multimodal_roles(fake_tree, monkeypatch):
+    """Phase 17.B.0 wiring proof (prepare-wiring-e2e-gap): build_graph drives
+    the model-role spec through the REAL entry point — it asks get_model for the
+    ``base`` role (the CTO driver) AND the ``multimodal`` role (describe_image,
+    decoupled from base) with the org threaded through. Not assumed from a
+    stub that swallows kwargs — captured here by recording the call args."""
+    calls: list[tuple[str, str | None]] = []
+
+    def _fake_get_model(*, role="base", org=None, model=None):
+        calls.append((role, org))
+        return f"MODEL-{role}"
+
+    monkeypatch.setattr(graph, "get_model", _fake_get_model)
+    monkeypatch.setattr(graph, "shared_exec", lambda: "EXEC")
+    monkeypatch.setattr(graph, "shared_backend", lambda: "BACKEND")
+    monkeypatch.setattr(graph, "build_native_specialists",
+                        lambda *a, **k: list(_SPECIALISTS))
+    monkeypatch.setattr(graph, "build_ctx_tools", lambda: [])
+    monkeypatch.setattr(graph, "ContextOffloadMiddleware", lambda: "OFFLOAD")
+    monkeypatch.setattr(graph, "create_deep_agent", lambda **kw: "GRAPH")
+    monkeypatch.setattr(graph, "load_profile", lambda org: None)
+
+    graph.build_graph("p", checkpointer=None)
+
+    # base (CTO) + multimodal (describe_image) both resolved, both carry the org.
+    assert ("base", "p") in calls
+    assert ("multimodal", "p") in calls
+    # No other role leaks in at the graph layer (worker is per-subagent; grader
+    # is the Phase 17.B middleware, not yet wired).
+    roles = {role for role, _ in calls}
+    assert roles == {"base", "multimodal"}
 
 
 # --- load_profile / validate_profile ---------------------------------------

@@ -22,5 +22,39 @@ system_prompt_suffix: |
   Never edit code you haven't read. No speculative refactors. No "also fix" —
   only the change that was asked for.
 
-# The rubric verify-gate lands in Phase 17.B (extends this file with a `rubric:`
-# block once profile.py + build_graph + the entry-point wiring are in place).
+# Phase 17.B — the RubricMiddleware verify-gate. After the CTO finishes, a
+# separate grader runs the `default` rubric below against the change using
+# sandbox tools (run tests, read the diff, grep for regressions) and returns a
+# verdict: satisfied / needs_revision / max_iterations_reached / failed /
+# grader_error. The agent revises until satisfied or max_iterations is hit.
+# This IS the tester + reviewer — one non-skippable gate, not a subagent the
+# CTO might skip.
+#
+# The grader's model is resolved by role (Phase 17.B.0): `get_model(role="grader",
+# org="dev-bot")`. It defaults to mimo-v2.5 (cheap/fast — right for a gate that
+# runs up to ×max_iterations per deliverable). To upgrade this org's grader to
+# the heavy reasoning model, set a top-level `models:` map:
+#   models:
+#     grader_model: glm-5.2     # the heavy/slow reasoning model
+# Leave it absent to inherit the shipped default.
+#
+# `default` is injected at invoke time when the operator gives no `--rubric`.
+# Per-org opt-in: only orgs that add this block get the gate; everything else
+# is byte-identical to today. Disable by flipping `enabled: false`.
+rubric:
+  enabled: true
+  max_iterations: 3
+  default: |
+    Grade whether the change is SHIPPABLE. Use the grader tools to gather
+    evidence before the verdict — run the test suite, read the diff, grep for
+    regressions — do NOT grade from the agent's summary alone. The agent fails
+    this gate by default; only mark `satisfied` when EVERY clause is proven.
+    - The change is implemented, not just described: the files exist and
+      compile / typecheck clean (run it; cite the command + exit code).
+    - The full pre-existing test suite passes (run it; cite command + exit code).
+    - New behavior has tests, and they pass.
+    - Lint / format is clean for the touched files.
+    - No out-of-scope changes, no speculative refactors; the diff reads like the
+      surrounding code.
+    - The deliverable is a concise summary (what changed, how verified), not a
+      play-by-play.

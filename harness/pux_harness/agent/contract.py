@@ -51,6 +51,7 @@ import yaml
 
 from pux_harness.sandbox import policy as policy_mod
 from pux_harness.agent import profile as profile_mod
+from pux_harness.agent import model as model_mod
 from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
 from pux_harness.agent.orgs import (
     PROJECT_ROOT,
@@ -484,6 +485,14 @@ def check_harness() -> list[Violation]:
         v.append(Violation("warn", "no-orphan-agents",
                            f"agent {orphan!r} is owned by no org (not in any "
                            f"`agents:` frontmatter)"))
+    # Phase 17.B.0: the shipped ``models.yaml`` (the role-spec single source of
+    # truth) must be present + well-formed — every model consumer resolves
+    # through it, so a missing/malformed spec breaks every org at once.
+    try:
+        model_mod.validate_models_spec()
+    except RuntimeError as exc:
+        v.append(Violation("error", "models-spec",
+                           f"models.yaml invalid: {exc}"))
     v.extend(_no_legacy_agent_py())
     v.extend(_no_legacy_sandbox_artifacts())
     return v

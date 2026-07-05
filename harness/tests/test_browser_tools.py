@@ -41,7 +41,7 @@ def cap(monkeypatch) -> _Capture:
 def _browser_tools() -> dict:
     """All browser specialists, keyed by their bare slug."""
     specs = tools.build_native_specialists(
-        exec_client="DUMMY", model=None, org=None
+        exec_client="DUMMY", vision_model=None, org=None
     )
     return {
         t.name.replace("pux_sandbox_", ""): t

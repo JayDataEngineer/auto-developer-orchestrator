@@ -379,7 +379,7 @@ _DESCRIBE_IMAGE_DESC = (
 )
 
 
-def _describe_image_tool(exec_client: DockerExecClient, model: object | None = None) -> StructuredTool:
+def _describe_image_tool(exec_client: DockerExecClient, vision_model: object | None = None) -> StructuredTool:
     def _run(
         image_path: str | None = None,
         image_url: str | None = None,
@@ -390,20 +390,21 @@ def _describe_image_tool(exec_client: DockerExecClient, model: object | None = N
         if image_path and image_url:
             return _result({"success": False, "error": "image_path and image_url are mutually exclusive"})
 
-        # PRIMARY: the driving model's native multimodal vision (mimo-v2.5 by
-        # default). Any failure here (model not multimodal, rate limit, empty
-        # output, fetch error) is caught and we fall through to the ONNX
-        # fallback — `primary_error` is preserved on the fallback result so the
-        # fallback is observable, never silent.
+        # PRIMARY: the multimodal model's native vision (mimo-v2.5 by default;
+        # resolved via the `multimodal` role in models.yaml — Phase 17.B.0). Any
+        # failure here (model not multimodal, rate limit, empty output, fetch
+        # error) is caught and we fall through to the ONNX fallback —
+        # `primary_error` is preserved on the fallback result so the fallback is
+        # observable, never silent.
         primary_error: str | None = None
-        if model is not None:
+        if vision_model is not None:
             try:
                 b64, mime = _acquire_image_b64(exec_client, image_path, image_url)
-                desc = _invoke_primary_vision(model, b64, mime, prompt)
+                desc = _invoke_primary_vision(vision_model, b64, mime, prompt)
                 return _result({
                     "success": True,
                     "description": desc,
-                    "model": _model_name(model),
+                    "model": _model_name(vision_model),
                     "source": "primary",
                 })
             except Exception as exc:
@@ -1235,17 +1236,18 @@ def _desktop_key_tool(exec_client: DockerExecClient) -> StructuredTool:
 # --- registry ---------------------------------------------------------------
 
 def build_native_specialists(
-    exec_client: DockerExecClient, model: object | None = None,
+    exec_client: DockerExecClient, vision_model: object | None = None,
     org: str | None = None,
 ) -> list[StructuredTool]:
     """Every native ``pux_sandbox_*`` specialist. ``exec_client`` is shared with
     the backend (one Docker client per process). Host-FS-only tools (skills)
     ignore it but take it for a uniform signature.
 
-    ``model`` threads the driving LLM into ``describe_image`` so it can use the
-    model's native multimodal vision as the PRIMARY path (ONNX fallback). The
-    offline ``--check`` smoke passes ``model=None`` → ``describe_image`` is
-    ONNX-only and spends no tokens.
+    ``vision_model`` threads the MULTIMODAL LLM into ``describe_image`` so it can
+    use the model's native vision as the PRIMARY path (ONNX fallback). Resolved
+    by the caller via ``get_model(role="multimodal", org=org)`` (Phase 17.B.0) —
+    decoupled from the base/CTO model. The offline ``--check`` smoke passes
+    ``vision_model=None`` → ``describe_image`` is ONNX-only and spends no tokens.
 
     ``org`` scopes the skills tools: ``list_skills`` / ``load_skill`` search the
     active org's skills first, then ``_shared``, then other orgs' (org-local
@@ -1255,7 +1257,7 @@ def build_native_specialists(
         _python_tool(exec_client),
         _list_skills_tool(org),
         _load_skill_tool(org),
-        _describe_image_tool(exec_client, model),
+        _describe_image_tool(exec_client, vision_model),
         _browser_navigate_tool(exec_client),
         _browser_click_tool(exec_client),
         _browser_type_tool(exec_client),

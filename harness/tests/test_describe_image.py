@@ -136,7 +136,7 @@ def test_both_paths_fail_surfaces_unavailable_with_primary_error():
 
 def test_no_model_is_onnx_only_no_primary_attempt():
     exec_ = _FakeExec()
-    tool = _describe_image_tool(exec_, model=None)
+    tool = _describe_image_tool(exec_, vision_model=None)
     res = _invoke(tool, {"image_path": "/sandbox/workspace/x.png"})
 
     assert res["success"] is True
