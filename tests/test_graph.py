@@ -68,6 +68,8 @@ def test_build_graph_wires_everything(monkeypatch):
     mock_ctx_tools = [MagicMock(name="ctx1")]
     mock_subagents = [MagicMock(name="sub1")]
     mock_prompt = "You are the CTO."
+    mock_memory_backend = MagicMock(name="memory_backend_factory")
+    mock_memory_store = MagicMock(name="memory_store")
 
     monkeypatch.setattr(graph_mod, "get_model", lambda role, org: mock_model)
     monkeypatch.setattr(graph_mod, "shared_exec", lambda: mock_exec)
@@ -75,12 +77,16 @@ def test_build_graph_wires_everything(monkeypatch):
     monkeypatch.setattr(graph_mod, "build_native_specialists",
                         lambda exec_client, vision_model=None, org=None, backend=None: mock_specialists)
     monkeypatch.setattr(graph_mod, "build_ctx_tools", lambda: mock_ctx_tools)
+    monkeypatch.setattr(graph_mod, "build_event_tools", lambda: [])
     monkeypatch.setattr(graph_mod, "build_system_prompt", lambda org: mock_prompt)
     monkeypatch.setattr(graph_mod, "load_profile", lambda org: None)
     monkeypatch.setattr(graph_mod, "load_subagents",
                         lambda org, specialists, profile=None: mock_subagents)
     monkeypatch.setattr(graph_mod, "load_rubric_gate", lambda org: None)
     monkeypatch.setattr(graph_mod, "RubricMiddleware", MagicMock)
+    monkeypatch.setattr(graph_mod, "build_memory_backend",
+                        lambda org, default_backend, store=None: (mock_memory_backend, mock_memory_store))
+    monkeypatch.setattr(graph_mod, "MEMORY_SOURCES", ["/memories/AGENTS.md"])
 
     mock_create = MagicMock(return_value=MagicMock(name="compiled_graph"))
     monkeypatch.setattr(graph_mod, "create_deep_agent", mock_create)
@@ -93,7 +99,9 @@ def test_build_graph_wires_everything(monkeypatch):
     assert call_kwargs.kwargs["model"] is mock_model
     assert call_kwargs.kwargs["system_prompt"] == mock_prompt
     assert call_kwargs.kwargs["checkpointer"] is checkpointer
-    assert call_kwargs.kwargs["backend"] is mock_backend
+    assert call_kwargs.kwargs["backend"] is mock_memory_backend
+    assert call_kwargs.kwargs["store"] is mock_memory_store
+    assert call_kwargs.kwargs["memory"] == ["/memories/AGENTS.md"]
     assert call_kwargs.kwargs["subagents"] is mock_subagents
 
 
@@ -105,6 +113,7 @@ def test_build_graph_applies_profile_suffix(monkeypatch):
     monkeypatch.setattr(graph_mod, "build_native_specialists",
                         lambda exec_client, vision_model=None, org=None, backend=None: [])
     monkeypatch.setattr(graph_mod, "build_ctx_tools", lambda: [])
+    monkeypatch.setattr(graph_mod, "build_event_tools", lambda: [])
     monkeypatch.setattr(graph_mod, "build_system_prompt", lambda org: "Base prompt")
     monkeypatch.setattr(graph_mod, "load_subagents", lambda org, sp, profile=None: [])
 
@@ -116,6 +125,9 @@ def test_build_graph_applies_profile_suffix(monkeypatch):
     )
     monkeypatch.setattr(graph_mod, "load_profile", lambda org: fake_profile)
     monkeypatch.setattr(graph_mod, "load_rubric_gate", lambda org: None)
+    monkeypatch.setattr(graph_mod, "build_memory_backend",
+                        lambda org, default_backend, store=None: (MagicMock(), None))
+    monkeypatch.setattr(graph_mod, "MEMORY_SOURCES", ["/memories/AGENTS.md"])
 
     mock_create = MagicMock(return_value=MagicMock())
     monkeypatch.setattr(graph_mod, "create_deep_agent", mock_create)
@@ -134,6 +146,7 @@ def test_build_graph_replaces_base_prompt(monkeypatch):
     monkeypatch.setattr(graph_mod, "build_native_specialists",
                         lambda exec_client, vision_model=None, org=None, backend=None: [])
     monkeypatch.setattr(graph_mod, "build_ctx_tools", lambda: [])
+    monkeypatch.setattr(graph_mod, "build_event_tools", lambda: [])
     monkeypatch.setattr(graph_mod, "build_system_prompt", lambda org: "Default")
     monkeypatch.setattr(graph_mod, "load_subagents", lambda org, sp, profile=None: [])
 
@@ -145,6 +158,9 @@ def test_build_graph_replaces_base_prompt(monkeypatch):
     )
     monkeypatch.setattr(graph_mod, "load_profile", lambda org: fake_profile)
     monkeypatch.setattr(graph_mod, "load_rubric_gate", lambda org: None)
+    monkeypatch.setattr(graph_mod, "build_memory_backend",
+                        lambda org, default_backend, store=None: (MagicMock(), None))
+    monkeypatch.setattr(graph_mod, "MEMORY_SOURCES", ["/memories/AGENTS.md"])
 
     mock_create = MagicMock(return_value=MagicMock())
     monkeypatch.setattr(graph_mod, "create_deep_agent", mock_create)

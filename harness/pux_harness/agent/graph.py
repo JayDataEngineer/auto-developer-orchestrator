@@ -24,7 +24,10 @@ from pux_harness.agent.profile import (
     load_profile,
     load_rubric_gate,
 )
+from pux_harness.context.event_middleware import EventCaptureMiddleware
+from pux_harness.context.event_tools import build_event_tools
 from pux_harness.context.offload import ContextOffloadMiddleware, build_ctx_tools
+from pux_harness.memory import MEMORY_SOURCES, build_memory_backend
 from pux_harness.sandbox.backend import PuxSandboxBackend
 from pux_harness.sandbox.docker_exec import DockerExecClient, get_exec_client
 from pux_harness.sandbox.tools import build_grader_tools, build_native_specialists
@@ -64,7 +67,12 @@ def shared_backend() -> PuxSandboxBackend:
     return _backend
 
 
-def build_graph(org: str, *, checkpointer: Any) -> CompiledStateGraph:
+def build_graph(
+    org: str,
+    *,
+    checkpointer: Any,
+    store: Any | None = None,
+) -> CompiledStateGraph:
     """Compile the deepagents graph for ``org`` against ``checkpointer``.
 
     Specialist ``pux_sandbox_*`` tools come from ``tools=`` (all native);
@@ -82,6 +90,10 @@ def build_graph(org: str, *, checkpointer: Any) -> CompiledStateGraph:
     ``load_subagents`` so the suffix + tool overrides reach EACH specialist
     subagent (e.g. the shared browser agent) — the user's stated goal. With no
     profile this path is byte-identical to a profile-less build.
+
+    Phase 18: ``store`` is an optional ``BaseStore`` for persistent memory.
+    When provided, memory survives server restarts. When ``None`` (the runner
+    default), ``StoreBackend`` falls back to the in-graph store (ephemeral).
     """
     # Roles (Phase 17.B.0): the CTO runs on `base`; describe_image runs on
     # `multimodal` (decoupled so an org can pin a vision model != the driver).
@@ -89,6 +101,7 @@ def build_graph(org: str, *, checkpointer: Any) -> CompiledStateGraph:
     base_model = get_model(role="base", org=org)
     specialists = build_native_specialists(
         shared_exec(), vision_model=get_model(role="multimodal", org=org), org=org,
+        backend=shared_backend(),
     )
     # Phase 7: ctx_recall/ctx_search ride on the MAIN agent only (they're not in
     # any subagent ``tools:`` whitelist, so excluding them from the subagent-
@@ -98,9 +111,10 @@ def build_graph(org: str, *, checkpointer: Any) -> CompiledStateGraph:
     # spec's `middleware` key (verified in the Phase 7 E2E), so attaching it to
     # specialists is a silent no-op — see context_offload.py module docstring.
     ctx_tools = build_ctx_tools()
+    evt_tools = build_event_tools()
 
     prompt = build_system_prompt(org)
-    main_tools: list = [*specialists, *ctx_tools]
+    main_tools: list = [*specialists, *ctx_tools, *evt_tools]
     cfg = load_profile(org)
     if cfg is not None:
         if cfg.base_system_prompt:
@@ -118,7 +132,7 @@ def build_graph(org: str, *, checkpointer: Any) -> CompiledStateGraph:
     # grader runs on the ``grader`` role (decoupled, cheap default) and grades
     # from REAL evidence via ``build_grader_tools`` (run tests / read the diff /
     # grep), never from the agent's summary.
-    middleware: list = [ContextOffloadMiddleware()]
+    middleware: list = [ContextOffloadMiddleware(), EventCaptureMiddleware()]
     gate = load_rubric_gate(org)
     if gate is not None and gate.enabled:
         middleware.append(
@@ -130,12 +144,25 @@ def build_graph(org: str, *, checkpointer: Any) -> CompiledStateGraph:
             )
         )
 
+    # Phase 18: agent-managed persistent memory. The composite backend routes
+    # /memories/ to a StoreBackend (namespace=(org,)) and everything else to
+    # the existing PuxSandboxBackend. MemoryMiddleware loads /memories/AGENTS.md
+    # at startup and injects it into the system prompt. The agent updates memory
+    # via edit_file — the model does the work, not the harness.
+    memory_backend, memory_store = build_memory_backend(
+        org=org,
+        default_backend=shared_backend(),
+        store=store,
+    )
+
     return create_deep_agent(
         model=base_model,
         system_prompt=prompt,
         tools=main_tools,
+        memory=MEMORY_SOURCES,
         subagents=load_subagents(org, specialists, profile=cfg),
         middleware=middleware,
-        backend=shared_backend(),
+        backend=memory_backend,
+        store=memory_store,
         checkpointer=checkpointer,
     )
