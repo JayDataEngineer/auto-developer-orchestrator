@@ -6,28 +6,35 @@ requires-python = ">=3.12,<3.14"
 # installs the harness runtime (deepagents, fastapi, uvicorn, …) + the `pux`
 # console script. Without this, `uv sync` syncs ONLY the root (dev tooling) and
 # prunes the member — a footgun. `--all-packages` is no longer required.
-dependencies = ["pux-harness"]
+dependencies = ["pux-harness", "pux-agentkit"]
 
-# uv workspace — the dual pyproject is INTENTIONAL, not drift:
+# uv workspace — the multi-pyproject layout is INTENTIONAL, not drift:
 #  - root = the umbrella: workspace membership, dev tooling (pytest/ruff/mypy),
 #    and the requires-python contract.
-#  - harness/ = the sole member: runtime deps, the `pux` console script, and the
-#    hatchling build.
-# One `uv sync` at the repo root materializes ONE .venv for the whole workspace;
-# harness/ has no venv/.python-version of its own (those were pre-workspace
-# orphans, deleted).
+#  - harness/ = the pux runtime member: Docker sandbox, ACP/server/TUI, the
+#    `pux` console script, and the hatchling build.
+#  - agentkit/ = the standalone org+skill compiler member: slim deps only
+#    (deepagents/langchain/langgraph/pyyaml), NO Docker. A different project
+#    depends on pux-agentkit alone to author+run an org without the harness.
+# The harness depends on agentkit (agentkit is upstream — it owns the org/skill
+# loaders; the harness re-exports them, so there is one loader, not two).
+# One `uv sync` at the repo root materializes ONE .venv for the whole workspace.
 [tool.uv.workspace]
-members = ["harness"]
+members = ["harness", "agentkit"]
 
-# Resolve the member dep to the in-tree workspace package, not PyPI.
+# Resolve member deps to the in-tree workspace packages, not PyPI.
 [tool.uv.sources]
 pux-harness = { workspace = true }
+pux-agentkit = { workspace = true }
 
 [dependency-groups]
 dev = ["pytest", "ruff", "mypy"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# One `pytest` from the repo root covers the whole workspace: the harness suite
+# (tests/) AND the agentkit suite (agentkit/tests/ — the standalone compiler's
+# own tests, runnable in isolation via `cd agentkit && pytest` too).
+testpaths = ["tests", "agentkit/tests"]
 pythonpath = ["."]
 
 [tool.ruff]

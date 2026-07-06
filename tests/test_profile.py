@@ -25,7 +25,8 @@ from deepagents import HarnessProfileConfig
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from pux_harness.agent import graph, orgs, profile
+from pux_harness.agent import graph, orgs, profile, stack
+from pux_harness.context.layer import build_context_layer
 
 
 # --- fakes -----------------------------------------------------------------
@@ -46,6 +47,14 @@ _SPECIALISTS = [
     _mk_tool("pux_sandbox_browser_save_session", "save session (original desc)"),
     _mk_tool("pux_sandbox_browser_navigate", "navigate to a url"),
 ]
+
+
+def _ctx() -> dict:
+    """The context layer the stack factory builds and threads into subagents.
+    ``load_subagents`` requires it explicitly now (one way: the loader no longer
+    builds the layer itself)."""
+    mw, tools = build_context_layer()
+    return {"subagent_middleware": mw, "retrieval_tools": tools}
 
 # The middleware ``build_graph`` ALWAYS mounts, in order, regardless of profile:
 # the unified context layer's middleware (capture+offload in one
@@ -70,6 +79,10 @@ def fake_tree(tmp_path: Path, monkeypatch):
     (tmp_path / "orgs" / "_shared" / "skills").mkdir(parents=True)
     monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
     monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
+    # BrowserVisionMiddleware is env-gated (default ON); pin it OFF so the
+    # baseline tests below see EXACTLY _BASELINE_MIDDLEWARE (the always-mounted
+    # routing+session_guide pair). The vision mount is proven in test_stack.py.
+    monkeypatch.setenv("PUX_BROWSER_VISION", "0")
 
     # org "p" with a CTO overlay + a browser-like specialist.
     d = tmp_path / "orgs" / "p"
@@ -116,14 +129,20 @@ def captured_build(monkeypatch):
     monkeypatch.setattr(graph, "shared_backend", lambda: "BACKEND")
     monkeypatch.setattr(graph, "build_native_specialists",
                         lambda *a, **k: list(_SPECIALISTS))
-    # The unified context layer (graph.py: ``ctx_mw, ctx_tools =
-    # build_context_layer()`` — one ContextMiddleware doing capture+offload in
-    # a single pass, plus the ctx_recall/ctx_search retrieval tools). Stubbed to
-    # empty so the no-gate baseline middleware is just ROUTE+GUIDE; the
-    # capture/offload behavior is proven separately in test_context_offload.py.
-    monkeypatch.setattr(graph, "build_context_layer", lambda: ([], []))
-    monkeypatch.setattr(graph, "RoutingMiddleware", lambda: "ROUTE")
-    monkeypatch.setattr(graph, "SessionGuideMiddleware", lambda: "GUIDE")
+    # Phase 21: the middleware assembly moved into ``stack.build_stack`` (the
+    # factory), so the build_context_layer + RoutingMiddleware +
+    # SessionGuideMiddleware stubs target the ``stack`` module's namespace
+    # (where ``build_stack`` looks them up), NOT ``graph``'s. ``graph.py`` is
+    # now thin — it imports none of those (the no-legacy-middleware-in-graph
+    # contract tripwire enforces that). Stubbed to empty/baseline so the
+    # no-gate middleware is just ROUTE+GUIDE; the capture/offload behavior is
+    # proven separately in test_context_offload.py. ``stack`` resolves the
+    # grader model via its OWN ``get_model`` import when a rubric gate arms —
+    # stub that too so the rubric tests see ``"MODEL"``.
+    monkeypatch.setattr(stack, "build_context_layer", lambda: ([], []))
+    monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
+    monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
+    monkeypatch.setattr(stack, "get_model", lambda *a, **k: "MODEL")
     monkeypatch.setattr(
         graph, "create_deep_agent",
         lambda **kw: cap.update(kw) or "GRAPH",
@@ -245,12 +264,13 @@ def test_build_graph_requests_base_and_multimodal_roles(fake_tree, monkeypatch):
     monkeypatch.setattr(graph, "shared_backend", lambda: "BACKEND")
     monkeypatch.setattr(graph, "build_native_specialists",
                         lambda *a, **k: list(_SPECIALISTS))
-    # Stub build_graph's remaining deps so it runs to completion; this test
-    # only asserts which roles ``get_model`` was asked for, not the middleware
-    # shape (that's the captured_build fixture's job elsewhere).
-    monkeypatch.setattr(graph, "build_context_layer", lambda: ([], []))
-    monkeypatch.setattr(graph, "RoutingMiddleware", lambda: "ROUTING")
-    monkeypatch.setattr(graph, "SessionGuideMiddleware", lambda: "SESSION")
+    # Phase 21: middleware assembly lives in ``stack.build_stack``; stub the
+    # stack-level names so the factory runs to completion. This test only
+    # asserts which roles ``graph.get_model`` was asked for at the graph layer
+    # — not the middleware shape (that's captured_build's job elsewhere).
+    monkeypatch.setattr(stack, "build_context_layer", lambda: ([], []))
+    monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTING")
+    monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "SESSION")
     monkeypatch.setattr(graph, "create_deep_agent", lambda **kw: "GRAPH")
     monkeypatch.setattr(graph, "load_profile", lambda org: None)
 
@@ -279,7 +299,7 @@ def test_rubric_gate_appends_middleware(fake_tree, captured_build, monkeypatch):
         rubric_kwargs.update(kwargs)
         return "RUBRIC_MW"
 
-    monkeypatch.setattr(graph, "RubricMiddleware", _fake_rubric_mw)
+    monkeypatch.setattr(stack, "RubricMiddleware", _fake_rubric_mw)
     # Write org p a rubric gate (no other profile fields).
     (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
         "rubric:\n"
@@ -297,8 +317,8 @@ def test_rubric_gate_appends_middleware(fake_tree, captured_build, monkeypatch):
     assert rubric_kwargs["max_iterations"] == 3
     # The grader's 3 evidence tools (execute / read_file / grep).
     assert len(rubric_kwargs["tools"]) == 3
-    # The grader model came from get_model (captured_build stubs it -> "MODEL");
-    # proving build_graph asked for it via the role-resolved path.
+    # The grader model came from get_model (captured_build stubs stack.get_model
+    # -> "MODEL"); proving build_stack asked for it via the role-resolved path.
     assert rubric_kwargs["model"] == "MODEL"
 
 
@@ -311,7 +331,7 @@ def test_no_rubric_gate_no_rubric_middleware(fake_tree, captured_build, monkeypa
         constructed.append(kwargs)
         raise AssertionError("RubricMiddleware must not be constructed without a gate")
 
-    monkeypatch.setattr(graph, "RubricMiddleware", _bomb_rubric_mw)
+    monkeypatch.setattr(stack, "RubricMiddleware", _bomb_rubric_mw)
     # org p has no profile.yaml in fake_tree.
     graph.build_graph("p", checkpointer=None)
 
@@ -325,7 +345,7 @@ def test_rubric_gate_disabled_mounts_no_middleware(fake_tree, captured_build, mo
     break is killed by flipping one flag, per the beta mitigation)."""
     constructed: list[dict] = []
     monkeypatch.setattr(
-        graph, "RubricMiddleware", lambda **k: constructed.append(k) or "RUBRIC_MW"
+        stack, "RubricMiddleware", lambda **k: constructed.append(k) or "RUBRIC_MW"
     )
     (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
         "rubric:\n"
@@ -506,7 +526,7 @@ def test_load_subagents_default_profile_none_preserves_behavior(fake_tree):
     tools ``ctx_recall`` + ``ctx_search`` are appended to the whitelist too
     (graph.py retracts the old "main-agent-only" claim — verified against
     deepagents 0.6.12)."""
-    subs = orgs.load_subagents("p", _SPECIALISTS)
+    subs = orgs.load_subagents("p", _SPECIALISTS, **_ctx())
     sub = next(s for s in subs if s["name"] == "browserish")
     assert sub["system_prompt"] == "browser body."
     names = {t.name for t in sub["tools"]}
@@ -527,7 +547,7 @@ def test_load_subagents_applies_profile(fake_tree):
         overrides={"pux_sandbox_browser_save_session": "REDONE"},
         excluded={"pux_sandbox_browser_navigate"},
     )
-    subs = orgs.load_subagents("p", _SPECIALISTS, profile=cfg)
+    subs = orgs.load_subagents("p", _SPECIALISTS, profile=cfg, **_ctx())
     sub = next(s for s in subs if s["name"] == "browserish")
     assert sub["system_prompt"].endswith("EXTRA")
     names = {t.name for t in sub["tools"]}

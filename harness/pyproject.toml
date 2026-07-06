@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "deepagents-based Pux harness (Phase 0 pivot spike)"
 requires-python = ">=3.12,<3.14"
 dependencies = [
+    "pux-agentkit",
     "deepagents",
     "deepagents-acp>=0.0.8",
     "docker>=7.1.0",

@@ -30,8 +30,16 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.tools import BaseTool
 
 from pux_harness.agent.model import get_model
-from pux_harness.context.layer import build_context_layer
 from pux_harness.sandbox.tools import Category, classify_slug, prefixed
+
+# The three PURE format parsers live upstream in pux-agentkit (the standalone
+# org+skill compiler — ``agentkit/``) so the harness and the kit never drift on
+# how an org / agent / SKILL.md frontmatter doc is parsed. The path helpers +
+# discovery functions BELOW stay harness-local: they are PROJECT_ROOT-bound and
+# monkeypatched by the contract tests (see profile.py / model.py / tool_servers
+# .py), a contract the kit's project_root-parameterized loaders would break.
+# The kit carries its own parameterized copies for use from a standalone app.
+from pux_agentkit.loaders import _parse_list, _scan_orgs, _split_frontmatter
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -89,27 +97,6 @@ def _read(rel: str) -> str:
     return (PROJECT_ROOT / rel).read_text()
 
 
-def _parse_list(raw: Any) -> list[str]:
-    """A list value -> stripped non-empty items. Accepts either a YAML list
-    (``[a, b]``) or a comma-separated scalar (``agents: a,b``)."""
-    if raw is None:
-        return []
-    if isinstance(raw, list):
-        return [str(s).strip() for s in raw if str(s).strip()]
-    return [s.strip() for s in str(raw).split(",") if s.strip()]
-
-
-def _scan_orgs(root: Path) -> list[str]:
-    """Scan a single directory for org subdirs (dirs containing ``AGENTS.md``)."""
-    out: list[str] = []
-    if not root.is_dir():
-        return out
-    for child in sorted(root.iterdir()):
-        if child.is_dir() and (child / "AGENTS.md").is_file():
-            out.append(child.name)
-    return out
-
-
 def discover_orgs() -> list[str]:
     """Sorted names of every org dir containing ``AGENTS.md``. Data-driven —
     no hardcoded manifest. An org's specialist roster lives in its
@@ -159,37 +146,6 @@ conflicts with the org docs above, THIS ADDENDUM wins.
   `/sandbox/workspace/` inside the sandbox container — the project root,
   bind-mounted. You and every subagent share this same surface.
 """
-
-
-def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    """Split a ``.md`` file into ``(frontmatter, body)``.
-
-    Frontmatter is the optional leading ``---``-delimited YAML block, parsed
-    with ``yaml.safe_load`` (so lists + nested mappings work — Phase 10 retired
-    the scalar-only hand-rolled parser). Body is the markdown after the closing
-    ``---``. No frontmatter -> ``({}, body)``. A non-mapping frontmatter block
-    or a YAML syntax error raises ``ValueError`` (fail loud — the old parser
-    silently produced junk values).
-
-    Still used for the root ``AGENTS.md`` + every ``SKILL.md`` + every agent
-    ``<slug>.md`` (contract rule 8 + the agent well-formedness tripwire); only
-    ``org.yaml`` (a bare YAML doc with no markdown body) bypasses it.
-    """
-    if not text.startswith("---"):
-        return {}, text.strip()
-    parts = text.split("---", 2)
-    if len(parts) < 3:
-        return {}, text.strip()
-    _, head, body = parts
-    try:
-        fm = yaml.safe_load(head) or {}
-    except yaml.YAMLError as e:  # pragma: no cover - covered by contract tests
-        msg = f"invalid YAML frontmatter: {e}"
-        raise ValueError(msg) from e
-    if not isinstance(fm, dict):
-        msg = f"frontmatter must be a YAML mapping, got {type(fm).__name__}"
-        raise ValueError(msg)
-    return fm, body.strip()
 
 
 def load_root_prompt() -> str:
@@ -290,7 +246,7 @@ def _load_agent_spec(slug: str, org: str) -> dict[str, Any] | None:
 
 def _build_sub(
     slug: str, spec: dict[str, Any], tool_map: dict[str, BaseTool], system_prompt: str,
-    org: str, *, ctx_mw: list[AgentMiddleware],
+    org: str, *, middleware: list[AgentMiddleware],
 ) -> dict[str, Any]:
     """Build a deepagents SubAgent dict from a spec mapping (the module's
     ``SUBAGENT`` dict). ``system_prompt`` is passed in explicitly.
@@ -302,16 +258,17 @@ def _build_sub(
     model so an org can set base!=worker. (Worker defaults to the same id as
     base, so today's orgs are byte-identical; the seam is what's new.)
 
-    Phase 19 — ``ctx_mw`` is the unified context-layer middleware (capture +
-    offload, one ``ContextMiddleware``) attached to EVERY subagent.
-    ``SubAgentMiddleware`` forwards a spec's ``middleware`` key into the
+    Phase 21 — ``middleware`` is the FULLY RESOLVED subagent middleware list
+    handed down by the stack factory (``stack.build_stack``): the always-on
+    context layer (capture + offload) PLUS any toggleable middleware the org
+    added to the subagent scope via ``profile.yaml``'s ``middleware.subagent``
+    block. ``SubAgentMiddleware`` forwards a spec's ``middleware`` key into the
     compiled subagent (verified against deepagents 0.6.12: ``graph.py:656`` +
     ``middleware/subagents.py:494`` both ``.extend(spec.get("middleware", []))``
-    into ``create_agent``), so this makes the layer intercept THIS subagent's
-    own tool calls. The old Phase-7 docstring claim that the ``middleware`` key
-    is silently dropped was WRONG and is retracted. The retrieval tools
-    (``ctx_recall``/``ctx_search``) are appended to the whitelist separately in
-    ``load_subagents`` (after profile filtering) — see there.
+    into ``create_agent``), so this makes every entry intercept THIS subagent's
+    own tool calls. The retrieval tools (``ctx_recall``/``ctx_search``) are
+    appended to the whitelist separately in ``load_subagents`` (after profile
+    filtering) — see there.
     """
     sub: dict[str, Any] = {
         "name": spec.get("name", slug),
@@ -326,7 +283,7 @@ def _build_sub(
         sub["model"] = get_model(role="worker", org=org)
     if "skills" in spec:
         sub["skills"] = _resolve_skills(spec["skills"], slug)
-    sub["middleware"] = list(ctx_mw)
+    sub["middleware"] = list(middleware)
     return sub
 
 
@@ -334,29 +291,27 @@ def load_subagents(
     org: str,
     all_tools: list[BaseTool],
     profile: Any = None,
+    *,
+    subagent_middleware: list[AgentMiddleware],
+    retrieval_tools: list[BaseTool],
 ) -> list[dict[str, Any]]:
     """Build deepagents SubAgent dicts for ``org``'s specialists.
 
     For each slug in ``org.yaml``, load ``orgs/<org>/agents/<slug>.md`` (or
     ``orgs/_shared/agents/<slug>.md``) and build from its frontmatter + body.
 
-    Phase 19 — the unified context layer (capture + offload + retrieval) now
-    reaches EVERY subagent, not just the main agent:
+    ONE WAY — the stack factory (``stack.build_stack``) owns the WHOLE agent
+    tree's middleware + retrieval surface and hands the resolved SUBAGENT slice
+    down here. Both are required: every caller (the factory at runtime, every
+    direct test/contract call) builds the context layer itself and passes it.
+    The loader never builds the layer — it only threads what it is given:
 
-    - ``middleware``: built ONCE via ``build_context_layer()`` and attached to
-      each spec (``_build_sub`` sets ``sub["middleware"]``). deepagents'
-      ``SubAgentMiddleware`` forwards that key into the compiled subagent
-      (verified against 0.6.12), so ``ContextMiddleware`` intercepts each
-      subagent's own tool calls. The old Phase-7 "main-agent-only" claim is
-      retracted. Both the main agent (``graph.build_graph``) and every
-      subagent bind the SAME process-wide ``EventStore`` (the default store
-      in ``build_context_layer``), so a blob offloaded by any agent is
-      recallable by any other.
-    - retrieval tools (``ctx_recall``/``ctx_search``): appended to each
-      specialist's resolved whitelist, AFTER profile filtering (so an org's
-      ``excluded_tools`` can never strip retrieval). A spec with no ``tools``
-      inherits the main agent's tools — which already include them via
-      ``graph.build_graph`` — so we don't synthesize a list in that case.
+    - ``subagent_middleware``: forwarded into each spec via ``_build_sub`` →
+      ``sub["middleware"]`` (the always-on context layer + any toggleable
+      middleware the org added to the subagent scope).
+    - ``retrieval_tools``: ``ctx_recall``/``ctx_search``, appended to each
+      specialist's resolved whitelist AFTER profile filtering (so an org's
+      ``excluded_tools`` can never strip retrieval).
 
     ``profile`` (optional ``HarnessProfileConfig`` from ``orgs/<org>/
     profile.yaml``; Phase 16.3b) applies the org-wide overrides to EACH
@@ -364,17 +319,11 @@ def load_subagents(
     ``tool_description_overrides`` + ``excluded_tools`` are applied to the
     resolved tool whitelist (so an org-wide override reaches a shared subagent
     like the browser agent, not just the CTO). The helper is imported lazily to
-    avoid a module cycle (``profile.py`` imports ``orgs._orgs_dir``). Default
-    ``None`` keeps every existing call site byte-identical to today.
+    avoid a module cycle (``profile.py`` imports ``orgs._orgs_dir``).
     """
     if org not in discover_orgs():
         raise KeyError(f"unknown org {org!r}; discovered orgs: {discover_orgs()}")
     tool_map: dict[str, BaseTool] = {t.name: t for t in all_tools}
-    # Build the context layer once for the whole org — every subagent shares
-    # the same middleware instance + the same retrieval tools, all bound to the
-    # process-wide EventStore (so an offload by any subagent is recallable by
-    # any other, and by the main agent).
-    ctx_mw, ctx_tools = build_context_layer()
     apply_profile_to_tools = None
     if profile is not None:
         # Lazy: profile.py imports ``_orgs_dir`` from THIS module at load time.
@@ -388,7 +337,8 @@ def load_subagents(
             raise FileNotFoundError(
                 f"no agent {slug!r} for org {org!r} — searched {searched}")
         sub = _build_sub(
-            slug, spec, tool_map, spec["system_prompt"], org, ctx_mw=ctx_mw,
+            slug, spec, tool_map, spec["system_prompt"], org,
+            middleware=subagent_middleware,
         )
         if profile is not None:
             if profile.system_prompt_suffix:
@@ -400,12 +350,12 @@ def load_subagents(
         # Retrieval surface, appended AFTER profile filtering so an org-wide
         # ``excluded_tools`` can't strip it. Guarded by ``sub.get("tools")``: a
         # spec with no whitelist inherits the main agent's tools (already
-        # including these via graph.build_graph), and synthesizing a list here
-        # would silently break that inheritance.
+        # including these via the factory), and synthesizing a list here would
+        # silently break that inheritance.
         if sub.get("tools"):
             have = {t.name for t in sub["tools"]}
             sub["tools"] = [
-                *sub["tools"], *(t for t in ctx_tools if t.name not in have)
+                *sub["tools"], *(t for t in retrieval_tools if t.name not in have)
             ]
         subs.append(sub)
     return subs

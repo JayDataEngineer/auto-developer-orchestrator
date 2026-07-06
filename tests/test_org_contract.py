@@ -28,6 +28,7 @@ from pux_harness.agent.contract import (
     KNOWN_POLICY_SECTIONS,
     NATIVE_FS_TOOLS,
     _REQUIRED_AGENT_KEYS,
+    _scan_runtime_for_memory_saver,
     check_harness,
     check_org,
     discover_orgs,
@@ -438,6 +439,47 @@ def test_no_legacy_sandbox_artifacts_on_real_repo():
     assert vs == [], vs
 
 
+def test_no_legacy_memory_saver_on_real_repo():
+    """acp.py + main.py neither import nor instantiate MemorySaver — the
+    server-side runtimes share the persistent AsyncSqliteSaver from
+    threads.open_thread_store (Phase 23)."""
+    vs = [v for v in check_harness()
+          if v.rule == "no-legacy-memory-saver"]
+    assert vs == [], vs
+
+
+def test_no_legacy_memory_saver_tripwire_fires(tmp_path):
+    """Provocation: a runtime file that imports + instantiates MemorySaver emits
+    one Violation per offence. Mirrors the no-legacy-sandbox-artifacts
+    provocation shape — drives the AST scanner against a temp file so the real
+    acp.py/main.py are untouched."""
+    fake = tmp_path / "evil_runtime.py"
+    fake.write_text(
+        "from langgraph.checkpoint.memory import MemorySaver\n"
+        "cp = MemorySaver()\n"
+    )
+    vs = _scan_runtime_for_memory_saver(fake)
+    assert len(vs) == 2, vs  # one for the import, one for the call
+    assert all(v.rule == "no-legacy-memory-saver" and v.severity == "error"
+               for v in vs)
+    msgs = "\n".join(v.message for v in vs)
+    assert "imports MemorySaver" in msgs
+    assert "instantiates MemorySaver" in msgs
+
+
+def test_no_legacy_memory_saver_tripwire_clean(tmp_path):
+    """A clean runtime (no MemorySaver at all) emits nothing — including when
+    'MemorySaver' appears only in a docstring/comment (no false positive)."""
+    fake = tmp_path / "clean_runtime.py"
+    fake.write_text(
+        '"""Docstring mentions MemorySaver but never uses it."""\n'
+        "# a comment: MemorySaver() would be bad\n"
+        "from pux_harness.threads import open_thread_store\n"
+        "saver = object()  # not a MemorySaver\n"
+    )
+    assert _scan_runtime_for_memory_saver(fake) == []
+
+
 def test_host_setup_validator_missing_helper(fake_tree):
     """A host_setup hook whose helper_script doesn't resolve under the project
     root fails --check-contract (offline) before Docker is ever touched."""
@@ -616,11 +658,11 @@ def test_profile_yaml_non_mapping_reports_violation(fake_tree):
 
 def test_dev_bot_roster_on_real_repo():
     """dev-bot's shipped roster is exactly the three specialists — explorer
-    (recon), code_worker (mechanical one-shot execution), web_agent (e2e
+    (recon), code-worker (mechanical one-shot execution), web-agent (e2e
     verification). The CTO does all the thinking; these three are the only
     delegation targets."""
     slugs = orgs.org_agent_slugs("dev-bot")
-    assert slugs == ["dev-bot-explorer", "code_worker", "web_agent"], slugs
+    assert slugs == ["dev-bot-explorer", "code-worker", "web-agent"], slugs
 
 
 def test_dev_bot_no_general_subagent_tripwire_on_real_repo():
@@ -658,7 +700,7 @@ def test_dev_bot_tripwire_does_not_fire_for_other_orgs(fake_tree):
 
 
 def test_dev_bot_specialists_resolve_on_worker_role(monkeypatch):
-    """code_worker + web_agent have no frontmatter ``model:`` → both resolve on
+    """code-worker + web-agent have no frontmatter ``model:`` → both resolve on
     the ``worker`` role (cheap mimo, the "small one-shot worker" the user asked
     for). Drives the REAL load_subagents('dev-bot') — no Docker, no tokens.
     Fake key only (get_model reads it at construction, never sends a request)."""
@@ -667,26 +709,32 @@ def test_dev_bot_specialists_resolve_on_worker_role(monkeypatch):
     from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
 
     # Stand-in tools covering the WHOLE specialist registry — load_subagents
-    # only needs .name to resolve each agent's tools whitelist, and web_agent
+    # only needs .name to resolve each agent's tools whitelist, and web-agent
     # references the full browser_* surface.
     class _T:
         def __init__(self, name):
             self.name = name
     specialists = [_T(n) for n in SPECIALIST_TOOL_NAMES]
-    subs = orgs_mod.load_subagents("dev-bot", specialists)
+    # load_subagents takes the context layer explicitly now (one way: the loader
+    # no longer builds it). Build it here exactly as the stack factory does.
+    from pux_harness.context.layer import build_context_layer
+    mw, ctx_tools = build_context_layer()
+    subs = orgs_mod.load_subagents(
+        "dev-bot", specialists, subagent_middleware=mw, retrieval_tools=ctx_tools,
+    )
     by_name = {s["name"]: s for s in subs}
-    assert set(by_name) == {"dev-bot-explorer", "code_worker", "web_agent"}, \
+    assert set(by_name) == {"dev-bot-explorer", "code-worker", "web-agent"}, \
         set(by_name)
     # worker role resolves to a concrete model id (mimo-v2.5 default); the
     # resolved value is NOT a hardcoded literal — it comes from models.yaml.
-    for slug in ("code_worker", "web_agent"):
+    for slug in ("code-worker", "web-agent"):
         assert by_name[slug]["model"] is not None, f"{slug} model unresolved"
-    # code_worker carries only python (+ native fs always auto-injected at
+    # code-worker carries only python (+ native fs always auto-injected at
     # graph build, not in the whitelist) PLUS the Phase-19 ctx retrieval pair
-    # (ctx_recall/ctx_search reach every subagent); web_agent carries the
+    # (ctx_recall/ctx_search reach every subagent); web-agent carries the
     # browser surface (+ the same ctx pair).
-    cw_tools = {t.name for t in by_name["code_worker"]["tools"]}
+    cw_tools = {t.name for t in by_name["code-worker"]["tools"]}
     assert cw_tools == {"pux_sandbox_python", "ctx_recall", "ctx_search"}, cw_tools
-    web_tools = [t.name for t in by_name["web_agent"]["tools"]]
+    web_tools = [t.name for t in by_name["web-agent"]["tools"]]
     assert "pux_sandbox_browser_navigate" in web_tools
     assert "pux_sandbox_describe_image" in web_tools

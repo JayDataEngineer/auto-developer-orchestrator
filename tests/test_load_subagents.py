@@ -29,6 +29,7 @@ import pytest
 from langchain_openai import ChatOpenAI
 
 from pux_harness.agent import orgs
+from pux_harness.context.layer import build_context_layer
 from pux_harness.context.middleware import ContextMiddleware
 
 
@@ -42,6 +43,14 @@ class _FakeTool:
 
 def _specialists() -> list[_FakeTool]:
     return [_FakeTool("pux_sandbox_python")]
+
+
+def _ctx() -> dict:
+    """The unified context layer the stack factory builds and threads into every
+    subagent. ``load_subagents`` takes it explicitly now (one way: the loader
+    no longer builds the layer itself), so direct callers pass this."""
+    mw, tools = build_context_layer()
+    return {"subagent_middleware": mw, "retrieval_tools": tools}
 
 
 @pytest.fixture
@@ -102,7 +111,7 @@ def test_tools_resolved_to_specialist_surface(fake_tree):
     _agent_md("t", root, tools=["python"])
     _org_yaml("o", ["t"], root)
 
-    subs = orgs.load_subagents("o", _specialists())
+    subs = orgs.load_subagents("o", _specialists(), **_ctx())
     assert len(subs) == 1
     sub = subs[0]
     assert sub["name"] == "t"
@@ -129,7 +138,7 @@ def test_model_resolved_via_get_model(fake_tree):
     _agent_md("m", root, model="glm-5.2", body="body")
     _org_yaml("o", ["m"], root)
 
-    sub = orgs.load_subagents("o", _specialists())[0]
+    sub = orgs.load_subagents("o", _specialists(), **_ctx())[0]
     assert isinstance(sub["model"], ChatOpenAI)
     assert sub["model"].model_name == "glm-5.2"
 
@@ -143,7 +152,7 @@ def test_model_omitted_uses_worker_role(fake_tree):
     _agent_md("bare", root, tools=["python"])
     _org_yaml("o", ["bare"], root)
 
-    sub = orgs.load_subagents("o", _specialists())[0]
+    sub = orgs.load_subagents("o", _specialists(), **_ctx())[0]
     assert isinstance(sub["model"], ChatOpenAI)
     assert sub["model"].model_name == "mimo-v2.5"
 
@@ -158,7 +167,7 @@ def test_model_omitted_worker_role_org_override(fake_tree):
         "models:\n  worker_model: glm-5.2\n"
     )
 
-    sub = orgs.load_subagents("o", _specialists())[0]
+    sub = orgs.load_subagents("o", _specialists(), **_ctx())[0]
     assert sub["model"].model_name == "glm-5.2"
 
 
@@ -168,7 +177,7 @@ def test_skills_resolved_to_container_paths(fake_tree):
     _agent_md("sk", root, skills=["orgs/_shared/skills"])
     _org_yaml("o", ["sk"], root)
 
-    sub = orgs.load_subagents("o", _specialists())[0]
+    sub = orgs.load_subagents("o", _specialists(), **_ctx())[0]
     assert sub["skills"] == ["/sandbox/workspace/orgs/_shared/skills"]
 
 
@@ -180,7 +189,7 @@ def test_unknown_skills_source_raises(fake_tree):
     _org_yaml("o", ["bad"], root)
 
     with pytest.raises(KeyError, match="ghost"):
-        orgs.load_subagents("o", _specialists())
+        orgs.load_subagents("o", _specialists(), **_ctx())
 
 
 def test_skills_accepts_yaml_list(fake_tree):
@@ -191,7 +200,7 @@ def test_skills_accepts_yaml_list(fake_tree):
     _agent_md("multi", root, skills=["orgs/_shared/skills", "orgs/o/skills"])
     _org_yaml("o", ["multi"], root)
 
-    sub = orgs.load_subagents("o", _specialists())[0]
+    sub = orgs.load_subagents("o", _specialists(), **_ctx())[0]
     assert sub["skills"] == [
         "/sandbox/workspace/orgs/_shared/skills",
         "/sandbox/workspace/orgs/o/skills",
@@ -204,7 +213,7 @@ def test_md_agent_loads(fake_tree):
     _agent_md("mdagent", root, tools=["python"], skills=["orgs/_shared/skills"])
     _org_yaml("o", ["mdagent"], root)
 
-    subs = orgs.load_subagents("o", _specialists())
+    subs = orgs.load_subagents("o", _specialists(), **_ctx())
     assert len(subs) == 1
     sub = subs[0]
     assert sub["name"] == "mdagent"
@@ -232,7 +241,7 @@ def test_shared_agent_resolves(fake_tree):
     _agent_md("sharedone", root, org="_shared", tools=["python"])
     _org_yaml("o", ["sharedone"], root)
 
-    sub = orgs.load_subagents("o", _specialists())[0]
+    sub = orgs.load_subagents("o", _specialists(), **_ctx())[0]
     assert sub["name"] == "sharedone"
     assert sub["system_prompt"] == "prose body"
 
@@ -245,7 +254,7 @@ def test_org_local_overrides_shared(fake_tree):
     _agent_md("dup", root, org="o", body="org body", description="org")
     _org_yaml("o", ["dup"], root)
 
-    sub = orgs.load_subagents("o", _specialists())[0]
+    sub = orgs.load_subagents("o", _specialists(), **_ctx())[0]
     assert sub["system_prompt"] == "org body"
     assert sub["description"] == "org"
 
@@ -257,7 +266,7 @@ def test_missing_agent_md_raises(fake_tree):
     _org_yaml("o", ["ghost"], root)
 
     with pytest.raises(FileNotFoundError, match="ghost"):
-        orgs.load_subagents("o", _specialists())
+        orgs.load_subagents("o", _specialists(), **_ctx())
 
 
 def test_org_agent_slugs_reads_org_yaml(fake_tree):
@@ -291,7 +300,7 @@ def test_real_browser_whitelist_resolves(monkeypatch):
 
     monkeypatch.setenv("OPENCODE_API_KEY", "test-key")  # worker-role model build
     specialists = build_native_specialists("DUMMY", None, None)
-    subs = orgs.load_subagents("general", specialists)
+    subs = orgs.load_subagents("general", specialists, **_ctx())
     browser = next(s for s in subs if s["name"] == "browser")
     names = {t.name for t in browser["tools"]}
     # Representative coverage across navigate / search / screenshot / tabs /

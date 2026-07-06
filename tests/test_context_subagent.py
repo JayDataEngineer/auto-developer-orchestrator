@@ -43,6 +43,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, PrivateAttr
 
 from pux_harness.context.events import EventStore
+from pux_harness.context.layer import build_context_layer
 from pux_harness.context.middleware import ContextMiddleware
 
 
@@ -115,7 +116,7 @@ def test_subagent_with_context_middleware_offloads(tmp_path):
     tool_msgs = [m for m in result["messages"] if isinstance(m, ToolMessage)]
     assert tool_msgs, "expected the big_tool ToolMessage in the trace"
     stub = tool_msgs[-1]
-    assert "ctx-offload" in stub.content  # the model saw the stub, not the blob
+    assert _extract_handle(stub.content)  # a ctx:<id> handle → model saw the stub, not the blob
     # Only a bounded PREVIEW is inline (boilerplate + ~500 chars), NOT the full
     # 9016-char payload — that's the whole point of offloading.
     assert len(stub.content) < 2000
@@ -144,7 +145,9 @@ def test_subagent_without_middleware_does_not_offload(tmp_path):
     tool_msgs = [m for m in result["messages"] if isinstance(m, ToolMessage)]
     assert tool_msgs
     assert tool_msgs[-1].content.startswith("BIG-BLOB-MARKER")  # full content inline
-    assert "ctx-offload" not in tool_msgs[-1].content
+    # No ctx:<id> handle → not offloaded. (Raw regex, not _extract_handle —
+    # that helper ASSERTS a handle exists, so it can't probe the negative case.)
+    assert re.search(r"ctx:[0-9a-f]+", tool_msgs[-1].content) is None
     # And nothing was stashed: no blob handle exists to recall.
     assert store.recall_blob("ctx:deadbeefcafe") is None
     assert store.search_context("BIG-BLOB-MARKER") == []
@@ -186,7 +189,13 @@ def test_load_subagents_middleware_fires_in_real_compiler(
     # (monkeypatch auto-restores it for the rest of the suite).
     monkeypatch.setattr(ev, "_store", EventStore(fake_tree / "shared.db"))
 
-    subs = orgs.load_subagents("o", [_big_tool()])
+    # load_subagents takes the layer explicitly now (one way: the loader no
+    # longer builds it). Build it AFTER the store redirect above so the layer
+    # binds to the shared.db store the assertion below writes to.
+    mw, ctx_tools = build_context_layer()
+    subs = orgs.load_subagents(
+        "o", [_big_tool()], subagent_middleware=mw, retrieval_tools=ctx_tools,
+    )
     mw_list = subs[0]["middleware"]
     assert mw_list, "load_subagents must attach the context layer to every subagent"
     assert any(isinstance(m, ContextMiddleware) for m in mw_list)
@@ -198,4 +207,4 @@ def test_load_subagents_middleware_fires_in_real_compiler(
 
     tool_msgs = [m for m in result["messages"] if isinstance(m, ToolMessage)]
     assert tool_msgs
-    assert "ctx-offload" in tool_msgs[-1].content  # the spec's middleware fired
+    assert _extract_handle(tool_msgs[-1].content)  # ctx:<id> handle → the spec's middleware fired
