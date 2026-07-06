@@ -699,6 +699,47 @@ def test_dev_bot_tripwire_does_not_fire_for_other_orgs(fake_tree):
     assert not any(v.rule == "dev-bot-no-general-subagent" for v in vs), vs
 
 
+# --- Phase 1: dev-bot-disables-general-purpose (sibling tripwire) -----------
+
+def test_dev_bot_disables_general_purpose_on_real_repo():
+    """Phase 1 sibling tripwire (defense in depth, NEW code path): dev-bot's
+    profile.yaml MUST declare ``general_purpose_subagent: {enabled: false}``.
+    The roster rule above reads org.yaml and so NEVER sees the general-purpose
+    slot deepagents auto-adds to every graph (graph.py:716-717); this rule reads
+    profile.yaml and closes that gap. The shipped repo is clean."""
+    vs = check_org("dev-bot")
+    assert not any(v.rule == "dev-bot-disables-general-purpose" for v in vs), vs
+
+
+def test_dev_bot_disables_general_purpose_fires_when_absent(fake_tree):
+    """A dev-bot whose profile.yaml OMITS the field trips the rule — deepagents
+    would otherwise auto-add a heavy generic worker the roster rule can't see.
+    Only the explicit neuter (``enabled: false``) satisfies dev-bot's intent."""
+    add_org, add_agent = fake_tree
+    add_agent("code-worker", org="dev-bot")
+    add_org("dev-bot", agents=["code-worker"])
+    # profile.yaml present but WITHOUT general_purpose_subagent.
+    (contract._orgs_dir() / "dev-bot" / "profile.yaml").write_text(
+        "system_prompt_suffix: |\n  be terse.\n")
+    vs = check_org("dev-bot")
+    rule_vs = [v for v in vs if v.rule == "dev-bot-disables-general-purpose"]
+    assert len(rule_vs) == 1, vs
+    assert "general_purpose_subagent" in rule_vs[0].message
+
+
+def test_dev_bot_disables_general_purpose_fires_when_enabled_true(fake_tree):
+    """A dev-bot that EXPLICITLY enables the GP also trips the rule — only
+    ``enabled: false`` (the neuter spec) satisfies the no-catch-all intent."""
+    add_org, add_agent = fake_tree
+    add_agent("code-worker", org="dev-bot")
+    add_org("dev-bot", agents=["code-worker"])
+    (contract._orgs_dir() / "dev-bot" / "profile.yaml").write_text(
+        "general_purpose_subagent:\n  enabled: true\n")
+    vs = check_org("dev-bot")
+    rule_vs = [v for v in vs if v.rule == "dev-bot-disables-general-purpose"]
+    assert len(rule_vs) == 1, vs
+
+
 def test_dev_bot_specialists_resolve_on_worker_role(monkeypatch):
     """code-worker + web-agent have no frontmatter ``model:`` → both resolve on
     the ``worker`` role (cheap mimo, the "small one-shot worker" the user asked

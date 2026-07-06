@@ -193,6 +193,99 @@ def test_no_profile_subagent_middleware_is_the_context_layer(fake_tree, stub_fac
     assert plan.subagents[0]["middleware"] == []
 
 
+# --- the general-purpose subagent (Phase 1 — own the GP) --------------------
+
+def test_no_profile_emits_no_general_purpose(fake_tree, stub_factory):
+    """No ``general_purpose_subagent`` block → pux emits NO GP spec; deepagents
+    then auto-adds its own default (graph.py:716-717). This is the parity path —
+    pux only intervenes when the org explicitly owns the slot, so a no-profile
+    org is byte-identical to today. Proven here by absence: the roster is exactly
+    the org's specialists."""
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+    )
+    assert [s["name"] for s in plan.subagents] == ["browserish"]
+
+
+def test_disabled_general_purpose_is_neutered(fake_tree, stub_factory):
+    """``general_purpose_subagent: {enabled: false}`` → pux emits a NEUTERED
+    ``general-purpose`` spec: present (so deepagents skips the heavy auto-add),
+    but DEAD — empty tools + empty middleware + an honest disabled
+    description/prompt, so even a stray delegation returns immediately
+    (Safeguard S1). The slot is dead weight on purpose; full removal would need
+    the model-keyed registry pux can't safely use."""
+    from deepagents import GeneralPurposeSubagentProfile
+    cfg = HarnessProfileConfig(
+        general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
+    )
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=cfg,
+        rubric_gate=None, exec_client="EXEC",
+    )
+    names = [s["name"] for s in plan.subagents]
+    assert "general-purpose" in names
+    gp = next(s for s in plan.subagents if s["name"] == "general-purpose")
+    assert gp["tools"] == []                       # dead — no tools
+    assert gp["middleware"] == []                  # dead — no middleware
+    assert gp["model"] == "WORKER_MODEL"
+    assert "disabled" in gp["description"].lower()
+    assert "disabled" in gp["system_prompt"].lower()
+
+
+def test_customized_general_purpose_carries_surface(fake_tree, stub_factory):
+    """A customized GP (``enabled`` absent → treated as on) carries the org's
+    custom description/prompt AND the full specialist surface (profile-filtered
+    the same way every roster subagent's whitelist is). The org-wide suffix
+    layers on top of the GP prompt — same precedence every subagent follows."""
+    from deepagents import GeneralPurposeSubagentProfile
+    cfg = HarnessProfileConfig(
+        system_prompt_suffix="ORG SUFFIX",
+        general_purpose_subagent=GeneralPurposeSubagentProfile(
+            description="custom desc", system_prompt="custom prompt",
+        ),
+    )
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=cfg,
+        rubric_gate=None, exec_client="EXEC",
+    )
+    gp = next(s for s in plan.subagents if s["name"] == "general-purpose")
+    assert gp["description"] == "custom desc"
+    # GP prompt then org-wide suffix (most-specific last).
+    assert gp["system_prompt"] == "custom prompt\n\nORG SUFFIX"
+    # Full specialist surface (ctx_tools stubbed empty here) — NOT dead.
+    assert {t.name for t in gp["tools"]} == {
+        "pux_sandbox_python", "pux_sandbox_browser_navigate",
+    }
+    assert gp["model"] == "WORKER_MODEL"
+
+
+def test_general_purpose_not_double_emitted_when_roster_has_it(fake_tree, stub_factory):
+    """If an org literally rostered a ``general-purpose`` specialist in org.yaml
+    (unusual but possible), pux must NOT double-emit — the roster entry wins, one
+    slot. Mirrors deepagents' own ``not any(...)`` guard at graph.py:717."""
+    (fake_tree / "orgs" / "p" / "org.yaml").write_text(
+        "agents: [browserish, general-purpose]\n")
+    gdir = fake_tree / "orgs" / "p" / "agents"
+    (gdir / "general-purpose.md").write_text(
+        "---\n"
+        'name: "general-purpose"\n'
+        'description: "roster gp"\n'
+        "---\n\nroster body.\n")
+    from deepagents import GeneralPurposeSubagentProfile
+    cfg = HarnessProfileConfig(
+        general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=False),
+    )
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=cfg,
+        rubric_gate=None, exec_client="EXEC",
+    )
+    gps = [s for s in plan.subagents if s["name"] == "general-purpose"]
+    assert len(gps) == 1
+    # The roster entry wins (its body), NOT the neutered spec.
+    assert "roster body" in gps[0]["system_prompt"]
+
+
 # --- BrowserVisionMiddleware mount (env-gated, default ON) ------------------
 
 def test_browser_vision_mounts_innermost_when_enabled(fake_tree, stub_factory, monkeypatch):

@@ -22,6 +22,19 @@ system_prompt_suffix: |
   Never edit code you haven't read. No speculative refactors. No "also fix" —
   only the change that was asked for.
 
+# Phase 1 — own the general-purpose subagent. deepagents auto-adds a HEAVY
+# default ``general-purpose`` worker to EVERY graph unless the org opts out.
+# Dev-Bot's specialists (dev-bot-explorer + the coding rubric gate below) ARE
+# the surface — a generic catch-all worker would dilute delegation and ship the
+# wrong (host-filesystem, non-coding) tool set. ``enabled: false`` makes the
+# harness emit a NEUTERED slot (no tools, an honest "disabled" description) so
+# the task menu shows a dead entry rather than a live generic worker that
+# silently does off-roster work. See pux-harness/pux_harness/agent/orgs.py
+# ``_build_general_purpose_sub`` (Safeguard S1) + the
+# ``dev-bot-disables-general-purpose`` contract rule.
+general_purpose_subagent:
+  enabled: false
+
 # Phase 17.B — the RubricMiddleware verify-gate. After the CTO finishes, a
 # separate grader runs the `default` rubric below against the change using
 # sandbox tools (run tests, read the diff, grep for regressions) and returns a
