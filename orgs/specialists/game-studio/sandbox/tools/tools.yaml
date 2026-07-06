@@ -1,0 +1,139 @@
+# Declared sandbox tools for the game-studio org.
+#
+# Each entry is auto-translated (pux_harness/sandbox/tools/declared.py) into a
+# typed langchain StructuredTool whose func `docker exec`s the script
+# IN-CONTAINER. The model calls `pux_sandbox_<name>(typed args)` directly
+# instead of emitting untyped `python3 sandbox/<script>.py ...` shell.
+#
+# Type vocab: string / integer / number / boolean.
+# invoke: flags (default, robust) -> --name value (boolean -> --name store_true).
+# invoke: positional -> values in declared order.
+# subcommand: optional leading positional word before args.
+# returns: text (default) | json (parse stdout as JSON).
+tools:
+  # --- godot_client.py ------------------------------------------------------
+  - name: godot_health
+    description: >-
+      Check if the Godot MCP server is reachable. Returns 'GODOT_MCP_DOWN'
+      if the server is unreachable, or the editor state JSON if healthy.
+      Uses GODOT_MCP_URL env var (default: http://localhost:8080).
+    script: godot_client.py
+    subcommand: health
+    invoke: flags
+    returns: json
+    timeout: 30
+
+  - name: godot_open_scene
+    description: >-
+      Open a scene file in the Godot editor via MCP. The path is a
+      Godot resource path (res://). Example: res://scenes/main.tscn.
+    script: godot_client.py
+    subcommand: scene-open
+    invoke: positional
+    returns: json
+    timeout: 90
+    args:
+      - name: path
+        type: string
+        required: true
+        description: "Godot resource path, e.g. res://scenes/main.tscn"
+
+  - name: godot_save_scene
+    description: >-
+      Save the currently-active scene in the Godot editor.
+    script: godot_client.py
+    subcommand: scene-save
+    invoke: flags
+    returns: json
+    timeout: 90
+
+  - name: godot_read_script
+    description: >-
+      Read a GDScript file through the Godot editor MCP. Returns the
+      script content and metadata. Path is a Godot resource path.
+    script: godot_client.py
+    subcommand: script-read
+    invoke: positional
+    returns: json
+    timeout: 90
+    args:
+      - name: path
+        type: string
+        required: true
+        description: "Godot resource path, e.g. res://scripts/player.gd"
+
+  - name: godot_update_script
+    description: >-
+      Update a GDScript file in the Godot editor via MCP. Provide the
+      Godot resource path and the local file path whose contents become
+      the new script body.
+    script: godot_client.py
+    subcommand: script-update
+    invoke: flags
+    returns: json
+    timeout: 90
+    args:
+      - name: path
+        type: string
+        required: true
+        description: "Godot resource path, e.g. res://scripts/player.gd"
+      - name: content
+        type: string
+        required: true
+        description: "Local file path containing the new script body"
+
+  - name: godot_screenshot_viewport
+    description: >-
+      Capture the Godot editor viewport as a PNG file and save it to
+      the specified path inside the sandbox.
+    script: godot_client.py
+    subcommand: screenshot-viewport
+    invoke: flags
+    returns: json
+    timeout: 90
+    args:
+      - name: out
+        type: string
+        required: true
+        description: "Path to save the PNG screenshot (e.g. /sandbox/workspace/qa/shot.png)"
+
+  - name: godot_runtime_errors
+    description: >-
+      List runtime errors from the Godot editor. Returns error messages,
+      stack traces, and source locations.
+    script: godot_client.py
+    subcommand: runtime-errors-get
+    invoke: flags
+    returns: json
+    timeout: 30
+
+  - name: godot_console_logs
+    description: >-
+      Dump console output from the Godot editor. Returns recent log
+      entries including prints, warnings, and errors.
+    script: godot_client.py
+    subcommand: console-logs
+    invoke: flags
+    returns: json
+    timeout: 30
+
+  - name: godot_call_tool
+    description: >-
+      Escape hatch: call any Godot editor tool by name with JSON
+      arguments. Use when a specific tool doesn't have its own
+      dedicated subcommand yet.
+    script: godot_client.py
+    subcommand: call
+    invoke: flags
+    returns: json
+    timeout: 90
+    args:
+      - name: tool_name
+        type: string
+        required: true
+        description: "Godot MCP tool name, e.g. 'scene-open'"
+      - name: args
+        type: string
+        required: false
+        default: "{}"
+        description: "JSON arguments for the tool, e.g. '{\"path\":\"res://x\"}'"
