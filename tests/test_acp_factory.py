@@ -16,13 +16,13 @@ from pux_harness.acp import _make_factory
 
 
 def test_make_factory_returns_callable():
-    factory = _make_factory("general")
+    factory = _make_factory("general", saver=object())
     assert callable(factory)
 
 
 def test_make_factory_ignores_context():
     """The factory ignores context.cwd — org is fixed at server startup."""
-    factory = _make_factory("invest")
+    factory = _make_factory("invest", saver=object())
     fake_context = SimpleNamespace(cwd="/some/editor/dir")
 
     with patch("pux_harness.acp.build_graph") as mock_build:
@@ -35,17 +35,21 @@ def test_make_factory_ignores_context():
         assert result is mock_build.return_value
 
 
-def test_make_factory_uses_memory_saver():
-    """The factory creates a MemorySaver for the checkpointer."""
-    factory = _make_factory("general")
+def test_make_factory_uses_persistent_saver():
+    """The factory threads the shared persistent saver into build_graph (Phase 23).
+
+    ACP no longer mints an ephemeral MemorySaver — it reuses the
+    ``AsyncSqliteSaver`` from ``open_thread_store`` so session checkpoints
+    persist across ``pux acp`` restarts."""
+    sentinel_saver = object()
+    factory = _make_factory("general", saver=sentinel_saver)
 
     with patch("pux_harness.acp.build_graph") as mock_build:
         mock_build.return_value = MagicMock()
         factory(SimpleNamespace(cwd="/tmp"))
 
         checkpointer = mock_build.call_args.kwargs["checkpointer"]
-        from langgraph.checkpoint.memory import MemorySaver
-        assert isinstance(checkpointer, MemorySaver)
+        assert checkpointer is sentinel_saver
 
 
 # --- main validation ----------------------------------------------------------
