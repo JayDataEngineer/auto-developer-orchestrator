@@ -72,6 +72,7 @@ def test_build_graph_delegates_to_stack_and_threads_plan(monkeypatch):
         supervisor_middleware=[MagicMock(name="mw1")],
         supervisor_prompt="You are the CTO.",
         subagents=[MagicMock(name="sub1")],
+        supervisor_skills=[],  # Phase 6: empty -> skills=None (no SkillsMiddleware)
     )
 
     monkeypatch.setattr(graph_mod, "get_model", lambda *a, **k: mock_model)
@@ -117,3 +118,6 @@ def test_build_graph_delegates_to_stack_and_threads_plan(monkeypatch):
     assert kw["store"] is mock_memory_store
     assert kw["checkpointer"] is checkpointer
     assert kw["memory"] == ["/memories/AGENTS.md"]
+    # Phase 6: supervisor skills threaded through; empty plan -> None (no
+    # SkillsMiddleware mounted, byte-identical to a no-skills org).
+    assert kw["skills"] is None

@@ -112,8 +112,7 @@ what's registered in `cmd/mcpserver/main.go::main` at boot.
 | `file_grep` | `tools/file/file.go` | `adapters.FileOps` → Docker exec | ripgrep primary, grep fallback. |
 | `file_glob` | `tools/file/file.go` | `adapters.FileOps` → Docker exec | Standard glob syntax. |
 | `python` | `mcpserver/sandbox_python.go` | `adapters.BashExecutor` → `python3 -c` | Sandbox-installed deps available. |
-| `list_skills` | `mcpserver/skills_tool.go` | `skills.Discover` → host FS at `<project>/skills/` | Returns metadata only (no body). |
-| `load_skill` | `mcpserver/skills_tool.go` | `skills.Load` → host FS at `<project>/skills/<name>/SKILL.md` | Returns full markdown body. |
+| `list_skills` | `mcpserver/skills_tool.go` | `skills.Discover` → host FS at `<project>/skills/` | Returns metadata + the SKILL.md `path` for each skill. Bodies are peeked with native `read_file`. |
 | `describe_image` | `mcpserver/vision_tool.go` | `adapters.BashExecutor` → `/usr/local/bin/describe_image.py` | Local ONNX vision (Qwen3.5-2B-ONNX-OPT fp16). Graceful degradation — missing model returns `success:false, reason:"unavailable"`, not an error. |
 | `browser_navigate` | `mcpserver/browser_tool.go` | `adapters.BashExecutor` → `curl POST /navigate` to in-sandbox `sb_server.py` | Opens URL in persistent Chrome. Returns title/url/text + SoM-labeled element map + screenshot path. |
 | `browser_click` | `mcpserver/browser_tool.go` | `adapters.BashExecutor` → `curl POST /click` to `sb_server.py` | Click by SoM `index` (integer) or CSS `selector`. Returns post-click page state. |
@@ -140,9 +139,17 @@ edit them (`chmod 0444`).
 
 Skills are operator-authored markdown files at `<project>/skills/<name>/SKILL.md`.
 Each carries YAML frontmatter (`name`, `description`) and a markdown body.
-The model discovers them via `list_skills` (cheap — metadata only) and
-reads a specific body via `load_skill(name)`. This is the progressive-
-disclosure pattern: list first, load on demand.
+Progressive disclosure is the **native deepagents** path (Phase 6
+unification): the supervisor's `SkillsMiddleware` injects each skill's
+name + description into the prompt at startup, and the agent peeks a body
+on demand with the **native `read_file`** (canonical path). The host-side
+`list_skills` is a discovery aid that complements the middleware by
+spanning EVERY org's skills (not just the active org's + `_shared`); each
+entry carries the SKILL.md `path` to `read_file`.
+
+`pux_sandbox_load_skill` was REMOVED — bodies are no longer a second
+parallel surface. The `skills-peek-via-read-file` contract rule makes
+re-introduction a HARD failure.
 
 Skills are NOT model-mutable through this surface — they're host-side
 backbone context, distinct from in-sandbox artifacts. The model can still

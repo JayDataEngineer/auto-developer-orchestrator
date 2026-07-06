@@ -87,7 +87,7 @@ Python:
 |------|----------|
 | `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute` | native — `PuxSandboxBackend.execute()` → docker exec (8a) |
 | `python` | native — docker exec `python3 -c` (8b) |
-| `list_skills` / `load_skill` | native — host FS `orgs/_shared/skills/` + each `orgs/<name>/skills/` (8c) |
+| `list_skills` | native — host FS `orgs/_shared/skills/` + each `orgs/<name>/skills/` (8c). Discovery aid; bodies peeked via native `read_file` (Phase 6). |
 | `describe_image` | native — **driving-model PRIMARY** (mimo-v2.5 multimodal) → in-sandbox ONNX fallback (8d) |
 | `multimodal` | native — image **or** audio **or** video + a PROMPT → multimodal model (18.B). Returns the model's reasoning or an HONEST error; **no silent fallback** (the value is the prompt-conditioned judgment — e.g. "is this audio intelligible?" — that a generic describer can't give). |
 | `multimodal_mega` | native — resilient sibling of `multimodal`: model first, then a per-type WATERFALL on failure (image→ONNX, audio→honest-unavailable, video→ffmpeg keyframes→per-frame image waterfall) (18.B). Use when you want SOMETHING back even if the model is down. |

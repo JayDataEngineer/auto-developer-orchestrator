@@ -45,12 +45,15 @@ Two tool surfaces, all running **inside the Docker container**:
     xdotool + the sandbox's Xvfb desktop (DISPLAY=:99). Pixel coordinates are
     the contract; click the `(cx, cy)` of an element from the latest
     desktop_screenshot.
-  - **list_skills / load_skill** — discover and load skills from every skills
-    root in the project: `orgs/_shared/skills/` + each `orgs/<name>/skills/`
-    (org-local wins on a name collision). Subagents may additionally scope
-    themselves to specific roots via the `skills:` field in their
-    `orgs/<name>/agents/<slug>.md` frontmatter (deepagents `SkillsMiddleware`
-    loads the index at startup, bodies on demand).
+  - **list_skills** — discovery aid: list SKILL.md files across every skills
+    root in the project (`orgs/_shared/skills/` + each `orgs/<name>/skills/`;
+    org-local wins on a name collision). Each entry carries the SKILL.md
+    `path`. The supervisor additionally gets the native deepagents
+    `SkillsMiddleware` (Phase 6), which injects each skill's name +
+    description into the prompt at startup; **peek a body with the native
+    `read_file`** on the `path` (`pux_sandbox_load_skill` is gone). Subagents
+    may additionally scope themselves to specific roots via the `skills:`
+    field in their `orgs/<name>/agents/<slug>.md` frontmatter.
 
 All paths the tools report are **inside the sandbox container**. The project
 is bind-mounted at `/sandbox/workspace/`.

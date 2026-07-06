@@ -1,7 +1,7 @@
 """Tests for untested tool factories in pux_harness.sandbox.tools.
 
-Covers: _python_tool, _parse_skill, _skills_dirs, _list_skills_tool,
-_load_skill_tool, _tail, _result, _media_kind, _guess_mime, _model_name.
+Covers: _python_tool, _parse_skill, _skills_dirs, _list_skills_tool, _tail,
+_result, _media_kind, _guess_mime, _model_name.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pux_harness.sandbox.tools._media import _guess_mime, _media_kind, _model_name
-from pux_harness.sandbox.tools.skills import _list_skills_tool, _load_skill_tool, _parse_skill
+from pux_harness.sandbox.tools.skills import _list_skills_tool, _parse_skill
 from pux_harness.sandbox.tools.python import _python_tool
 from pux_harness.sandbox.tools._shared import _result, _skills_dirs, _tail
 
@@ -144,41 +144,6 @@ def test_list_skills_tool_with_fake_skill(tmp_path, monkeypatch):
     parsed = json.loads(result)
     assert parsed["count"] == 1
     assert parsed["skills"][0]["name"] == "test"
-
-
-# --- _load_skill_tool ---------------------------------------------------------
-
-
-def test_load_skill_tool_missing_name():
-    tool = _load_skill_tool()
-    result = tool.invoke({"name": ""})
-    parsed = json.loads(result)
-    assert parsed["success"] is False
-
-
-def test_load_skill_tool_not_found():
-    tool = _load_skill_tool()
-    result = tool.invoke({"name": "nonexistent"})
-    parsed = json.loads(result)
-    assert parsed["success"] is False
-    assert "not found" in parsed["error"]
-
-
-def test_load_skill_tool_success(tmp_path, monkeypatch):
-    skill_dir = tmp_path / "skills" / "my-skill"
-    skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("---\nname: my-skill\ndescription: A skill\n---\nDo this.")
-
-    monkeypatch.setattr(
-        "pux_harness.sandbox.tools.skills._skills_dirs",
-        lambda org=None: [tmp_path / "skills"],
-    )
-    tool = _load_skill_tool()
-    result = tool.invoke({"name": "my-skill"})
-    parsed = json.loads(result)
-    assert parsed["name"] == "my-skill"
-    assert parsed["description"] == "A skill"
-    assert "Do this." in parsed["content"]
 
 
 # --- _media_kind --------------------------------------------------------------
