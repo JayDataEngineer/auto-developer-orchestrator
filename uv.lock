@@ -191,7 +191,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pux-harness", directory = "pux-harness" }]
+requires-dist = [{ name = "pux-harness", editable = "pux-harness" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1417,7 +1417,7 @@ wheels = [
 [[package]]
 name = "pux-harness"
 version = "0.1.0"
-source = { directory = "pux-harness" }
+source = { editable = "pux-harness" }
 dependencies = [
     { name = "ag-ui-langgraph" },
     { name = "copilotkit" },

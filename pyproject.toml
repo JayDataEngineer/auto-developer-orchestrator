@@ -12,9 +12,13 @@ requires-python = ">=3.12,<3.14"
 dependencies = ["pux-harness"]
 
 # Resolve the orchestrator's pux-harness dep to the in-tree submodule checkout
-# (editable install into this repo's .venv), NOT PyPI.
+# (editable install into this repo's .venv), NOT PyPI. ``editable = true`` is
+# REQUIRED: without it uv installs a NON-editable physical copy that silently
+# diverges from the submodule source — the orchestrator tests would run a stale
+# snapshot and harness edits would look inert until a manual reinstall. Editable
+# makes the submodule source the live import target: edit + re-test, no reinstall.
 [tool.uv.sources]
-pux-harness = { path = "pux-harness" }
+pux-harness = { path = "pux-harness", editable = true }
 
 [dependency-groups]
 dev = ["pytest", "ruff", "mypy"]
