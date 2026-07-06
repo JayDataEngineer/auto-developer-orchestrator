@@ -98,6 +98,11 @@ def stub_factory(monkeypatch):
     monkeypatch.setattr(stack, "build_context_layer", lambda: ([], []))
     monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
     monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
+    # AuditMiddleware is opt-in (Phase 4); stub to a marker so the resolver test
+    # can observe its presence/position without constructing a real one (which
+    # would bind shared_event_store() and touch the real .pux/events.sqlite). The
+    # real class is unit-tested in pux-harness/tests/test_audit.py.
+    monkeypatch.setattr(stack, "AuditMiddleware", lambda **kw: "AUDIT")
 
     def _rubric(**kwargs):
         cap["rubric"].append(kwargs)
@@ -135,10 +140,11 @@ def _write_middleware_block(fake_tree: Path, block: str) -> None:
 def test_registry_lists_documented_names():
     """The registry is the single vocabulary; ``middleware_names`` is the
     contract/test surface that reads it. Phase 3 folded ``context`` +
-    ``browser_vision`` in as first-class (default-on, removable) specs."""
+    ``browser_vision`` in as first-class (default-on, removable) specs; Phase 4
+    added the opt-in ``audit`` spec (default OFF)."""
     names = stack.middleware_names()
-    assert set(names) == {"context", "routing", "session_guide", "rubric",
-                          "browser_vision"}
+    assert set(names) == {"audit", "context", "routing", "session_guide",
+                          "rubric", "browser_vision"}
     # No duplicate registrations.
     assert len(names) == len(set(names))
 
@@ -154,13 +160,14 @@ def test_defaults_match_pre_factory_baseline():
 
 
 def test_registry_scopes_are_correct():
-    """``context`` + ``browser_vision`` are dual-scope (supervisor AND
-    subagent); ``routing`` / ``session_guide`` / ``rubric`` are supervisor-only
-    (the subagent scope grows when a subagent-scoped middleware is registered)."""
+    """``audit`` + ``context`` + ``browser_vision`` are dual-scope (supervisor
+    AND subagent); ``routing`` / ``session_guide`` / ``rubric`` are supervisor-
+    only (the subagent scope grows when a subagent-scoped middleware is
+    registered)."""
     by_name = {s.name: s for s in stack.MIDDLEWARE_REGISTRY}
     for name in ("routing", "session_guide", "rubric"):
         assert by_name[name].scope == {stack.Scope.SUPERVISOR}, name
-    for name in ("context", "browser_vision"):
+    for name in ("audit", "context", "browser_vision"):
         assert by_name[name].scope == {stack.Scope.SUPERVISOR,
                                        stack.Scope.SUBAGENT}, name
 
@@ -452,7 +459,51 @@ def test_override_empty_block_is_byte_identical(fake_tree, stub_factory):
     assert plan.supervisor_middleware == ["ROUTE", "GUIDE"]
 
 
+# --- Phase 4: the opt-in ``audit`` spec ------------------------------------
+
+def test_audit_is_default_off(fake_tree, stub_factory):
+    """``audit`` is opt-in — a no-block org emits NO audit middleware (the
+    default-on baseline is unchanged; audit never costs anything unless asked
+    for). The registry lists it, but neither DEFAULT list includes it."""
+    assert "audit" not in stack.DEFAULT_SUPERVISOR
+    assert "audit" not in stack.DEFAULT_SUBAGENT
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+    )
+    assert "AUDIT" not in plan.supervisor_middleware
+
+
+def test_audit_opt_in_supervisor_mounts_outermost(fake_tree, stub_factory):
+    """``middleware.supervisor.add: [audit]`` mounts AuditMiddleware FIRST
+    (outermost observer) — its ``handler(request)`` then wraps the whole
+    pipeline so elapsed/outcome measure the real call. The default-on layers
+    (context/routing/session_guide/browser_vision) follow in registry order."""
+    _write_middleware_block(fake_tree,
+        "middleware:\n  supervisor:\n    add: [audit]\n")
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+    )
+    mw = plan.supervisor_middleware
+    assert mw[0] == "AUDIT", mw  # outermost
+    # the default-on baseline still follows, unchanged, in registry order
+    assert mw[1:] == ["ROUTE", "GUIDE"], mw
+
+
+def test_audit_opt_in_subagent_scope_allowed(fake_tree, stub_factory):
+    """``audit`` is dual-scope — ``middleware.subagent.add: [audit]`` is a valid
+    override (validated against the registry scope), not a scope-mismatch error.
+    Drives ``validate_overrides`` directly since ``build_stack`` returns the
+    supervisor middleware only (subagent middleware is threaded into the
+    subagent specs at graph-build time)."""
+    _write_middleware_block(fake_tree,
+        "middleware:\n  subagent:\n    add: [audit]\n")
+    assert stack.validate_overrides("p") == []
+
+
 # --- the deepagents ``excluded_middleware`` field (was a dead path) --------
+
 
 def test_excluded_middleware_field_honored(fake_tree, stub_factory):
     """``HarnessProfileConfig.excluded_middleware`` is treated as an UNSCOPED
