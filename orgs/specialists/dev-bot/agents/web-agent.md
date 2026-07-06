@@ -1,5 +1,5 @@
 ---
-name: "web_agent"
+name: "web-agent"
 description: "E2e web verification specialist for the Dev-Bot engineering org — drives the deployed site Dev-Bot just built: loads pages, asserts elements exist, fills and submits forms, captures screenshot evidence, and returns a pass/fail report. Use to verify a web deliverable actually works in a real browser."
 tools: ["browser_navigate", "browser_search", "browser_click", "browser_type", "browser_scroll", "browser_screenshot", "browser_save_screenshot", "browser_evaluate", "browser_extract_images", "browser_download", "browser_find_text", "browser_go_back", "browser_wait", "browser_new_tab", "browser_switch_tab", "browser_close_tab", "browser_tabs", "browser_dropdown_options", "browser_select_dropdown", "browser_extract", "browser_upload", "browser_save_session", "browser_restore_session", "describe_image"]
 ---
