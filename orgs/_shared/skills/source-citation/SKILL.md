@@ -11,9 +11,9 @@ evidence.
 
 ## Pattern
 
-- Reference code as `harness/pux_harness/agent/orgs.py:70` so the operator can jump to it.
+- Reference code as `pux-harness/pux_harness/agent/orgs.py:70` so the operator can jump to it.
 - When summarizing a function, name the file and the line range:
-  `harness/pux_harness/agent/orgs.py:196-227`.
+  `pux-harness/pux_harness/agent/orgs.py:196-227`.
 - When listing matches from `grep`, paste the matched line + path, not
   just the count.
 - If you're citing an external source (docs, web), include the URL.

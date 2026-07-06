@@ -3,10 +3,10 @@
 # Tasks name the NATIVE `execute` tool (Phase 3); `pux_sandbox_bash` is gone.
 DEFAULT_TASKS: dict[str, str] = {
     "general": (
-        "How many Python modules ship under /sandbox/workspace/harness/pux_harness/, "
+        "How many Python modules ship under /sandbox/workspace/pux-harness/pux_harness/, "
         "and what are their names? Delegate to the `researcher` subagent — do NOT "
         "inspect the codebase yourself. Have it run, via the native `execute` tool: "
-        "`find /sandbox/workspace/harness/pux_harness -name '*.py'`. "
+        "`find /sandbox/workspace/pux-harness/pux_harness -name '*.py'`. "
         "Report the researcher's findings verbatim."
     ),
     "_demo": (

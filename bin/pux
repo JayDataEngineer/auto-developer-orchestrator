@@ -13,30 +13,28 @@ set -euo pipefail
 # resolve symlinks (e.g. ~/.local/bin/pux -> repo/bin/pux) before computing paths
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
-HARNESS="$REPO/harness"
 
 if [[ -f "$REPO/.env" ]]; then set -a; . "$REPO/.env"; set +a; fi
 
+# Pin the APP root for the harness: ``orgs/`` + ``.pux/`` + ``AGENTS.md`` live
+# at the orchestrator repo, regardless of where the ``pux_harness`` package is
+# physically installed. ``$PUX_PROJECT_ROOT`` is the ONE seam the kit's resolver
+# reads; without it the harness would default to the CWD and miss the orgs.
+# Run from ``$REPO`` so ``uv run`` resolves the orchestrator workspace venv
+# (which installs pux-harness as a member) — no per-subcommand ``cd`` needed.
+export PUX_PROJECT_ROOT="$REPO"
+cd "$REPO"
+
 cmd="${1:-}"
 case "$cmd" in
-  serve)
-    shift
-    cd "$HARNESS" && exec uv run python -m pux_harness.server "$@" ;;
-  direct)
-    shift
-    cd "$HARNESS" && exec uv run python -m pux_harness.main "$@" ;;
-  acp)
-    shift
-    cd "$HARNESS" && exec uv run python -m pux_harness.acp "$@" ;;
-  mcp)
-    shift
-    cd "$HARNESS" && exec uv run python -m pux_harness.mcp_server "$@" ;;
-  sandbox)
-    shift
-    cd "$HARNESS" && exec uv run python -m pux_harness.main --sandbox "$@" ;;
+  serve)   shift; exec uv run python -m pux_harness.server "$@" ;;
+  direct)  shift; exec uv run python -m pux_harness.main "$@" ;;
+  acp)     shift; exec uv run python -m pux_harness.acp "$@" ;;
+  mcp)     shift; exec uv run python -m pux_harness.mcp_server "$@" ;;
+  sandbox) shift; exec uv run python -m pux_harness.main --sandbox "$@" ;;
   "")
     echo "usage: pux <serve|direct|acp|mcp|sandbox|agents|dispatch|resume|show|history|run|wait> ..." >&2
     exit 2 ;;
 esac
 
-cd "$HARNESS" && exec uv run python -m pux_harness.cli "$@"
+exec uv run python -m pux_harness.cli "$@"

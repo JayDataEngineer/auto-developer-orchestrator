@@ -16,8 +16,10 @@ fi
 
 echo "Running tests before push..."
 
-# Run the harness tests (deepagents pivot; the TS vitest suite is gone).
-( cd harness && uv run pytest -q )
+# Run the orchestrator integration suite (deepagents pivot; the TS vitest suite
+# is gone). Runs at the repo root — pux-harness is consumed as a path-dep
+# submodule, and the library's own org-agnostic suite lives in that repo.
+uv run pytest -q
 TEST_RESULT=$?
 
 if [ $TEST_RESULT -ne 0 ]; then

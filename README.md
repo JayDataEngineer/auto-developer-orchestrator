@@ -6,19 +6,24 @@ agent layer served over the [LangChain Agent
 Protocol](https://langchain-ai.github.io/agent-protocol/), backed by a Docker
 sandbox that exposes bash / file / browser / desktop / vision tools.
 
-Two pieces, one each:
+This repo is the **orchestrator app**: it owns `orgs/`, the `sandbox/` Docker
+image, the integration `tests/`, and the optional `site/` web UI. The agent
+layer is a separate library — **`pux-harness/`** — pinned as a git submodule
+([github.com/JayDataEngineer/pux-harness](https://github.com/JayDataEngineer/pux-harness)),
+consumed by uv as a path dependency (`[tool.uv.sources] pux-harness = { path = "pux-harness" }`).
 
-- **`harness/`** (Python, uv) — the agent layer. Builds per-org deepagents
-  graphs (a CTO + specialist subagents), serves them over the Agent Protocol
-  REST API, and ships a thin `pux` client. Native fs/shell tools (`ls` /
-  `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute`) run
-  through a `PuxSandboxBackend`; the 40 specialist tools (`browser_*`,
-  `desktop_*`, `describe_image`, `python`, skills) are native Python too
-  (Phase 8a–8f). `container.py` owns the Docker sandbox lifecycle +
-  declarative policy enforcement (Phase 8g). The harness boots its own
-  container directly over the Docker SDK — there is no Go server.
-- **`console_scripts` entry point** (`pux` from `pux_harness.cli:main`) — the
-  native CLI dispatches `pux serve` / `pux direct` / `pux sandbox` / `pux <client-cmd>`
+- **`pux-harness/`** (Python, uv; submodule) — the deepagents Pux harness
+  library. Builds per-org deepagents graphs (a CTO + specialist subagents),
+  serves them over the Agent Protocol REST API, and ships the `pux` console
+  script. Native fs/shell tools (`ls` / `read_file` / `write_file` /
+  `edit_file` / `glob` / `grep` / `execute`) run through a `PuxSandboxBackend`;
+  the 40 specialist tools (`browser_*`, `desktop_*`, `describe_image`,
+  `python`, skills) are native Python too (Phase 8a–8f). `container.py` owns
+  the Docker sandbox lifecycle + declarative policy enforcement (Phase 8g).
+  The harness boots its own container directly over the Docker SDK — there is
+  no Go server.
+- **`pux` console script** (`pux_harness.cli:main`) — the native CLI
+  dispatches `pux serve` / `pux direct` / `pux sandbox` / `pux <client-cmd>`
   into the harness.
 
 Single-tenant, localhost-only, no auth. One pux process = one project = one
@@ -27,9 +32,9 @@ sandbox.
 ## Quick start
 
 ```bash
-# 1. Clone + sync the Python harness
-git clone <this-repo> pux && cd pux
-cd harness && uv sync && cd ..
+# 1. Clone (with the pux-harness submodule) + sync the orchestrator venv
+git clone --recursive <this-repo> pux && cd pux
+uv sync                    # resolves pux-harness from the ./pux-harness/ submodule
 
 # 2. Build the sandbox image (one-time)
 cd sandbox && docker build -t pux-sandbox:latest . && cd ..
@@ -153,8 +158,11 @@ pux run <thread_id> "follow up"    # continue on the same thread
 ## Tests
 
 ```bash
-# from the repo root — `tests/` lives here (workspace pattern), NOT under harness/
-uv run --project harness pytest -q          # 586 passed (9 skipped): org contract + browser/profile wiring + MCP server + memory backend + server routing + policy + context offload + container lifecycle
+# from the repo root — `tests/` is the orchestrator integration suite (org
+# contract, delegation, export, stack/graph/acp against the real orgs/ tree +
+# the container-side sb_server.py JS). The pux-harness library's own
+# org-agnostic suite lives in the submodule at pux-harness/tests/.
+uv run pytest -q
 ```
 
 The server tests use FastAPI's `TestClient` with a stub graph (no tokens, no

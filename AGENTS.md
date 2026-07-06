@@ -168,7 +168,7 @@ Two more blocks ride on the same file (Phase 17.B):
   four roles — `base_model` (CTO driver), `worker_model` (subagents),
   `multimodal_model` (describe_image, decoupled from base), `grader_model` (the
   rubric gate) — all defaulting to `mimo-v2.5` in the shipped
-  `harness/pux_harness/agent/models.yaml`. Override per-org here, e.g.
+  `pux-harness/pux_harness/agent/models.yaml`. Override per-org here, e.g.
   `models: {grader_model: glm-5.2}`, or per-agent via frontmatter `model:`.
   Resolution: frontmatter `model:` > this `models:` map > `PUX_<ROLE>_MODEL`
   env (legacy `PUX_MODEL` for base) > shipped default. One file to edit when
@@ -186,7 +186,7 @@ Two more blocks ride on the same file (Phase 17.B):
   `main._run`; an operator `--rubric` override wins. `orgs/specialists/dev-bot/profile.yaml`
   is the shipped sample (dev-bot is the Claude-Code-equivalent coding org).
 
-The loader (`harness/pux_harness/agent/profile.py`) uses deepagents'
+The loader (`pux-harness/pux_harness/agent/profile.py`) uses deepagents'
 `HarnessProfileConfig` SCHEMA but applies the fields at the `build_graph(org)`
 call site rather than the global model-keyed `_HARNESS_PROFILES` registry —
 that registry has no per-org namespace, so two orgs sharing a model would

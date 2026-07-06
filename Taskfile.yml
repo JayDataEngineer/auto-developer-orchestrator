@@ -1,8 +1,5 @@
 version: "3"
 
-vars:
-  HARNESS: harness
-
 tasks:
   default:
     desc: Show available tasks
@@ -10,8 +7,7 @@ tasks:
       - task --list
 
   sync:
-    desc: Sync the Python harness (uv sync)
-    dir: "{{.HARNESS}}"
+    desc: Sync the orchestrator venv (uv sync; resolves pux-harness submodule dep)
     cmds:
       - uv sync
 
@@ -32,7 +28,6 @@ tasks:
 
   contract:
     desc: Validate the declarative org contract (all 10 orgs green; no server)
-    dir: "{{.HARNESS}}"
     cmds:
       - uv run pux check-contract
 

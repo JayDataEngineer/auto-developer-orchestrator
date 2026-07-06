@@ -1,7 +1,7 @@
 # Optional per-org harness profile (Phase 16.3b). Applied to the deepagents
 # stack the harness compiles for this org — org-wide: the CTO system prompt AND
 # every specialist subagent (so the shared browser agent inherits it too). See
-# harness/pux_harness/agent/profile.py for the schema + the why-not-registry
+# pux-harness/pux_harness/agent/profile.py for the schema + the why-not-registry
 # rationale, and AGENTS.md for the field reference.
 
 # Appended to the assembled CTO prompt + each subagent's system prompt.

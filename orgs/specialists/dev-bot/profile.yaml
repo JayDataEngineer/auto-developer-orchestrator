@@ -1,6 +1,6 @@
 # Optional per-org harness profile (Phase 16 seam). Applied to the deepagents
 # stack the harness compiles for this org — org-wide: the CTO system prompt AND
-# every specialist subagent. See harness/pux_harness/agent/profile.py for the
+# every specialist subagent. See pux-harness/pux_harness/agent/profile.py for the
 # schema + AGENTS.md (root) for the field reference.
 #
 # Dev-Bot is the Claude-Code-equivalent coding org. The suffix below carries

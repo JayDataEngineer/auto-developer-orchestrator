@@ -51,7 +51,7 @@ Re-verified green after every edit batch: `uv run pytest -q` (578/6) +
 2. **"`CONTRACT.md` is a blocker; rewrite it"** — MISFRAMED. Its preamble freezes it
    as the `master`-branch Go-server reference ("does not describe the pi-pivot branch").
    Intentionally frozen, not drift. The **live** contract on this branch is
-   `harness/pux_harness/agent/contract.py` (+ AGENTS.md spec). Left untouched.
+   `pux-harness/pux_harness/agent/contract.py` (+ AGENTS.md spec). Left untouched.
 3. **"`_demo` org has an agent-resolution violation"** — FALSE. `_demo`'s
    `researcher`/`browser` resolve via `orgs/_shared/agents/`, which the contract allows.
 4. **"Committed multi-GB `.venv` under orgs"** — FALSE. `git ls-files` = 0 for both;

@@ -2,39 +2,30 @@
 name = "auto-developer-orchestrator"
 version = "0.1.0"
 requires-python = ">=3.12,<3.14"
-# The umbrella depends on its sole member so a plain `uv sync` at the repo root
-# installs the harness runtime (deepagents, fastapi, uvicorn, …) + the `pux`
-# console script. Without this, `uv sync` syncs ONLY the root (dev tooling) and
-# prunes the member — a footgun. `--all-packages` is no longer required.
-dependencies = ["pux-harness", "pux-agentkit"]
+# The orchestrator depends on the pux-harness library (the deepagents Pux
+# harness: the slim org+skill compiler + the Docker sandbox runtimes).
+# pux-harness lives in its OWN repo (github.com/JayDataEngineer/pux-harness),
+# pinned here as a git submodule at ./pux-harness/ — so `git clone --recursive`
+# yields a known-compatible pair (the two share hard contracts: the
+# ``project_root()`` path-seam, the ``pux_harness.kit`` surface, the contract
+# tripwires). uv resolves it from the submodule path below.
+dependencies = ["pux-harness"]
 
-# uv workspace — the multi-pyproject layout is INTENTIONAL, not drift:
-#  - root = the umbrella: workspace membership, dev tooling (pytest/ruff/mypy),
-#    and the requires-python contract.
-#  - harness/ = the pux runtime member: Docker sandbox, ACP/server/TUI, the
-#    `pux` console script, and the hatchling build.
-#  - agentkit/ = the standalone org+skill compiler member: slim deps only
-#    (deepagents/langchain/langgraph/pyyaml), NO Docker. A different project
-#    depends on pux-agentkit alone to author+run an org without the harness.
-# The harness depends on agentkit (agentkit is upstream — it owns the org/skill
-# loaders; the harness re-exports them, so there is one loader, not two).
-# One `uv sync` at the repo root materializes ONE .venv for the whole workspace.
-[tool.uv.workspace]
-members = ["harness", "agentkit"]
-
-# Resolve member deps to the in-tree workspace packages, not PyPI.
+# Resolve the orchestrator's pux-harness dep to the in-tree submodule checkout
+# (editable install into this repo's .venv), NOT PyPI.
 [tool.uv.sources]
-pux-harness = { workspace = true }
-pux-agentkit = { workspace = true }
+pux-harness = { path = "pux-harness" }
 
 [dependency-groups]
 dev = ["pytest", "ruff", "mypy"]
 
 [tool.pytest.ini_options]
-# One `pytest` from the repo root covers the whole workspace: the harness suite
-# (tests/) AND the agentkit suite (agentkit/tests/ — the standalone compiler's
-# own tests, runnable in isolation via `cd agentkit && pytest` too).
-testpaths = ["tests", "agentkit/tests"]
+# The orchestrator's suite is the INTEGRATION layer: it builds real orgs/
+# (org contract, delegation, export, stack/graph/acp against the installed
+# pux-harness) + the container-side sandbox scripts (sb_server.py JS). The
+# pux-harness library's OWN org-agnostic suite (kit, registry, model resolver)
+# lives in the submodule at pux-harness/tests/.
+testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.ruff]

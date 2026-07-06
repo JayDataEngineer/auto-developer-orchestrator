@@ -4,11 +4,11 @@
 > server that lives on `master` (the pre-pivot MVP). It does **not** describe
 > the `pi-pivot` branch, where that Go server is deleted (Phase 8i) and the
 > agent + sandbox layer is the Python deepagents harness — see `CLAUDE.md` and
-> `harness/README.md` for the current surface. Kept here as the frozen contract
+> `pux-harness/README.md` for the current surface. Kept here as the frozen contract
 > for `master`.
 >
 > **Live MCP server (pi-pivot):** the surface Hermes/OpenClaw connect to is the
-> Python FastMCP wrapper at `harness/pux_harness/mcp_server.py` (`pux mcp`, SSE
+> Python FastMCP wrapper at `pux-harness/pux_harness/mcp_server.py` (`pux mcp`, SSE
 > :9987), not this Go spec. A full rewrite of this document to match it is
 > deferred to a separate PR.
 
