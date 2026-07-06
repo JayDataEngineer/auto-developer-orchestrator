@@ -3,20 +3,34 @@
 #                headers?, tools? (allowlist), credentials?}}
 #
 # An org opts in via policy.yaml tool_servers: [name, ...] and may narrow
-# tools: per entry. See harness/docs/tool_servers.md for the full spec.
+# tools: per entry. The schema + env-injection rules are documented inline
+# per entry below.
+#
+# URLs are NOT hardcoded here — every endpoint is deployment-specific
+# (Tailscale IP, cloud hostname, localhost) and must be injected via a
+# `${VAR}` placeholder resolved from the operator's env at load time. The
+# offline contract validates these structurally (the field is declared); the
+# runtime path fails loud if a var is unset, and McpSessionManager.open() then
+# logs ERROR + contributes zero tools for that server (per-server isolation —
+# one unset var can't brick the org). Set the documented PUX_MCP_* vars in
+# your shell / env manager before `pux serve|acp|direct`.
 
 web_research:
   kind: mcp
   transport: http
-  url: https://cloud.tailb1e597.ts.net:10000/research/mcp
+  url: ${PUX_MCP_WEB_RESEARCH_URL}
   # allowlist verified against the LIVE server's tools/list (2026-07-06). The
   # server exposes `scrape` (read a single page), NOT `fetch` — a phantom
   # `fetch` here would make _apply_allowlist fail-loud and load ZERO tools,
   # silently breaking web_research for any org that opts in (caught only by a
   # live handshake, never by the offline contract).
+  # Env: PUX_MCP_WEB_RESEARCH_URL — the Streamable-HTTP endpoint of the
+  # web-research MCP server (e.g. https://<host>/research/mcp).
   tools: [search, scrape, research]
 
 media:
   kind: mcp
   transport: sse
-  url: http://100.86.69.57:8101
+  url: ${PUX_MCP_MEDIA_URL}
+  # Env: PUX_MCP_MEDIA_URL — the SSE endpoint of the media-analysis MCP server
+  # (vision/audio/video tools), e.g. http://<host>:8101.

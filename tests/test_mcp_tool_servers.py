@@ -352,7 +352,7 @@ def test_open_one_bad_server_does_not_brick_the_batch(monkeypatch):
 # Part 5 — the shipped wiring: general opts into web_research (REAL tree)
 # ===========================================================================
 
-def test_general_ships_web_research():
+def test_general_ships_web_research(monkeypatch):
     """The MCP consumer gap is CLOSED: a shipped org actually declares a foreign
     MCP server. ``general`` (the general-purpose CTO fallback) opts into
     ``web_research`` via ``orgs/general/policy.yaml``. This runs against the REAL
@@ -360,15 +360,39 @@ def test_general_ships_web_research():
     wiring end-to-end at the resolver — if the declaration is removed or the
     catalog ref drifts, this fails. The live handshake + the agent invoking the
     tool are proven separately (wild run 2026-07-06); this is the offline lock
-    that the wiring ships and resolves."""
+    that the wiring ships and resolves.
+
+    web_research's URL is env-injected (``${PUX_MCP_WEB_RESEARCH_URL}``), not
+    git-tracked — the strict runtime path needs the var set, so this test sets
+    it. The offline contract passes WITHOUT it (permissive) — see
+    ``test_placeholder_url_passes_contract_but_fails_strict_without_env``."""
+    monkeypatch.setenv("PUX_MCP_WEB_RESEARCH_URL", "https://injected.example/mcp")
     specs = resolve_tool_servers("general")
     assert len(specs) == 1
     spec = specs[0]
     assert spec.name == "web_research"
     assert spec.transport == "http"
+    # The URL is the env-injected value, NOT a git-tracked literal.
+    assert spec.url == "https://injected.example/mcp"
     # The catalog allowlist (verified against the live server's tools/list):
     # the server exposes scrape, not fetch.
     assert spec.tools == ["search", "scrape", "research"]
     # The declaration is contract-clean (valid catalog ref, no dangling name).
     assert validate_tool_servers("general") == []
+
+
+def test_placeholder_url_passes_contract_but_fails_strict_without_env(monkeypatch):
+    """The contract/runtime split for git-safe URLs. A catalog entry may ship
+    ``url: ${VAR}`` whose value is deployment-specific (and therefore must NOT
+    be git-tracked). The offline contract validates STRUCTURE — the field is
+    declared, the transport is known — so it PASSES despite the unresolved
+    placeholder. The runtime path (strict) fails LOUD, naming the missing var,
+    so a misconfigured deployment is caught at load, not silently dropped."""
+    monkeypatch.delenv("PUX_MCP_WEB_RESEARCH_URL", raising=False)
+    # Offline contract: permissive -> zero errors despite the ${VAR} url.
+    assert validate_tool_servers("general") == []
+    # Runtime: strict -> loud failure naming the var the operator forgot.
+    with pytest.raises(ValueError, match="PUX_MCP_WEB_RESEARCH_URL"):
+        resolve_tool_servers("general")
+
 
