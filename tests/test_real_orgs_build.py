@@ -183,3 +183,37 @@ def test_every_real_org_emits_only_registry_middleware(stubbed_factory):
         emitted = {str(m) for m in plan.supervisor_middleware}
         stray = emitted - allowed
         assert not stray, f"{org}: middleware bypassed the registry: {stray}"
+
+
+# --- the MCP seam holds for every real org ----------------------------------
+
+
+@pytest.mark.parametrize("org", REAL_ORGS)
+def test_every_real_org_accepts_mcp_tools_through_the_seam(org, stubbed_factory):
+    """Foreign MCP tool-servers flow into EVERY real org through the same
+    ``build_stack(mcp_tools=)`` seam (no org-specific MCP code path). A tool
+    surfaced as ``mcp__web__search`` lands on each org's supervisor surface —
+    proving the universal pattern covers MCP for the whole fleet, not just one
+    fixture org (see test_mcp_tool_servers.py for the resolver/profile-filtering
+    depth proof)."""
+    from langchain_core.tools import StructuredTool
+    from pydantic import BaseModel
+    from pux_harness.agent import profile as profile_mod
+
+    class _NoArgs(BaseModel):
+        pass
+    mcp_tool = StructuredTool(
+        name="mcp__web__search", description="mcp",
+        args_schema=_NoArgs, func=lambda: "",
+    )
+    plan = stack.build_stack(
+        org,
+        specialists=_real_specialists(),
+        profile=profile_mod.load_profile(org),
+        rubric_gate=profile_mod.load_rubric_gate(org),
+        exec_client=_EXEC,
+        mcp_tools=[mcp_tool],
+    )
+    names = {t.name for t in plan.supervisor_tools}
+    assert "mcp__web__search" in names, f"{org}: MCP tool dropped at the seam"
+
