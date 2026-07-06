@@ -314,3 +314,67 @@ def test_real_browser_whitelist_resolves(monkeypatch):
         "describe_image",
     ):
         assert "pux_sandbox_" + slug in names, f"{slug} not resolved"
+
+
+# --- Phase 2: extends: inheritance through the REAL load_subagents path ----
+
+def test_extends_inherits_base_tools_and_body(fake_tree):
+    """An org-local child with ``extends: <shared base>`` + ``tools_add``
+    inherits the base's body + tool whitelist AND adds the new tool — driven
+    through the REAL ``load_subagents`` entry point, not just the kit-layer unit
+    test (prepare-wiring-e2e-gap: a wiring seam proven only in isolation is
+    unproven). The base lives in ``_shared``; the org-local child specializes it
+    without forking the base prompt. This is the universal per-agent override
+    surface replacing the deleted top-level ``subagents:`` block."""
+    root = fake_tree
+    # base: shared agent, owns the core whitelist + body
+    _agent_md("base", root, org="_shared", tools=["python"],
+              body="BASE PROMPT.", description="the base")
+    # child: org-local, extends base + adds a tool + appends a body
+    child_dir = root / "orgs" / "o" / "agents"
+    child_dir.mkdir(parents=True, exist_ok=True)
+    (child_dir / "special.md").write_text(
+        "---\n"
+        'name: "special"\n'
+        'description: "the specialist"\n'
+        "extends: base\n"
+        'tools_add: ["browser_navigate"]\n'
+        "---\n\n"
+        "CHILD PROMPT.\n"
+    )
+    _org_yaml("o", ["special"], root)
+
+    # Two resolvable specialists so the inherited + added tools are BOTH
+    # observable end-to-end (python inherited from base, browser_navigate added).
+    specialists = [
+        _FakeTool("pux_sandbox_python"),
+        _FakeTool("pux_sandbox_browser_navigate"),
+    ]
+    sub = orgs.load_subagents("o", specialists, **_ctx())[0]
+    assert sub["name"] == "special"
+    # Base body + child body both present (concatenation, NOT full-replace).
+    assert "BASE PROMPT." in sub["system_prompt"]
+    assert "CHILD PROMPT." in sub["system_prompt"]
+    # Inherited base tool + added tool both resolve (union over the base
+    # whitelist), plus the ctx retrieval pair appended by the context layer.
+    assert {t.name for t in sub["tools"]} == {
+        "pux_sandbox_python", "pux_sandbox_browser_navigate",
+        "ctx_recall", "ctx_search",
+    }
+
+
+def test_extends_cycle_raises_through_load_subagents(fake_tree):
+    """A cycle in ``extends:`` surfaces loudly through ``load_subagents`` (the
+    runtime path), not just the kit loader — the contract tripwire is a belt,
+    this is the suspenders."""
+    root = fake_tree
+    a_dir = root / "orgs" / "o" / "agents"
+    a_dir.mkdir(parents=True, exist_ok=True)
+    (a_dir / "x.md").write_text(
+        "---\nname: x\nextends: y\n---\n\nX BODY\n")
+    (a_dir / "y.md").write_text(
+        "---\nname: y\nextends: x\n---\n\nY BODY\n")
+    _org_yaml("o", ["x"], root)
+
+    with pytest.raises(ValueError, match="extends cycle"):
+        orgs.load_subagents("o", _specialists(), **_ctx())

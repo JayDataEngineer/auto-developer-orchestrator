@@ -779,3 +779,77 @@ def test_dev_bot_specialists_resolve_on_worker_role(monkeypatch):
     web_tools = [t.name for t in by_name["web-agent"]["tools"]]
     assert "pux_sandbox_browser_navigate" in web_tools
     assert "pux_sandbox_describe_image" in web_tools
+
+
+# --- Phase 2: subagent `extends:` + the legacy `subagents:`-block fold -----
+
+def test_no_legacy_subagents_block_on_real_repo():
+    """No shipped org's profile.yaml carries a top-level ``subagents:`` key —
+    the legacy second partial-override surface is gone (folded into per-agent
+    ``extends:`` + delta frontmatter). The permanent tripwire keeps it gone."""
+    for org in discover_orgs():
+        vs = check_org(org)
+        assert not any(v.rule == "no-legacy-subagents-block" for v in vs), \
+            f"{org}: {vs}"
+
+
+def test_no_legacy_subagents_block_fires(fake_tree):
+    """A profile.yaml with a top-level ``subagents:`` block is a HARD contract
+    failure pointing at the replacement (``extends:`` + delta fields) — the
+    no-legacy-left-behind permanent gate. Mirrors the no-legacy-org-roster /
+    no-legacy-sandbox-artifacts provocation shape."""
+    add_org, _ = fake_tree
+    add_org("o")
+    (contract._orgs_dir() / "o" / "profile.yaml").write_text(
+        "subagents:\n"
+        "  some-slug:\n"
+        "    system_prompt_suffix: be terse\n"
+    )
+    vs = check_org("o")
+    rule_vs = [v for v in vs if v.rule == "no-legacy-subagents-block"]
+    assert len(rule_vs) == 1, vs
+    assert "extends" in rule_vs[0].message
+    assert "tools_add" in rule_vs[0].message  # points at the delta vocabulary
+
+
+def test_agent_extends_resolvable_fires(fake_tree):
+    """An agent whose ``extends:`` references a non-existent agent fires
+    ``agent-extends-resolvable`` — the dedicated rule (not a generic
+    agent-resolves), with the chain in the message."""
+    add_org, _ = fake_tree
+    agents_dir = contract._orgs_dir() / "o" / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    (agents_dir / "lonely.md").write_text(
+        "---\nname: lonely\nextends: ghost\n---\n\nbody\n")
+    add_org("o", agents=["lonely"])
+    vs = check_org("o")
+    rule_vs = [v for v in vs if v.rule == "agent-extends-resolvable"]
+    assert len(rule_vs) == 1, vs
+    assert "ghost" in rule_vs[0].message
+
+
+def test_agent_extends_acyclic_fires(fake_tree):
+    """An ``extends:`` cycle (x -> y -> x) fires ``agent-extends-acyclic``.
+    The roster lists only the entry point; ``y`` exists on disk to close the
+    cycle but is walked via the chain, not the roster."""
+    add_org, _ = fake_tree
+    agents_dir = contract._orgs_dir() / "o" / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    (agents_dir / "x.md").write_text("---\nname: x\nextends: y\n---\n\nbody\n")
+    (agents_dir / "y.md").write_text("---\nname: y\nextends: x\n---\n\nbody\n")
+    add_org("o", agents=["x"])
+    vs = check_org("o")
+    rule_vs = [v for v in vs if v.rule == "agent-extends-acyclic"]
+    assert len(rule_vs) == 1, vs
+    assert "cycle" in rule_vs[0].message
+    assert "x" in rule_vs[0].message and "y" in rule_vs[0].message
+
+
+def test_agent_extends_clean_on_real_repo():
+    """No shipped agent has a broken ``extends:`` chain (unresolvable or cyclic)
+    — the two Phase-2 rules are green across every org."""
+    for org in discover_orgs():
+        vs = check_org(org)
+        bad = [v for v in vs
+               if v.rule in ("agent-extends-resolvable", "agent-extends-acyclic")]
+        assert bad == [], f"{org}: {bad}"

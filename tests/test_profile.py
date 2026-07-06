@@ -499,6 +499,22 @@ def test_load_profile_rejects_unknown_key(fake_tree):
         profile.load_profile("p")
 
 
+def test_load_profile_rejects_legacy_subagents_block(fake_tree):
+    """no-legacy-left-behind (Phase 2 fold): the top-level ``subagents:`` block —
+    the old second partial-override surface — is no longer peeled before
+    ``HarnessProfileConfig.from_dict``, so it fails loud as an unknown key (the
+    build-time second layer beneath the contract's ``no-legacy-subagents-block``
+    tripwire). Per-agent overrides now live in each agent's own frontmatter +
+    ``extends:``."""
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
+        "subagents:\n"
+        "  some-slug:\n"
+        "    system_prompt_suffix: be terse\n"
+    )
+    with pytest.raises(TypeError, match="Unknown keys"):
+        profile.load_profile("p")
+
+
 def test_load_profile_rejects_non_mapping(fake_tree):
     """A non-mapping top level fails loud (not silently treated as empty)."""
     (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
