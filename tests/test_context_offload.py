@@ -47,9 +47,9 @@ def test_offload_replaces_oversized_with_stub_and_handle(tmp_path):
     assert isinstance(out, ToolMessage)
     assert out.tool_call_id == "call_1"  # id preserved so the AIMessage still matches
     assert len(out.content) < len(BIG)
-    assert "ctx-offload" in out.content
+    assert _extract_handle(out.content)  # a ctx:<id> handle = the offload fired
     assert "ctx_recall(" in out.content
-    assert "Preview (first 500 chars)" in out.content
+    assert "(first 500 shown)" in out.content
     # the full bytes live in the store, keyed by the handle in the stub
     handle = _extract_handle(out.content)
     assert store.recall_blob(handle) == BIG
@@ -125,7 +125,7 @@ def test_ctx_recall_returns_full_then_not_found(tmp_path):
     # bare id also accepted
     assert recall.invoke({"handle": stash.id}) == BIG
     # garbage handle → friendly not-found, not an exception
-    assert "no stashed content" in recall.invoke({"handle": "ctx:deadbeef"})
+    assert "no truncated result found" in recall.invoke({"handle": "ctx:deadbeef"})
 
 
 def test_ctx_search_finds_stashed_blob(tmp_path):
@@ -137,7 +137,7 @@ def test_ctx_search_finds_stashed_blob(tmp_path):
     assert "1 hit" in out
     assert "alpha deployment failed" in out
     # empty query returns nothing (no accidental full dumps)
-    assert "no stashed result" in search.invoke({"query": "   "})
+    assert "no prior tool output or event" in search.invoke({"query": "   "})
 
 
 # --- store path safety -------------------------------------------------------
@@ -188,7 +188,7 @@ def test_non_retrieval_tool_with_same_size_does_offload(tmp_path):
     m = ContextMiddleware(store, threshold=10, preview=5)
     out = m.wrap_tool_call(_req(name="execute"), lambda r: _tm(BIG, name="execute"))
     assert isinstance(out, ToolMessage)
-    assert "ctx-offload" in out.content
+    assert _extract_handle(out.content)  # offloaded → carries a ctx:<id> handle
     assert store.recall_blob(_extract_handle(out.content)) == BIG
 
 

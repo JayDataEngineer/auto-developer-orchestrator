@@ -284,7 +284,7 @@ def test_ctx_search_no_match(tmp_path):
 
     _, search = build_context_tools(store)
     out = search.invoke({"query": "zzznonexistent"})
-    assert "no stashed result" in out  # unified empty-message phrasing
+    assert "no prior tool output or event" in out  # unified empty-message phrasing
 
 
 # --- v2: dedup ----------------------------------------------------------------
