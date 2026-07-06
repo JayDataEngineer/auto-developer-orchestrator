@@ -1,0 +1,30 @@
+# Declared sandbox tools for the invest org.
+#
+# Each entry is auto-translated (pux_harness/sandbox/tools/declared.py) into a
+# typed langchain StructuredTool whose func `docker exec`s the script
+# IN-CONTAINER. The model calls `pux_sandbox_<name>(typed args)` directly
+# instead of emitting untyped `python3 sandbox/<script>.py ...` shell — the
+# weak-model (mimo-v2.5) reliability bridge. The harness builds the shell;
+# the model can't get arg order/quoting wrong. Contract-validated + audited.
+#
+# Type vocab: string / integer / number / boolean.
+# invoke: flags (default, robust) -> --name value (boolean -> --name store_true).
+# invoke: positional -> values in declared order.
+# subcommand: optional leading positional word before args.
+# returns: text (default) | json (parse stdout as JSON).
+tools:
+  - name: scan_signals
+    description: >-
+      Score a ticker (or the default watchlist) through the invest org's
+      multi-signal fusion engine, which combines fundamentals, technicals, and
+      sentiment into one fused score. Call this directly instead of shelling out
+      to signals.py. Omit `ticker` to score the configured watchlist.
+    script: signals.py
+    subcommand: score
+    invoke: flags
+    returns: json
+    args:
+      - name: ticker
+        type: string
+        required: false
+        description: "Ticker symbol to score, e.g. AAPL. Omit to score the default watchlist."

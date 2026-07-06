@@ -18,8 +18,10 @@ from __future__ import annotations
 import pytest
 
 from pux_harness.agent import orgs, stack
-from pux_harness.agent.orgs import discover_orgs, org_agent_slugs
+from pux_harness.agent.orgs import _org_path, discover_orgs, org_agent_slugs
 from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES, build_native_specialists
+from pux_harness.sandbox.tools._shared import PUX_PREFIX
+from pux_harness.sandbox.tools.declared import declared_tool_names
 
 # The real org list, resolved at collection time from the real orchestrator
 # orgs/ tree (10 orgs incl. _demo). Parametrizing over it builds every one.
@@ -60,6 +62,20 @@ def _real_specialists():
     return build_native_specialists(exec_client=_EXEC)
 
 
+def _declared_surface(org: str) -> set[str]:
+    """Prefixed (``pux_sandbox_*``) tool names this real org DECLARES in its
+    ``sandbox/tools/tools.yaml`` — empty for orgs that declare none. Declared
+    tools are a legitimate 4th channel (typed, by-name, IN-container), so a real
+    org's supervisor surface may legitimately carry its OWN declared names in
+    addition to the specialist registry. Mirrors contract Rule 4's
+    ``classify_slug is None and tool not in declared_names`` gate: a name is
+    phantom only if it is NEITHER a specialist NOR one of this org's declared
+    tools. Reading the yaml here (not trusting the built plan) keeps the test
+    honest about what the org's CONFIG declares, independent of build plumbing."""
+    sandbox_dir = _org_path(org) / "sandbox"
+    return {PUX_PREFIX + name for name in declared_tool_names(sandbox_dir)}
+
+
 def _build_real_org(org: str, stubbed_factory) -> stack.StackPlan:
     """Build ``org`` with its REAL profile + rubric gate + the full real
     specialist surface. ``stubbed_factory`` is the fixture (forces its setup)."""
@@ -90,8 +106,9 @@ def test_every_real_org_builds_a_well_formed_stack(org, stubbed_factory):
     # that surface is non-empty + phantom-free (no stray tool names leak on).
     sup_names = {t.name for t in plan.supervisor_tools}
     assert sup_names, f"{org}: empty supervisor tool surface"
-    assert sup_names <= SPECIALIST_TOOL_NAMES, (
-        f"{org}: phantom supervisor tools: {sup_names - SPECIALIST_TOOL_NAMES}")
+    allowed = SPECIALIST_TOOL_NAMES | _declared_surface(org)
+    assert sup_names <= allowed, (
+        f"{org}: phantom supervisor tools: {sup_names - allowed}")
     assert plan.supervisor_middleware, f"{org}: empty supervisor middleware"
     # Roster matches the real declared specialists (GP excluded).
     expected = org_agent_slugs(org)
@@ -106,13 +123,15 @@ def test_every_real_org_roster_agents_resolve_with_real_tools(org, stubbed_facto
     names — the universal tool resolver + each org's profile filtering agree).
     This is the per-org contract that the roster honors the tool registry."""
     plan = _build_real_org(org, stubbed_factory)
+    allowed = SPECIALIST_TOOL_NAMES | _declared_surface(org)
     for sub in plan.subagents:
         if sub["name"] == "general-purpose":
             continue  # neutered/customized slot, not a roster specialist
         for t in sub.get("tools", []):
             # ``tools`` is a list of StructuredTool objs; each name must be a
-            # known specialist (no phantom tool on any roster subagent).
-            assert t.name in SPECIALIST_TOOL_NAMES, (
+            # known specialist OR one of this org's declared sandbox tools
+            # (no phantom tool on any roster subagent).
+            assert t.name in allowed, (
                 f"{org}/{sub['name']}: phantom tool {t.name!r}")
 
 
