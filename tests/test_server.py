@@ -139,8 +139,10 @@ class _StubGraph:
 def client(tmp_path, monkeypatch) -> TestClient:
     # isolate the DB so tests don't touch the operator's .pux/ store.
     # NB: patch the module attribute, not the env var — PUX_API_DB is read at
-    # import time, so setenv here would be too late.
-    monkeypatch.setattr(server, "PUX_API_DB", tmp_path / "test.sqlite")
+    # call time inside open_thread_store(), but the canonical home is now
+    # pux_harness.threads (server.py imports open_thread_store from there).
+    import pux_harness.threads as threads_mod
+    monkeypatch.setattr(threads_mod, "PUX_API_DB", tmp_path / "test.sqlite")
     monkeypatch.setattr(server, "build_graph", lambda org, **kw: _StubGraph())
     # TestClient as a context manager runs the lifespan (opens saver + db)
     with TestClient(server.app) as c:

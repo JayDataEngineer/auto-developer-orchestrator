@@ -87,10 +87,19 @@ def test_execute_no_rubric_for_ungated_org(monkeypatch):
 
 # --- main._run (the `pux direct` / in-process path) -------------------------
 
-def _stub_run_deps(monkeypatch, graph: _CapturingGraph) -> None:
-    """Stub _run's heavy deps: skip the graph build, the prep jobs, and Docker."""
+def _stub_run_deps(monkeypatch, tmp_path, graph: _CapturingGraph) -> None:
+    """Stub _run's heavy deps: skip the graph build, the prep jobs, and Docker.
+
+    Phase 23: ``_run`` now opens the shared thread store, so point PUX_API_DB at
+    a tmp file (hermetic — never the operator's .pux/) and accept the new
+    ``saver=`` kwarg on the _build_agent stub."""
+    import pux_harness.threads as threads_mod  # noqa: PLC0415
+
+    monkeypatch.setattr(threads_mod, "PUX_API_DB", tmp_path / "rubric.sqlite")
     backend = types.SimpleNamespace(execute_log=[])
-    monkeypatch.setattr(main, "_build_agent", lambda org, mcp_tools=None: (graph, backend))
+    monkeypatch.setattr(
+        main, "_build_agent",
+        lambda org, saver=None, mcp_tools=None: (graph, backend))
     monkeypatch.setattr(main, "shared_exec", lambda: None)
     # `_run` does `from pux_harness.sandbox.container import prepare` at call
     # time, so patching the module attr is what reaches it.
@@ -99,32 +108,32 @@ def _stub_run_deps(monkeypatch, graph: _CapturingGraph) -> None:
     monkeypatch.setattr(container, "prepare", lambda org, exec_client=None: [])
 
 
-def test_run_injects_default_rubric(monkeypatch):
+def test_run_injects_default_rubric(monkeypatch, tmp_path):
     """main._run (the `pux direct` path) arms the gate with the org default when
     the operator passed no --rubric."""
     g = _CapturingGraph()
-    _stub_run_deps(monkeypatch, g)
+    _stub_run_deps(monkeypatch, tmp_path, g)
 
     asyncio.run(main._run("dev-bot", "do the task", 60))
 
     assert g.captured["state"]["rubric"] == default_rubric("dev-bot")
 
 
-def test_run_rubric_override_wins(monkeypatch):
+def test_run_rubric_override_wins(monkeypatch, tmp_path):
     """--rubric override reaches invoke state verbatim; the default is not
     injected."""
     g = _CapturingGraph()
-    _stub_run_deps(monkeypatch, g)
+    _stub_run_deps(monkeypatch, tmp_path, g)
 
     asyncio.run(main._run("dev-bot", "do the task", 60, rubric="MINE"))
 
     assert g.captured["state"]["rubric"] == "MINE"
 
 
-def test_run_no_rubric_for_ungated_org(monkeypatch):
+def test_run_no_rubric_for_ungated_org(monkeypatch, tmp_path):
     """A no-gate org gets no rubric key on state (byte-identical regression)."""
     g = _CapturingGraph()
-    _stub_run_deps(monkeypatch, g)
+    _stub_run_deps(monkeypatch, tmp_path, g)
 
     asyncio.run(main._run("general", "do the task", 60))
 

@@ -10,7 +10,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pux_harness.sandbox.backend import PuxSandboxBackend, _DOWNLOAD_PY, _UPLOAD_PY
+from pux_harness.sandbox.backend import (
+    WORKSPACE_ROOT,
+    PuxSandboxBackend,
+    _DOWNLOAD_PY,
+    _UPLOAD_PY,
+)
 
 
 @pytest.fixture
@@ -120,3 +125,85 @@ def test_execute_log_bounded(backend, fake_exec):
     for i in range(3000):
         backend.execute(f"cmd{i}")
     assert len(backend.execute_log) == 2048  # maxlen
+
+
+# --- glob default-root override ---------------------------------------------
+
+
+class TestGlobDefaultRoot:
+    """``BaseSandbox.glob`` defaults an omitted ``path`` to ``/`` (``os.chdir("/")``
+    + recursive ``**``) → walks the whole container → 20s ``GLOB_TIMEOUT`` (the
+    "Glob is timing out" symptom via ACP/Zed). ``PuxSandboxBackend`` overrides
+    ``glob``/``aglob`` to default to ``WORKSPACE_ROOT`` instead. These spy on the
+    inherited ``BaseSandbox.glob`` to assert the resolved path — no container."""
+
+    def test_glob_defaults_to_workspace_when_path_omitted(self, backend):
+        captured = {}
+
+        def fake_super_glob(self_, pattern, path=None):
+            captured["pattern"] = pattern
+            captured["path"] = path
+            return SimpleNamespace(matches=[], error=None)
+
+        with patch(
+            "pux_harness.sandbox.backend.BaseSandbox.glob",
+            autospec=True,
+            side_effect=fake_super_glob,
+        ):
+            backend.glob("**/*.py")
+
+        assert captured["path"] == WORKSPACE_ROOT
+        assert captured["pattern"] == "**/*.py"
+
+    def test_glob_respects_explicit_path(self, backend):
+        captured = {}
+
+        def fake_super_glob(self_, pattern, path=None):
+            captured["path"] = path
+            return SimpleNamespace(matches=[], error=None)
+
+        with patch(
+            "pux_harness.sandbox.backend.BaseSandbox.glob",
+            autospec=True,
+            side_effect=fake_super_glob,
+        ):
+            backend.glob("**/*.py", path="/sandbox/workspace/src")
+
+        # An explicit path is passed through verbatim — including "/"; the
+        # override only changes the DEFAULT, it does not forbid searching /.
+        assert captured["path"] == "/sandbox/workspace/src"
+
+    def test_glob_explicit_root_still_allowed(self, backend):
+        captured = {}
+
+        def fake_super_glob(self_, pattern, path=None):
+            captured["path"] = path
+            return SimpleNamespace(matches=[], error=None)
+
+        with patch(
+            "pux_harness.sandbox.backend.BaseSandbox.glob",
+            autospec=True,
+            side_effect=fake_super_glob,
+        ):
+            backend.glob("*.py", path="/")
+
+        assert captured["path"] == "/"
+
+    def test_aglob_defaults_to_workspace_when_path_omitted(self, backend):
+        import asyncio
+
+        captured = {}
+
+        async def fake_super_aglob(self_, pattern, path=None):
+            captured["path"] = path
+            return SimpleNamespace(matches=[], error=None)
+
+        with patch(
+            "pux_harness.sandbox.backend.BaseSandbox.aglob",
+            autospec=True,
+            side_effect=fake_super_aglob,
+        ):
+            asyncio.run(backend.aglob("**/*.md"))
+
+        assert captured["path"] == WORKSPACE_ROOT
+

@@ -182,7 +182,7 @@ def test_unexpected_exception_captured() -> None:
     assert "docker daemon gone" in (results[0].error or "")
 
 
-def test_run_wires_prepare_to_shared_exec(monkeypatch):
+def test_run_wires_prepare_to_shared_exec(monkeypatch, tmp_path):
     """Regression: ``_run`` must pass a real exec client to ``prepare``.
 
     Phase 14.2 shipped ``_run`` reaching for ``backend.exec_client`` — a
@@ -190,13 +190,18 @@ def test_run_wires_prepare_to_shared_exec(monkeypatch):
     ``_exec``). Every ``pux direct`` invocation crashed at the prepare line
     before the agent even ran; the bug slipped past because ``prepare`` was
     only unit-tested in isolation, never driven through ``_run``. This test
-    stubs the three Docker/model touch-points (``_build_agent``,
-    ``shared_exec``, ``prepare``) and proves the wiring hands ``prepare`` the
-    shared exec client — no AttributeError, no second client constructed.
+    stubs the Docker/model touch-points (``_build_agent``,
+    ``shared_exec``, ``prepare``) and isolates the shared thread store (Phase 23)
+    so it opens a tmp sqlite, not the operator's ``.pux/``. It then proves the
+    wiring hands ``prepare`` the shared exec client — no AttributeError, no
+    second client constructed.
     """
     import asyncio
 
+    import pux_harness.threads as threads_mod
     from pux_harness import main
+
+    monkeypatch.setattr(threads_mod, "PUX_API_DB", tmp_path / "jobs.sqlite")
 
     sentinel = object()  # stands in for the shared DockerExecClient
 
@@ -205,7 +210,8 @@ def test_run_wires_prepare_to_shared_exec(monkeypatch):
 
     fake_agent = SimpleNamespace(ainvoke=_fake_ainvoke)
     fake_backend = SimpleNamespace(execute_log=[])
-    monkeypatch.setattr(main, "_build_agent", lambda org, mcp_tools=None: (fake_agent, fake_backend))
+    monkeypatch.setattr(main, "_build_agent",
+                        lambda org, saver=None, mcp_tools=None: (fake_agent, fake_backend))
     monkeypatch.setattr(main, "shared_exec", lambda: sentinel)
 
     seen: dict = {}
