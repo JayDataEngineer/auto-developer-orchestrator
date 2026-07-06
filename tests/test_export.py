@@ -112,11 +112,29 @@ class TestResolveSharedSandbox:
 
 
 class TestResolveToolServers:
-    """``_resolve_tool_servers`` includes tool_servers.yaml when needed."""
+    """``_resolve_tool_servers`` bundles the shared catalog for orgs that opt in.
 
-    def test_returns_empty_when_no_declaration(self):
-        """No org currently declares tool_servers in policy — function returns empty."""
+    general is the shipped org that consumes a foreign MCP server (web_research)
+    — so its export MUST include the shared ``tool_servers.yaml`` catalog, or the
+    exported org would silently lose its MCP capability (the declaration
+    references a catalog the export doesn't carry). This is the export-side half
+    of the MCP-shipping proof; the resolver-side half is in
+    ``test_mcp_tool_servers.py`` Part 5."""
+
+    def test_general_declaration_bundles_catalog(self):
+        """general declares ``tool_servers: [web_research]`` → export carries the
+        shared catalog the declaration resolves against."""
         files = _resolve_tool_servers("general")
+        assert "orgs/_shared/tool_servers.yaml" in files
+        assert files["orgs/_shared/tool_servers.yaml"].is_file()
+
+    def test_org_without_declaration_returns_empty(self):
+        """An org whose policy.yaml has NO ``tool_servers:`` block exports
+        nothing extra (the default, MCP-free state). video-production has a real
+        policy.yaml (sandbox image, creds) but no tool_servers → empty, proving
+        the ``policy.get('tool_servers')``-is-None branch, not just the
+        no-policy-file branch."""
+        files = _resolve_tool_servers("video-production")
         assert files == {}
 
 

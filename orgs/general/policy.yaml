@@ -1,0 +1,18 @@
+# Declarative policy for the general org.
+#
+# general is the general-purpose CTO fallback — no custom sandbox image, no
+# credentials, no egress allowlist of its own. This is intentionally a
+# tool_servers-only policy: the sandbox layer treats "no policy" (NoPolicy) and
+# "policy with empty sections" as IDENTICAL for execution — egress_rules()
+# returns "" for both (no egress.conf staged → open), and resolve_tier() returns
+# the "isolated" fallback for both. So the SOLE effect of this file is opting
+# general into the foreign MCP tool servers declared in
+# orgs/_shared/tool_servers.yaml. Verified 2026-07-06.
+#
+# web_research runs HOST-SIDE (the McpSessionManager makes the HTTP calls from
+# the pux process, not from inside the org's container), so this capability is
+# independent of general's sandbox egress. If the server is unreachable from a
+# given deployment, McpSessionManager.open() logs a loud ERROR and contributes
+# zero tools — general still starts and works (per-server isolation).
+tool_servers:
+  - web_research

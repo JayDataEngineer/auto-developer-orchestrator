@@ -107,6 +107,21 @@ def mcp_tree(tmp_path: Path, monkeypatch):
     return root
 
 
+@pytest.fixture(autouse=True)
+def _reset_catalog_cache():
+    """``load_catalog()`` caches its read in a module-level ``_catalog_cache``
+    (a production optimization — avoid re-reading the catalog per org per
+    build). That cache leaks across tests: a test reading the REAL tree would
+    poison every later test's tmp-tree catalog (and vice-versa) because
+    ``mcp_tree`` only repoints ``_orgs_dir``, not the cache. Reset it before
+    each test so every test reads its own catalog fresh — real or tmp per its
+    ``_orgs_dir``."""
+    from pux_harness.agent import tool_servers
+    tool_servers._catalog_cache = None
+    yield
+    tool_servers._catalog_cache = None
+
+
 def test_resolve_handles_all_three_declaration_forms(mcp_tree: Path):
     """The three supported forms all resolve: bare string (catalog ref),
     ``{ref:, tools:}`` (catalog ref + allowlist override), and a fully inline
@@ -331,3 +346,29 @@ def test_open_one_bad_server_does_not_brick_the_batch(monkeypatch):
         return [t.name for t in mgr.tools]
 
     assert asyncio.run(_run()) == ["mcp__live__search"]
+
+
+# ===========================================================================
+# Part 5 — the shipped wiring: general opts into web_research (REAL tree)
+# ===========================================================================
+
+def test_general_ships_web_research():
+    """The MCP consumer gap is CLOSED: a shipped org actually declares a foreign
+    MCP server. ``general`` (the general-purpose CTO fallback) opts into
+    ``web_research`` via ``orgs/general/policy.yaml``. This runs against the REAL
+    orchestrator ``orgs/`` tree (no tmp fixture) so it proves the production
+    wiring end-to-end at the resolver — if the declaration is removed or the
+    catalog ref drifts, this fails. The live handshake + the agent invoking the
+    tool are proven separately (wild run 2026-07-06); this is the offline lock
+    that the wiring ships and resolves."""
+    specs = resolve_tool_servers("general")
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec.name == "web_research"
+    assert spec.transport == "http"
+    # The catalog allowlist (verified against the live server's tools/list):
+    # the server exposes scrape, not fetch.
+    assert spec.tools == ["search", "scrape", "research"]
+    # The declaration is contract-clean (valid catalog ref, no dangling name).
+    assert validate_tool_servers("general") == []
+
