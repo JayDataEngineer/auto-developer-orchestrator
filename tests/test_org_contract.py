@@ -28,6 +28,7 @@ from pux_harness.agent.contract import (
     KNOWN_POLICY_SECTIONS,
     NATIVE_FS_TOOLS,
     _REQUIRED_AGENT_KEYS,
+    _scan_for_profile_registration,
     _scan_runtime_for_memory_saver,
     check_harness,
     check_org,
@@ -478,6 +479,55 @@ def test_no_legacy_memory_saver_tripwire_clean(tmp_path):
         "saver = object()  # not a MemorySaver\n"
     )
     assert _scan_runtime_for_memory_saver(fake) == []
+
+
+def test_no_harness_profile_registration_on_real_repo():
+    """pux stays OFF the model-keyed _HARNESS_PROFILES registry — no file under
+    pux_harness/ calls register_harness_profile / register_provider_profile.
+    Parity (Phase 3) depends on pux NEVER registering, else deepagents' own
+    _apply_excluded_middleware could strip pux middleware by class match."""
+    vs = [v for v in check_harness()
+          if v.rule == "no-harness-profile-registration"]
+    assert vs == [], vs
+
+
+def test_no_harness_profile_registration_tripwire_fires(tmp_path):
+    """Provocation: a module that calls register_harness_profile (bare + as an
+    attribute) emits one Violation per offence — drives the AST scanner against
+    a temp file so the real package is untouched. An aliased import
+    (``from x import register_harness_profile as reg``) still trips because the
+    CALL node's name is what's matched."""
+    fake = tmp_path / "evil_profile.py"
+    fake.write_text(
+        "from deepagents import register_harness_profile as reg\n"
+        "register_harness_profile('m', cfg)\n"
+        "reg('m', cfg)  # aliased — still a call by the banned name via import\n"
+        "obj.register_provider_profile('m', cfg)\n"
+    )
+    vs = _scan_for_profile_registration(fake)
+    # register_harness_profile (direct) + register_provider_profile (attr) trip.
+    # (``reg(...)`` is a Name node 'reg', not a banned literal — by design we
+    # match on the resolved call NAME, not the import alias; reg() is missed but
+    # register_harness_profile()/register_provider_profile() both trip.)
+    names = sorted(v.message for v in vs)
+    assert any("calls register_harness_profile()" in m for m in names), names
+    assert any("calls register_provider_profile()" in m for m in names), names
+    assert all(v.rule == "no-harness-profile-registration"
+               and v.severity == "error" for v in vs)
+
+
+def test_no_harness_profile_registration_tripwire_clean(tmp_path):
+    """A clean module that merely MENTIONS the names in a docstring/comment and
+    imports deepagents (without calling the banned fns) emits nothing — no false
+    positive on prose."""
+    fake = tmp_path / "clean_profile.py"
+    fake.write_text(
+        '"""Never call register_harness_profile here — it collides."""\n'
+        "# note: register_provider_profile() is also banned\n"
+        "import deepagents  # importing the package is fine\n"
+        "x = 1\n"
+    )
+    assert _scan_for_profile_registration(fake) == []
 
 
 def test_host_setup_validator_missing_helper(fake_tree):

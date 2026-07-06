@@ -134,27 +134,35 @@ def _write_middleware_block(fake_tree: Path, block: str) -> None:
 
 def test_registry_lists_documented_names():
     """The registry is the single vocabulary; ``middleware_names`` is the
-    contract/test surface that reads it."""
+    contract/test surface that reads it. Phase 3 folded ``context`` +
+    ``browser_vision`` in as first-class (default-on, removable) specs."""
     names = stack.middleware_names()
-    assert set(names) == {"routing", "session_guide", "rubric"}
+    assert set(names) == {"context", "routing", "session_guide", "rubric",
+                          "browser_vision"}
     # No duplicate registrations.
     assert len(names) == len(set(names))
 
 
 def test_defaults_match_pre_factory_baseline():
-    """The defaults ARE the pre-factory mount order: routing + session_guide on
-    the supervisor, nothing toggleable on subagents (the context layer is the
-    non-toggleable base, handled outside the toggle list)."""
-    assert stack.DEFAULT_SUPERVISOR == ["routing", "session_guide"]
-    assert stack.DEFAULT_SUBAGENT == []
+    """The defaults ARE the pre-Phase-3 mount order, now expressed through the
+    registry: context + routing + session_guide + browser_vision on the
+    supervisor, context + browser_vision on subagents. (``rubric`` is
+    gate-driven, not a default.)"""
+    assert stack.DEFAULT_SUPERVISOR == ["context", "routing", "session_guide",
+                                        "browser_vision"]
+    assert stack.DEFAULT_SUBAGENT == ["context", "browser_vision"]
 
 
-def test_routing_and_session_are_supervisor_scoped_rubric_too():
-    """Every shipped middleware is supervisor-scoped today (the subagent scope
-    is reserved — grows when a subagent-scoped middleware is registered)."""
+def test_registry_scopes_are_correct():
+    """``context`` + ``browser_vision`` are dual-scope (supervisor AND
+    subagent); ``routing`` / ``session_guide`` / ``rubric`` are supervisor-only
+    (the subagent scope grows when a subagent-scoped middleware is registered)."""
     by_name = {s.name: s for s in stack.MIDDLEWARE_REGISTRY}
     for name in ("routing", "session_guide", "rubric"):
-        assert stack.Scope.SUPERVISOR in by_name[name].scope
+        assert by_name[name].scope == {stack.Scope.SUPERVISOR}, name
+    for name in ("context", "browser_vision"):
+        assert by_name[name].scope == {stack.Scope.SUPERVISOR,
+                                       stack.Scope.SUBAGENT}, name
 
 
 # --- the byte-identical baseline (the regression guarantee) ----------------
@@ -543,3 +551,77 @@ def test_validate_overrides_accepts_valid_block(fake_tree, stub_factory):
     _write_middleware_block(fake_tree,
         "middleware:\n  supervisor:\n    remove: [routing]\n")
     assert stack.validate_overrides("p") == []
+
+
+# --- Phase 3: context + browser_vision are first-class removable specs -----
+
+def test_context_mounts_outermost_and_emits_tools(fake_tree, stub_factory, monkeypatch):
+    """The context spec (Phase 3) mounts at registry position 0 (OUTERMOST) and
+    its coupled retrieval tools escape via ``ctx.emitted_tools_supervisor`` into
+    ``supervisor_tools``. ``stub_factory`` blanks the layer to ``([], [])`` for
+    the baseline tests; here we stub it to a marker mw + a marker tool so both
+    halves of the coupled pair are observable."""
+    ctx_tool = _mk_tool("ctx_recall")
+    monkeypatch.setattr(stack, "build_context_layer",
+                        lambda: (["CONTEXT"], [ctx_tool]))
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+    )
+    # context outermost, then routing, session_guide (browser_vision env-off).
+    assert plan.supervisor_middleware == ["CONTEXT", "ROUTE", "GUIDE"]
+    # The retrieval tool escaped the spec into the supervisor surface.
+    assert "ctx_recall" in {t.name for t in plan.supervisor_tools}
+
+
+def test_context_is_now_removable(fake_tree, stub_factory, monkeypatch):
+    """The formerly-NON-toggleable context layer is now a registry spec, so
+    ``middleware.supervisor.remove: [context]`` drops it AND its retrieval tool
+    (the spec never ran → nothing emitted) — the user's 'selectively remove
+    middleware' request, applied to the base capture/offload layer too."""
+    monkeypatch.setattr(stack, "build_context_layer",
+                        lambda: (["CONTEXT"], [_mk_tool("ctx_recall")]))
+    _write_middleware_block(fake_tree,
+        "middleware:\n  supervisor:\n    remove: [context]\n")
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+    )
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE"]
+    assert "ctx_recall" not in {t.name for t in plan.supervisor_tools}
+
+
+def test_browser_vision_is_now_removable_when_enabled(fake_tree, stub_factory, monkeypatch):
+    """``browser_vision`` is a registry spec, so ``middleware.supervisor.remove:
+    [browser_vision]`` drops it EVEN when the env pin is ON — selectable like
+    every other middleware, not just env-toggleable."""
+    from pux_harness.context.browser_vision import BrowserVisionMiddleware
+    monkeypatch.setenv("PUX_BROWSER_VISION", "1")  # override fake_tree's OFF pin
+    _write_middleware_block(fake_tree,
+        "middleware:\n  supervisor:\n    remove: [browser_vision]\n")
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+    )
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE"]
+    assert not any(isinstance(m, BrowserVisionMiddleware)
+                   for m in plan.supervisor_middleware)
+
+
+def test_full_supervisor_order_is_canonical_registry_order(fake_tree, stub_factory, monkeypatch):
+    """The byte-identical FULL order — context, routing, session_guide, rubric,
+    browser_vision — when the gate is armed AND vision is on. Registry order is
+    canonical, so browser_vision stays INNERMOST past rubric (the pre-Phase-3
+    append-last behavior, now registry-driven rather than special-cased)."""
+    from pux_harness.context.browser_vision import BrowserVisionMiddleware
+    monkeypatch.setattr(stack, "build_context_layer",
+                        lambda: (["CONTEXT"], []))
+    monkeypatch.setenv("PUX_BROWSER_VISION", "1")
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=_gate(), exec_client="EXEC",
+    )
+    mw = plan.supervisor_middleware
+    assert mw[:4] == ["CONTEXT", "ROUTE", "GUIDE", "RUBRIC"]
+    assert isinstance(mw[-1], BrowserVisionMiddleware)
+    assert len(mw) == 5  # exactly: context, routing, session_guide, rubric, browser_vision
