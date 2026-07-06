@@ -1,5 +1,5 @@
 """Tests for ``pux_harness.memory.backend.build_memory_backend`` — the
-CompositeBackend factory that routes ``/memories/`` to a ``StoreBackend``.
+CompositeBackend instance that routes ``/memories/`` to a ``StoreBackend``.
 
 The crash these guard against (caught by the Phase-18 live E2E for
 ``pux direct``): ``MemoryMiddleware.before_agent`` downloads memory files at
@@ -31,29 +31,28 @@ def _default_backend():
 
 def test_store_none_supplies_in_memory_store_not_none():
     # THE CRASH GUARD. A None store MUST NOT reach StoreBackend — it has no
-    # in-graph fallback and dies on the first download_files. The factory
+    # in-graph fallback and dies on the first download_files. The builder
     # supplies an InMemoryStore so the ephemeral runner path works without the
     # caller having to know this.
-    backend_factory, store = build_memory_backend(
+    backend, store = build_memory_backend(
         org="general", default_backend=_default_backend(), store=None,
     )
     assert store is not None
     assert isinstance(store, InMemoryStore)
 
 
-def test_store_backend_inside_factory_uses_non_none_store():
-    # The StoreBackend the factory builds at graph-execution time must resolve
-    # to a NON-None store at call time — this is the exact value the crash
-    # dereferenced (download_files → store.get on None). Drives the REAL
-    # factory (not a mock) with store=None, then asks the backend for the store
-    # it would actually use (``_get_store`` is StoreBackend's own resolution
-    # method — init store wins, the get_store() fallback is never reached).
-    backend_factory, store = build_memory_backend(
+def test_store_backend_uses_non_none_store():
+    # The StoreBackend the builder constructs must resolve to a NON-None store
+    # at call time — this is the exact value the crash dereferenced
+    # (download_files → store.get on None). Drives the REAL builder (not a mock)
+    # with store=None, then asks the backend for the store it would actually
+    # use (``_get_store`` is StoreBackend's own resolution method — init store
+    # wins, the get_store() fallback is never reached).
+    backend, store = build_memory_backend(
         org="general", default_backend=_default_backend(), store=None,
     )
-    composite = backend_factory(rt=MagicMock())
     # CompositeBackend.routes maps the prefix → the StoreBackend instance.
-    store_backends = [v for v in composite.routes.values()]
+    store_backends = [v for v in backend.routes.values()]
     assert store_backends, "expected a /memories/ route to a StoreBackend"
     sb = store_backends[0]
     assert sb._get_store() is not None
@@ -62,14 +61,13 @@ def test_store_backend_inside_factory_uses_non_none_store():
 
 def test_caller_supplied_store_is_preserved_not_replaced():
     # A caller that wants cross-restart survival (the server) passes its own
-    # store; the factory must use THAT, not swap in an InMemoryStore.
+    # store; the builder must use THAT, not swap in an InMemoryStore.
     caller_store = InMemoryStore()
-    backend_factory, store = build_memory_backend(
+    backend, store = build_memory_backend(
         org="dev-bot", default_backend=_default_backend(), store=caller_store,
     )
     assert store is caller_store
-    composite = backend_factory(rt=MagicMock())
-    sb = list(composite.routes.values())[0]
+    sb = list(backend.routes.values())[0]
     assert sb._get_store() is caller_store
 
 

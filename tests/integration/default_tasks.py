@@ -14,14 +14,16 @@ DEFAULT_TASKS: dict[str, str] = {
         "to the `researcher` subagent — do NOT run tools yourself. Have it use the "
         "native `execute` tool: `ls -1 /sandbox/workspace`. Report its findings verbatim."
     ),
-    # `go` is not installed in the pux-sandbox image, so we exercise the
-    # read-only explorer specialist rather than the tester's run-tests path.
+    # The dev-bot sample Go package was removed in the pi-pivot; dev-bot now
+    # ships only its 3 specialist agents. Target THOSE — the explorer's real
+    # read-only-investigator job (grep the frontmatter `name:` field, cite files).
     "dev-bot": (
-        "What does the dev-bot sample Go package export? Delegate to the "
-        "`dev-bot-explorer` subagent — do NOT inspect the code yourself. The package "
-        "is under /sandbox/workspace/orgs/specialists/dev-bot/. Have the explorer find every "
-        "exported identifier (names starting with an uppercase letter) and report "
-        "each with a file:line citation. Report its findings verbatim."
+        "What specialist agents does the dev-bot org ship? Delegate to the "
+        "`dev-bot-explorer` subagent — do NOT inspect the code yourself. The agent "
+        "definitions live under /sandbox/workspace/orgs/specialists/dev-bot/agents/. "
+        "Have the explorer find every agent's declared `name:` field (in each `.md` "
+        "frontmatter) and report each name with its file citation. "
+        "Report its findings verbatim."
     ),
     # --- Phase 5: the remaining 7 orgs. Each forces delegation to a named
     # specialist and drives a NATIVE tool against the org's OWN bundled content
