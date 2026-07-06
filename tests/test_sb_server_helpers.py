@@ -168,7 +168,7 @@ def _assert_iife(name):
 
 def test_phase19_interaction_js_constants_are_iifes():
     for name in (
-        "ELEMENT_CENTER_JS", "SIMULATE_DND_JS", "PHYS_DRAG_JS",
+        "ELEMENT_CENTER_JS", "SIMULATE_DND_JS",
         "HOVER_JS", "PRESS_JS", "CLICK_AT_JS", "SCROLL_INTO_VIEW_JS",
     ):
         _assert_iife(name)
@@ -183,11 +183,25 @@ def test_simulate_dnd_js_fires_html5_sequence():
         assert evt in js, f"SIMULATE_DND_JS missing {evt!r}"
 
 
-def test_phys_drag_js_fires_mouse_sequence():
-    """Physics drag MUST emit mousedown → N×mousemove → mouseup."""
-    js = mod.PHYS_DRAG_JS
-    for evt in ("mousedown", "mousemove", "mouseup"):
-        assert evt in js, f"PHYS_DRAG_JS missing {evt!r}"
+def test_physics_drag_uses_trusted_cdp_not_iife():
+    """No-legacy-left-behind: the physics-drag strategy was migrated from an
+    in-page PHYS_DRAG_JS IIFE (synthetic, untrusted dispatchEvent → could NOT
+    move native sliders / fire dnd-kit's PointerSensor) to the trusted CDP
+    Input domain helper _trusted_cdp_drag. The OLD form must stay GONE.
+
+    Guards two things: (1) no PHYS_DRAG_JS constant exists in the module, and
+    (2) the trusted helper is present and drives the CDP Input primitive
+    (dispatch_mouse_event), not a synthetic JS event chain."""
+    assert not hasattr(mod, "PHYS_DRAG_JS"), (
+        "PHYS_DRAG_JS should be deleted — physics drag now uses the trusted "
+        "CDP helper _trusted_cdp_drag (synthetic events can't move native widgets)"
+    )
+    src = _SB_SERVER_PY.read_text()
+    assert "def _trusted_cdp_drag(" in src, "trusted CDP drag helper must exist"
+    assert "dispatch_mouse_event" in src, (
+        "physics drag must use CDP Input.dispatchMouseEvent (isTrusted=true), "
+        "not a synthetic in-page mousemove chain"
+    )
 
 
 def test_no_execute_script_uses_return_iife_pattern():

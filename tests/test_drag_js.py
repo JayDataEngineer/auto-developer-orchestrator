@@ -1,20 +1,22 @@
-"""Browser-free logic proof for the Phase 19 drag-and-drop JS.
+"""Browser-free logic proof for the Phase 20 drag-and-drop HTML5 JS.
 
 ``sandbox/scripts/sb_server.py`` can't be exercised here — SeleniumBase lives
 only in the sandbox Docker image (not on the host), so a live ``/drag`` against
 a real browser isn't runnable from the test suite. What we CAN prove without a
-browser is the correctness of the JS we authored: ``SIMULATE_DND_JS`` and
-``PHYS_DRAG_JS`` are pure functions of a ``document`` global, so we extract them
-from source, eval them in Node against a hand-rolled stub DOM, and assert they
-dispatch the EXACT event sequence that makes drag-and-drop work:
+browser is the correctness of the JS we authored: ``SIMULATE_DND_JS`` is a pure
+function of a ``document`` global, so we extract it from source, eval it in
+Node against a hand-rolled stub DOM, and assert it dispatches the EXACT event
+sequence that makes HTML5 drag-and-drop work:
 
-* HTML5 path: dragstart → dragenter → dragover → drop → dragend  (the chain
-  Selenium's native ActionChains skips — the whole reason this exists).
-* Physics path: mouseover → mousemove → mousedown → N×mousemove → mouseup.
+* dragstart → dragenter → dragover → drop → dragend  (the chain Selenium's
+  native ActionChains skips — the whole reason this exists).
 
 If the JS ever drops a step, or dispatches to the wrong element, this fires.
-The only thing it does NOT prove is that real browsers honor synthetic DragEvents
-— that's a documented industry fact (Selenium issue #3604), not our code.
+
+The PHYSICS drag strategy is no longer a JS IIFE — it's the Python helper
+``_trusted_cdp_drag`` driving the CDP Input domain directly, because synthetic
+in-page MouseEvents can't move native sliders or fire dnd-kit's PointerSensor
+(they're untrusted). That path is proven by the live E2E, not Node.
 """
 from __future__ import annotations
 
@@ -46,14 +48,19 @@ def _extract_const(source: str, name: str) -> str:
 
 _SOURCE = SB_SERVER.read_text()
 _DND_JS = _extract_const(_SOURCE, "SIMULATE_DND_JS")
-_PHYS_JS = _extract_const(_SOURCE, "PHYS_DRAG_JS")
 
-# Node harness: stub the DOM the two IIFEs touch, eval each constant (it's a
-# bare arrow-fn expression), call it, and print the recorded events as JSON.
-# JS bodies are base64'd in so no quoting/escaping can corrupt them.
+# No-legacy-left-behind: physics drag moved from a synthetic PHYS_DRAG_JS IIFE
+# to the trusted CDP helper _trusted_cdp_drag. The OLD JS form must stay GONE —
+# match the ASSIGNMENT, not the explanatory comment that names the migration.
+assert not re.search(r"^PHYS_DRAG_JS\s*=\s*", _SOURCE, re.MULTILINE), (
+    "PHYS_DRAG_JS assignment deleted — physics drag is now _trusted_cdp_drag (CDP Input)"
+)
+
+# Node harness: stub the DOM the IIFE touches, eval the constant (it's a bare
+# arrow-fn expression), call it, and print the recorded events as JSON.
+# JS body is base64'd in so no quoting/escaping can corrupt it.
 _HARNESS = r"""
 const DND = Buffer.from('__DND_B64__', 'base64').toString();
-const PHYS = Buffer.from('__PHYS_B64__', 'base64').toString();
 
 function makeEl(name) {
     return {
@@ -82,31 +89,21 @@ globalThis.DataTransfer = class {
 globalThis.DragEvent = class {
     constructor(type, o = {}) { this.type = type; this.dataTransfer = o.dataTransfer || null; this.clientX = o.clientX || 0; this.clientY = o.clientY || 0; }
 };
-globalThis.MouseEvent = class {
-    constructor(type, o = {}) { this.type = type; this.button = o.button || 0; this.buttons = o.buttons || 0; this.clientX = o.clientX || 0; this.clientY = o.clientY || 0; }
-};
 
 const dnd = (0, eval)(DND);
-const phys = (0, eval)(PHYS);
-
 const dndResult = JSON.parse(dnd('.src', '.dst'));
-const physResult = JSON.parse(phys(10, 20, 110, 120, 5, 0));
 
 console.log(JSON.stringify({
     dnd_ok: dndResult.ok,
     dnd_fired: dndResult.fired,
     dnd_src_events: els['.src']._events,
     dnd_dst_events: els['.dst']._events,
-    phys_ok: physResult.ok,
-    phys_types: physResult.fired.map((s) => s.split('(')[0]),
 }));
 """
 
 
 def _run_node() -> dict:
-    script = (_HARNESS
-              .replace("__DND_B64__", base64.b64encode(_DND_JS.encode()).decode())
-              .replace("__PHYS_B64__", base64.b64encode(_PHYS_JS.encode()).decode()))
+    script = _HARNESS.replace("__DND_B64__", base64.b64encode(_DND_JS.encode()).decode())
     proc = subprocess.run(
         ["node", "-"], input=script, text=True,
         capture_output=True, timeout=30,
@@ -130,14 +127,3 @@ def test_simulate_dnd_targets_right_elements():
     out = _run_node()
     assert out["dnd_src_events"] == ["dragstart", "dragend"], out
     assert out["dnd_dst_events"] == ["dragenter", "dragover", "drop"], out
-
-
-def test_phys_drag_dispatches_mouse_sequence():
-    """mouseover → mousemove → mousedown → (steps × mousemove) → mouseup.
-    steps=5 ⇒ 1 lead mousemove + 5 interpolated = 6 mousemoves total."""
-    out = _run_node()
-    assert out["phys_ok"] is True, out
-    expected = (["mouseover", "mousemove", "mousedown"]
-                + ["mousemove"] * 5
-                + ["mouseup"])
-    assert out["phys_types"] == expected, out
