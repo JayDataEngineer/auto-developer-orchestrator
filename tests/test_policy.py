@@ -1,4 +1,4 @@
-"""Parity gate for the policy engine (Phase 6 — mirrors the 22 Go tests in
+"""Parity gate for the policy engine (mirrors the 22 Go tests in
 ``backend/internal/policy``).
 
 Every test here is a 1:1 port of a Go test (``policy_test.go`` /
@@ -334,7 +334,7 @@ def test_resolve_tier_override_wins() -> None:
     assert policy.resolve_tier(p, "bridged") == "isolated"
 
 
-# --- host_setup + sandbox.build (Phase 13) ------------------------------------
+# --- host_setup + sandbox.build -----------------------------------------------
 
 
 def test_load_host_setup_parses(tmp_path: Path) -> None:

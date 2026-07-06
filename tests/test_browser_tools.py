@@ -1,4 +1,4 @@
-"""Browser tool factories (Phase 16.1) POST to the right sb_server endpoint
+"""Browser tool factories POST to the right sb_server endpoint
 with the right body shape.
 
 Each ``_browser_X_tool`` factory wraps a single ``_sb_post(exec_client,
@@ -58,7 +58,7 @@ def _browser_tools() -> dict:
 
 
 def test_all_browser_factories_registered():
-    """Every browser slug (Phase 16 + Phase 19) is registered with its prefixed name."""
+    """Every browser slug is registered with its prefixed name."""
     specs = _browser_tools()
     expected = {
         "browser_navigate", "browser_click", "browser_type", "browser_screenshot",
@@ -68,7 +68,7 @@ def test_all_browser_factories_registered():
         "browser_upload", "browser_tabs", "browser_new_tab", "browser_switch_tab",
         "browser_close_tab", "browser_dropdown_options", "browser_select_dropdown",
         "browser_save_session", "browser_restore_session",
-        # Phase 19 — SOTA mouse/keyboard/DnD
+        # SOTA mouse/keyboard/DnD
         "browser_drag", "browser_hover", "browser_press", "browser_click_at",
         "browser_scroll_into_view", "browser_a11y", "browser_iframe",
     }
@@ -79,7 +79,7 @@ def test_all_browser_factories_registered():
         assert t.description and t.description.strip(), f"{slug} has empty description"
 
 
-# --- Phase 19 tools: body-shape contract ------------------------------------
+# --- Advanced browser tools: body-shape contract ----------------------------
 
 
 def test_browser_drag_index_to_index_uses_auto(cap):

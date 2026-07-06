@@ -31,7 +31,7 @@ Two tool surfaces, all running **inside the Docker container**:
     the answer. Use when resilience beats a guaranteed-LLM judgment.
   - **browser_\*** — wrap the sandbox's persistent SeleniumBase Chrome session
     on `:9876`. The core five (`browser_navigate` / `_click` / `_type` /
-    `_screenshot` / `_evaluate`) plus the Phase-16 autopilot action set
+    `_screenshot` / `_evaluate`) plus the autopilot action set
     (`browser_search` / `_scroll` / `_go_back` / `_wait` / `_find_text` /
     `_extract` / `_extract_images` / `_save_screenshot` / `_download` /
     `_upload` / `_tabs` / `_new_tab` / `_switch_tab` / `_close_tab` /
@@ -49,7 +49,7 @@ Two tool surfaces, all running **inside the Docker container**:
     root in the project (`orgs/_shared/skills/` + each `orgs/<name>/skills/`;
     org-local wins on a name collision). Each entry carries the SKILL.md
     `path`. The supervisor additionally gets the native deepagents
-    `SkillsMiddleware` (Phase 6), which injects each skill's name +
+    `SkillsMiddleware`, which injects each skill's name +
     description into the prompt at startup; **peek a body with the native
     `read_file`** on the `path` (`pux_sandbox_load_skill` is gone). Subagents
     may additionally scope themselves to specific roots via the `skills:`
@@ -65,10 +65,10 @@ Two-layer model: **harness/** (lifecycle, policy, scheduling, org roster) +
 
 The harness owns the full sandbox lifecycle. There is no Go MCP server,
 no `bridge.py`, no `smoke_mcp.py` — the entire Go sandbox was re-hosted
-in Python and deleted (Phase 8a–8i). The per-org `bootstrap.sh` +
-`docker-compose.yml` shadow lifecycle (Phase 8i) was also deleted outright;
+in Python and deleted. The per-org `bootstrap.sh` +
+`docker-compose.yml` shadow lifecycle was also deleted outright;
 `policy.yaml` `host_setup` + `sandbox.build` cover host hooks and image
-builds (Phase 13; permanent `no-legacy-sandbox-artifacts` tripwire).
+builds (permanent `no-legacy-sandbox-artifacts` tripwire).
 
 ### Two-tier Python separation
 
@@ -165,7 +165,7 @@ NOT a policy file (no egress/sandbox effect); it shapes the agent graph itself:
 - `base_system_prompt` — REPLACE the assembled CTO prompt (rarely needed; the
   suffix is the usual lever).
 
-Two more blocks ride on the same file (Phase 17.B):
+Two more blocks ride on the same file:
 
 - `models:` — a map overriding the **model-role spec**. The harness resolves
   four roles — `base_model` (CTO driver), `worker_model` (subagents),
@@ -220,15 +220,15 @@ profile.yaml` is the shipped sample.
 
 **Dropped** (deepagents does it natively, or wasn't pulling weight):
 
-- ~~pi-mono TS harness~~ — replaced by the Python harness + Agent Protocol server (Phase 4)
+- ~~pi-mono TS harness~~ — replaced by the Python harness + Agent Protocol server
 - ~~In-process Go agent loop / Go dispatch surface / Go history recorder / Bubble Tea TUI~~ — replaced by deepagents + the Agent Protocol server
-- ~~Go MCP server + bridge.py + smoke_mcp.py~~ — re-hosted in Python then deleted (Phase 8a–8i)
-- ~~Per-org bootstrap.sh + docker-compose.yml shadow lifecycle~~ — harness owns the full lifecycle now (Phase 13)
+- ~~Go MCP server + bridge.py + smoke_mcp.py~~ — re-hosted in Python then deleted
+- ~~Per-org bootstrap.sh + docker-compose.yml shadow lifecycle~~ — harness owns the full lifecycle now
 - ~~TOML org config~~ — replaced by per-org `AGENTS.md` markdown
 
 **Deferred** (might land later):
 
-- SSE streaming for Agent Protocol runs (Phase 9)
+- SSE streaming for Agent Protocol runs
 - Multi-org orchestration
 - Self-evolving script toolkit (`make_script` / `edit_script`)
 - Diligence evals, safeguard router

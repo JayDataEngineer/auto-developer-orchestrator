@@ -2,7 +2,7 @@
 
 > Exhaustive sweep after the `sandbox/tools.py` → `sandbox/tools/` package split
 > + `context/` rewrite + new `__main__.py` / `mcp_server.py`. Re-verified against
-> the **live** tree (Phase 19/20) before each fix — the snapshot this audit was
+> the **live** tree before each fix — the snapshot this audit was
 > drafted on was stale; outcomes below reflect ground truth at fix time.
 
 ## TL;DR — OUTCOMES
@@ -47,7 +47,7 @@ Re-verified green after every edit batch: `uv run pytest -q` (578/6) +
 ## F. Claims investigated and REJECTED (do not re-chase)
 
 1. **"specialists should be 37"** — FALSE at the time (registry pins the count);
-   it is now **40** after Phase 20's 7 browser tools. README updated to 40.
+   it is now **40** after 7 browser tools were added. README updated to 40.
 2. **"`CONTRACT.md` is a blocker; rewrite it"** — MISFRAMED. Its preamble freezes it
    as the `master`-branch Go-server reference ("does not describe the pi-pivot branch").
    Intentionally frozen, not drift. The **live** contract on this branch is

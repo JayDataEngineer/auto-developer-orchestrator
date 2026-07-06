@@ -1,4 +1,4 @@
-"""Phase 10-12 — routing enforcement, snapshot builder, session guide.
+"""Routing enforcement, snapshot builder, session guide.
 
 Tests all three new modules against tmp-path databases (no Docker, no model).
 """
@@ -35,7 +35,7 @@ def _tm(content: Any, tcid: str = "call_1", name: str = "execute") -> ToolMessag
 
 
 # =============================================================================
-# Phase 10: Routing Middleware
+# Routing Middleware
 # =============================================================================
 
 
@@ -162,7 +162,7 @@ def test_routing_async_denies(tmp_path):
 
 
 # =============================================================================
-# Phase 11: Snapshot Builder
+# Snapshot Builder
 # =============================================================================
 
 
@@ -256,7 +256,7 @@ def test_snapshot_dedupes_files():
 
 
 # =============================================================================
-# Phase 12: Session Guide Middleware
+# Session Guide Middleware
 # =============================================================================
 
 

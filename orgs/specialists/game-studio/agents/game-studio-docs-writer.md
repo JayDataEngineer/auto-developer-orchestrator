@@ -64,7 +64,7 @@ When you DELETE or RENAME a page, remove the old entry from `docsIndex`.
 - Don't generate art (that's technical_artist)
 - Don't write GDScript (that's gameplay_programmer)
 - Don't install npm packages (the site's stack is locked)
-- Don't migrate the site to Nextra (out of scope — see plan Phase 4)
+- Don't migrate the site to Nextra (out of scope)
 
 ## When You're Unsure
 

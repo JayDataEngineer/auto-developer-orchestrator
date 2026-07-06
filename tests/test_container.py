@@ -1,10 +1,10 @@
-"""Parity tests for the Python sandbox lifecycle port (Phase 8g).
+"""Parity tests for the Python sandbox lifecycle port.
 
 Mirrors the spirit of the Go ``backend/internal/sandbox`` unit tests
 (``runtime_test.go``, ``cache_test.go``, ``defaults_test.go``) — the pure
 decision functions don't need a Docker daemon. The create/destroy path is
 proven end-to-end by ``pux sandbox start`` against a live Docker (see the
-Phase 8g verify log), not asserted here.
+verify log), not asserted here.
 """
 from __future__ import annotations
 
@@ -163,7 +163,7 @@ def test_build_env_no_policy_has_no_creds():
     assert len(env) == 6
 
 
-# --- host_setup ordering in create() (Phase 13) -------------------------------
+# --- host_setup ordering in create() ----------------------------------------
 # create() must run host_setup BEFORE validate_env, so creds the hooks produce
 # (e.g. TWITTER_COOKIES_B64) are visible to the existing cred/cookie chain.
 # Proven via a recorder: host_setup records + returns {}, validate_env records
@@ -234,7 +234,7 @@ def test_create_exports_flow_into_environ(monkeypatch):
     assert seen["TWITTER_COOKIES_B64"] == "FROM-HOOK"
 
 
-# --- _ensure_image build path (Phase 13) --------------------------------------
+# --- _ensure_image build path -----------------------------------------------
 
 
 class _FakeImages:

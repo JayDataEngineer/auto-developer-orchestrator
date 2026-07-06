@@ -1,4 +1,4 @@
-"""Phase 5 — org-level inheritance (``org.yaml extends:``) at the RUNTIME layer.
+"""Org-level inheritance (``org.yaml extends:``) at the RUNTIME layer.
 
 Scope is deliberately narrow and NON-duplicative. The sibling kit file
 (``pux-harness/tests/test_org_inheritance.py``) owns the kit-level mechanism

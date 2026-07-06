@@ -1,4 +1,4 @@
-"""Phase 21 — the stack factory (``stack.build_stack``) tests.
+"""The stack factory (``stack.build_stack``) tests.
 
 Proves the factory is the SINGLE resolver for the per-org agent stack — the
 user's "one place to adjust defaults" goal:
@@ -98,7 +98,7 @@ def stub_factory(monkeypatch):
     monkeypatch.setattr(stack, "build_context_layer", lambda: ([], []))
     monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
     monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
-    # AuditMiddleware is opt-in (Phase 4); stub to a marker so the resolver test
+    # AuditMiddleware is opt-in; stub to a marker so the resolver test
     # can observe its presence/position without constructing a real one (which
     # would bind shared_event_store() and touch the real .pux/events.sqlite). The
     # real class is unit-tested in pux-harness/tests/test_audit.py.
@@ -139,8 +139,8 @@ def _write_middleware_block(fake_tree: Path, block: str) -> None:
 
 def test_registry_lists_documented_names():
     """The registry is the single vocabulary; ``middleware_names`` is the
-    contract/test surface that reads it. Phase 3 folded ``context`` +
-    ``browser_vision`` in as first-class (default-on, removable) specs; Phase 4
+    contract/test surface that reads it. ``context`` +
+    ``browser_vision`` were folded in as first-class (default-on, removable) specs;
     added the opt-in ``audit`` spec (default OFF)."""
     names = stack.middleware_names()
     assert set(names) == {"audit", "context", "routing", "session_guide",
@@ -150,7 +150,7 @@ def test_registry_lists_documented_names():
 
 
 def test_defaults_match_pre_factory_baseline():
-    """The defaults ARE the pre-Phase-3 mount order, now expressed through the
+    """The defaults ARE the mount order, now expressed through the
     registry: context + routing + session_guide + browser_vision on the
     supervisor, context + browser_vision on subagents. (``rubric`` is
     gate-driven, not a default.)"""
@@ -208,7 +208,7 @@ def test_no_profile_subagent_middleware_is_the_context_layer(fake_tree, stub_fac
     assert plan.subagents[0]["middleware"] == []
 
 
-# --- the general-purpose subagent (Phase 1 — own the GP) --------------------
+# --- the general-purpose subagent -------------------------------------------
 
 def test_no_profile_emits_no_general_purpose(fake_tree, stub_factory):
     """No ``general_purpose_subagent`` block → pux emits NO GP spec; deepagents
@@ -346,7 +346,7 @@ def test_profile_base_system_prompt_replaces_assembled(fake_tree, stub_factory):
     """``profile.base_system_prompt`` REPLACES the assembled (root + org +
     addendum) prompt rather than appending — the override that lets an org
     swap the whole CTO persona. (This behavior moved out of graph.py in
-    Phase 21; it lives in the factory now.)"""
+    it lives in the factory now.)"""
     cfg = HarnessProfileConfig(base_system_prompt="FULL_REPLACE")
     plan = stack.build_stack(
         "p", specialists=list(_SPECIALISTS), profile=cfg,
@@ -459,7 +459,7 @@ def test_override_empty_block_is_byte_identical(fake_tree, stub_factory):
     assert plan.supervisor_middleware == ["ROUTE", "GUIDE"]
 
 
-# --- Phase 4: the opt-in ``audit`` spec ------------------------------------
+# --- the opt-in ``audit`` spec ---------------------------------------------
 
 def test_audit_is_default_off(fake_tree, stub_factory):
     """``audit`` is opt-in — a no-block org emits NO audit middleware (the
@@ -604,10 +604,10 @@ def test_validate_overrides_accepts_valid_block(fake_tree, stub_factory):
     assert stack.validate_overrides("p") == []
 
 
-# --- Phase 3: context + browser_vision are first-class removable specs -----
+# --- context + browser_vision are first-class removable specs ---------------
 
 def test_context_mounts_outermost_and_emits_tools(fake_tree, stub_factory, monkeypatch):
-    """The context spec (Phase 3) mounts at registry position 0 (OUTERMOST) and
+    """The context spec mounts at registry position 0 (OUTERMOST) and
     its coupled retrieval tools escape via ``ctx.emitted_tools_supervisor`` into
     ``supervisor_tools``. ``stub_factory`` blanks the layer to ``([], [])`` for
     the baseline tests; here we stub it to a marker mw + a marker tool so both
@@ -662,7 +662,7 @@ def test_browser_vision_is_now_removable_when_enabled(fake_tree, stub_factory, m
 def test_full_supervisor_order_is_canonical_registry_order(fake_tree, stub_factory, monkeypatch):
     """The byte-identical FULL order — context, routing, session_guide, rubric,
     browser_vision — when the gate is armed AND vision is on. Registry order is
-    canonical, so browser_vision stays INNERMOST past rubric (the pre-Phase-3
+    canonical, so browser_vision stays INNERMOST past rubric (the previous
     append-last behavior, now registry-driven rather than special-cased)."""
     from pux_harness.context.browser_vision import BrowserVisionMiddleware
     monkeypatch.setattr(stack, "build_context_layer",

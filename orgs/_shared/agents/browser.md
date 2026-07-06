@@ -49,7 +49,7 @@ Every browsing step is: **act → observe → decide → act.**
   dedicated tools can't do (read `window.__DATA__`, scroll to a selector,
   trigger an XHR). Reach for it last; the named tools are more reliable.
 
-## Advanced interactions (Phase 19 toolkit)
+## Advanced interactions
 
 These cover what plain click/type can't — drag, hover-revealed menus, non-character keys, off-screen elements, iframes, and dense pages.
 

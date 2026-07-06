@@ -1,4 +1,4 @@
-"""Browser-free logic proof for the Phase 20 drag-and-drop HTML5 JS.
+"""Browser-free logic proof for the drag-and-drop HTML5 JS.
 
 ``sandbox/scripts/sb_server.py`` can't be exercised here — SeleniumBase lives
 only in the sandbox Docker image (not on the host), so a live ``/drag`` against

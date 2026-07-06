@@ -3,13 +3,13 @@
 The contract test (``test_org_contract.py``) proves agents are *structurally*
 valid offline. This module proves the loader *resolves* them into the shapes
 deepagents consumes: ``model`` -> a ``ChatOpenAI`` instance via our router,
-``skills`` -> absolute dirs that exist, and (Phase 19) a ``middleware`` key
+``skills`` -> absolute dirs that exist, and a ``middleware`` key
 carrying the unified context layer (``ContextMiddleware`` — capture + offload)
 PLUS the ``ctx_recall``/``ctx_search`` retrieval tools appended to the
 whitelist. deepagents' ``SubAgentMiddleware`` forwards that ``middleware`` key
 into the compiled subagent (verified against 0.6.12), so the layer intercepts
 each subagent's own tool calls — the old "NO middleware key / main-agent-only"
-Phase-7 claim is retracted.
+old claim is retracted.
 
 Agents are frontmatter+body ``.md`` files resolved org-local first, then
 ``orgs/_shared/agents/`` — this module covers both paths.
@@ -117,15 +117,15 @@ def test_tools_resolved_to_specialist_surface(fake_tree):
     assert sub["name"] == "t"
     assert sub["description"] == "t subagent"
     assert sub["system_prompt"] == "prose body"
-    # Phase 19: the unified context layer threads ``ctx_recall``/``ctx_search``
+    # The unified context layer threads ``ctx_recall``/``ctx_search``
     # into every subagent (specialist whitelist = python; the retrieval pair is
     # appended on top — graph.py retracts the old main-agent-only claim).
     assert {t.name for t in sub["tools"]} == {
         "pux_sandbox_python", "ctx_recall", "ctx_search",
     }
-    # Phase 19: each subagent carries the unified ContextMiddleware (capture +
+    # Each subagent carries the unified ContextMiddleware (capture +
     # offload in one pass) so the layer intercepts its own tool calls — the old
-    # main-agent-only Phase-7 claim is retracted (file docstring above).
+    # main-agent-only claim is retracted (file docstring above).
     assert isinstance(sub["middleware"], list) and sub["middleware"]
     assert isinstance(sub["middleware"][0], ContextMiddleware)
 
@@ -219,7 +219,7 @@ def test_md_agent_loads(fake_tree):
     assert sub["name"] == "mdagent"
     assert sub["description"] == "mdagent subagent"
     assert sub["system_prompt"] == "prose body"
-    # Phase 19: the unified context layer threads ``ctx_recall``/``ctx_search``
+    # The unified context layer threads ``ctx_recall``/``ctx_search``
     # into every subagent (specialist whitelist = python; the retrieval pair is
     # appended on top — graph.py retracts the old main-agent-only claim).
     assert {t.name for t in sub["tools"]} == {
@@ -227,9 +227,9 @@ def test_md_agent_loads(fake_tree):
     }
     assert sub["skills"] == ["/sandbox/workspace/orgs/_shared/skills"]
     assert sub["model"].model_name == "mimo-v2.5"
-    # Phase 19: each subagent carries the unified ContextMiddleware (capture +
+    # Each subagent carries the unified ContextMiddleware (capture +
     # offload in one pass) so the layer intercepts its own tool calls — the old
-    # main-agent-only Phase-7 claim is retracted (file docstring above).
+    # main-agent-only claim is retracted (file docstring above).
     assert isinstance(sub["middleware"], list) and sub["middleware"]
     assert isinstance(sub["middleware"][0], ContextMiddleware)
 
@@ -288,7 +288,7 @@ def test_org_yaml_top_level_must_be_mapping(fake_tree):
         orgs.org_agent_slugs("o")
 
 
-# --- Phase 16: shared browser agent + its full whitelist ------------------
+# --- Shared browser agent + its full whitelist -----------------------------
 
 def test_real_browser_whitelist_resolves(monkeypatch):
     """The shipped browser agent (orgs/_shared/agents/browser.md) is rostered by
@@ -304,7 +304,7 @@ def test_real_browser_whitelist_resolves(monkeypatch):
     browser = next(s for s in subs if s["name"] == "browser")
     names = {t.name for t in browser["tools"]}
     # Representative coverage across navigate / search / screenshot / tabs /
-    # sessions / vision — every Phase-16 family is present + resolved.
+    # sessions / vision — every browser family is present + resolved.
     for slug in (
         "browser_navigate", "browser_search", "browser_click", "browser_type",
         "browser_scroll", "browser_screenshot", "browser_save_screenshot",
@@ -316,7 +316,7 @@ def test_real_browser_whitelist_resolves(monkeypatch):
         assert "pux_sandbox_" + slug in names, f"{slug} not resolved"
 
 
-# --- Phase 2: extends: inheritance through the REAL load_subagents path ----
+# --- extends: inheritance through the REAL load_subagents path --------------
 
 def test_extends_inherits_base_tools_and_body(fake_tree):
     """An org-local child with ``extends: <shared base>`` + ``tools_add``

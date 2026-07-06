@@ -1,4 +1,4 @@
-"""Phase 23.2 — prove ``pux direct`` persists threads to the SHARED store.
+"""Prove ``pux direct`` persists threads to the SHARED store.
 
 This is the cross-runtime-wiring proof, not a unit test of the helper
 ([[feedback_prepare_wiring_e2e_gap]]): it drives the REAL ``_run`` entry point

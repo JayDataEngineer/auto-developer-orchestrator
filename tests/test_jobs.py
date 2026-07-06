@@ -1,4 +1,4 @@
-"""In-sandbox prep-job runner (Phase 14). Exercises ``run_jobs`` with the exec
+"""In-sandbox prep-job runner. Exercises ``run_jobs`` with the exec
 client stubbed — no Docker, no real container. Proves warn-and-continue, timeout
 enforcement, and empty-policy no-op."""
 from __future__ import annotations
@@ -185,13 +185,13 @@ def test_unexpected_exception_captured() -> None:
 def test_run_wires_prepare_to_shared_exec(monkeypatch, tmp_path):
     """Regression: ``_run`` must pass a real exec client to ``prepare``.
 
-    Phase 14.2 shipped ``_run`` reaching for ``backend.exec_client`` — a
+    The initial version shipped ``_run`` reaching for ``backend.exec_client`` — a
     nonexistent attribute on ``PuxSandboxBackend`` (which stores it as
     ``_exec``). Every ``pux direct`` invocation crashed at the prepare line
     before the agent even ran; the bug slipped past because ``prepare`` was
     only unit-tested in isolation, never driven through ``_run``. This test
     stubs the Docker/model touch-points (``_build_agent``,
-    ``shared_exec``, ``prepare``) and isolates the shared thread store (Phase 23)
+    ``shared_exec``, ``prepare``) and isolates the shared thread store
     so it opens a tmp sqlite, not the operator's ``.pux/``. It then proves the
     wiring hands ``prepare`` the shared exec client — no AttributeError, no
     second client constructed.

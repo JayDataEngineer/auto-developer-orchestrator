@@ -180,7 +180,7 @@ def test_install_agent_writes_cto_and_ported_subagents(temp_home) -> None:
 
 
 def test_ported_subagents_exclude_browser_only_web_agent() -> None:
-    # web-agent drives pux-only browser tools (Phase 16/20) absent in dcode —
+    # web-agent drives pux-only browser tools absent in dcode —
     # porting it would advertise tools the agent can't call. This is the roster
     # boundary: code-worker + dev-bot-explorer in, web-agent out.
     assert "code-worker" in _PORTED_SUBAGENTS

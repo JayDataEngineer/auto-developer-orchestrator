@@ -1,4 +1,4 @@
-"""Phase 1 consolidation — the 7 pure org/agent loaders in ``orgs.py`` are thin
+"""Consolidation — the 7 pure org/agent loaders in ``orgs.py`` are thin
 delegates to ``pux_harness.kit.loaders``.
 
 Two guarantees, both ``verify-or-die``:
@@ -14,7 +14,7 @@ Two guarantees, both ``verify-or-die``:
   delegate's body mentions the old logic only in a docstring.
 
 A one-off byte-identical diff of the FULL delegatable surface (pre vs post
-migration) was run separately during Phase 1 (10 orgs / 26 slugs / 21
+migration) was run separately (10 orgs / 26 slugs / 21
 skills-specs, 387920 bytes identical) — that's the migration's regression
 guarantee; these tests are the permanent lock-in.
 """

@@ -1,7 +1,7 @@
 """Tests for ``pux_harness.memory.backend.build_memory_backend`` — the
 CompositeBackend instance that routes ``/memories/`` to a ``StoreBackend``.
 
-The crash these guard against (caught by the Phase-18 live E2E for
+The crash these guard against (caught by the live E2E for
 ``pux direct``): ``MemoryMiddleware.before_agent`` downloads memory files at
 graph startup via ``backend.adownload_files`` → ``StoreBackend.download_files``
 → ``store.get``. If the ``StoreBackend`` is built with ``store=None`` that call

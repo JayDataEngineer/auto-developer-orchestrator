@@ -69,7 +69,7 @@ def test_every_org_has_a_forcing_task():
     """The in-process runner (``pux direct --org <name>``) drives a delegation-
     forcing task per org. Every discovered org must have a DEFAULT_TASKS entry —
     a missing entry would make ``--org <name>`` fail with a KeyError instead of
-    running. (Phase 5: all 10 orgs ported to RUN on deepagents.)"""
+    running. (All 10 orgs ported to RUN on deepagents.)"""
     from tests.integration.default_tasks import DEFAULT_TASKS
 
     missing = set(discover_orgs()) - set(DEFAULT_TASKS)
@@ -262,7 +262,7 @@ def test_rule5_policy_valid_sections_ok(fake_tree):
 
 
 def test_rule5_policy_non_mapping_section_caught(fake_tree):
-    """Deep schema (Phase 6): a known section that is NOT a mapping passes the
+    """Deep schema: a known section that is NOT a mapping passes the
     shallow section check (the key is known) but fails the real policy engine —
     ``policy.load`` raises 'section must be a mapping'. Proves the load layer."""
     add_org, add_agent = fake_tree
@@ -275,7 +275,7 @@ def test_rule5_policy_non_mapping_section_caught(fake_tree):
 
 
 def test_rule5_policy_bad_mount_caught(fake_tree):
-    """Deep schema (Phase 6): a workspace mount with a relative container path
+    """Deep schema: a workspace mount with a relative container path
     parses as valid YAML + known sections, so both the shallow checks pass —
     only ``resolve_mounts`` (called by the contract's deep check) catches it.
     Proves the resolve_mounts layer (no network — safe offline)."""
@@ -402,7 +402,7 @@ def test_check_skill_roots_clean_on_real_repo():
 
 def test_no_legacy_agent_py_on_real_repo():
     """No .py agents ship + every agent .md carries frontmatter (name +
-    description) + a non-empty body — the FLIPPED tripwire (Phase 15). The
+    description) + a non-empty body — the FLIPPED tripwire. The
     old ``.pi/agents/<slug>.py`` SUBAGENT-dict form is permanently forbidden."""
     vs = [v for v in check_harness()
           if v.rule == "no-legacy-agent-py"]
@@ -434,7 +434,7 @@ def test_no_legacy_sandbox_artifacts_rejected(fake_tree):
 
 def test_no_legacy_sandbox_artifacts_on_real_repo():
     """No orgs/*/{bootstrap.sh,docker-compose.yml,docker-compose.override.yml}
-    ships — the shadow lifecycle is gone (Phase 13)."""
+    ships — the shadow lifecycle is gone."""
     vs = [v for v in check_harness()
           if v.rule == "no-legacy-sandbox-artifacts"]
     assert vs == [], vs
@@ -443,7 +443,7 @@ def test_no_legacy_sandbox_artifacts_on_real_repo():
 def test_no_legacy_memory_saver_on_real_repo():
     """acp.py + main.py neither import nor instantiate MemorySaver — the
     server-side runtimes share the persistent AsyncSqliteSaver from
-    threads.open_thread_store (Phase 23)."""
+    threads.open_thread_store."""
     vs = [v for v in check_harness()
           if v.rule == "no-legacy-memory-saver"]
     assert vs == [], vs
@@ -484,7 +484,7 @@ def test_no_legacy_memory_saver_tripwire_clean(tmp_path):
 def test_no_harness_profile_registration_on_real_repo():
     """pux stays OFF the model-keyed _HARNESS_PROFILES registry — no file under
     pux_harness/ calls register_harness_profile / register_provider_profile.
-    Parity (Phase 3) depends on pux NEVER registering, else deepagents' own
+    Parity depends on pux NEVER registering, else deepagents' own
     _apply_excluded_middleware could strip pux middleware by class match."""
     vs = [v for v in check_harness()
           if v.rule == "no-harness-profile-registration"]
@@ -634,7 +634,7 @@ def test_jobs_validator_valid_spec_passes(fake_tree, tmp_path):
     assert not job_vs, f"unexpected job violations: {job_vs}"
 
 
-# --- Phase 16: browser agent + per-org profile ---------------------------
+# --- Browser agent + per-org profile ---------------------------------------
 
 def test_browser_agent_resolves_from_shared_on_real_repo():
     """The shipped browser agent (orgs/_shared/agents/browser.md) is rostered by
@@ -650,7 +650,7 @@ def test_browser_agent_resolves_from_shared_on_real_repo():
 
 
 def test_new_browser_slugs_are_registered_specialists():
-    """Every Phase-16 browser slug is in SPECIALIST_TOOL_NAMES (rule 4b valid)
+    """Every browser slug is in SPECIALIST_TOOL_NAMES (rule 4b valid)
     — the agent whitelist would otherwise fail to resolve."""
     new_slugs = [
         "browser_search", "browser_scroll", "browser_go_back", "browser_wait",
@@ -704,7 +704,7 @@ def test_profile_yaml_non_mapping_reports_violation(fake_tree):
                for v in vs), vs
 
 
-# --- Phase 18: dev-bot roster redesign + no-general tripwire --------------
+# --- dev-bot roster redesign + no-general tripwire -------------------------
 
 def test_dev_bot_roster_on_real_repo():
     """dev-bot's shipped roster is exactly the three specialists — explorer
@@ -749,10 +749,10 @@ def test_dev_bot_tripwire_does_not_fire_for_other_orgs(fake_tree):
     assert not any(v.rule == "dev-bot-no-general-subagent" for v in vs), vs
 
 
-# --- Phase 1: dev-bot-disables-general-purpose (sibling tripwire) -----------
+# --- dev-bot-disables-general-purpose (sibling tripwire) -------------------
 
 def test_dev_bot_disables_general_purpose_on_real_repo():
-    """Phase 1 sibling tripwire (defense in depth, NEW code path): dev-bot's
+    """Sibling tripwire (defense in depth, NEW code path): dev-bot's
     profile.yaml MUST declare ``general_purpose_subagent: {enabled: false}``.
     The roster rule above reads org.yaml and so NEVER sees the general-purpose
     slot deepagents auto-adds to every graph (graph.py:716-717); this rule reads
@@ -821,7 +821,7 @@ def test_dev_bot_specialists_resolve_on_worker_role(monkeypatch):
     for slug in ("code-worker", "web-agent"):
         assert by_name[slug]["model"] is not None, f"{slug} model unresolved"
     # code-worker carries only python (+ native fs always auto-injected at
-    # graph build, not in the whitelist) PLUS the Phase-19 ctx retrieval pair
+    # graph build, not in the whitelist) PLUS the ctx retrieval pair
     # (ctx_recall/ctx_search reach every subagent); web-agent carries the
     # browser surface (+ the same ctx pair).
     cw_tools = {t.name for t in by_name["code-worker"]["tools"]}
@@ -831,7 +831,7 @@ def test_dev_bot_specialists_resolve_on_worker_role(monkeypatch):
     assert "pux_sandbox_describe_image" in web_tools
 
 
-# --- Phase 2: subagent `extends:` + the legacy `subagents:`-block fold -----
+# --- subagent `extends:` + the legacy `subagents:`-block fold ----------------
 
 def test_no_legacy_subagents_block_on_real_repo():
     """No shipped org's profile.yaml carries a top-level ``subagents:`` key —
@@ -897,7 +897,7 @@ def test_agent_extends_acyclic_fires(fake_tree):
 
 def test_agent_extends_clean_on_real_repo():
     """No shipped agent has a broken ``extends:`` chain (unresolvable or cyclic)
-    — the two Phase-2 rules are green across every org."""
+    — the two rules are green across every org."""
     for org in discover_orgs():
         vs = check_org(org)
         bad = [v for v in vs

@@ -1,4 +1,4 @@
-# Optional per-org harness profile (Phase 16 seam). Applied to the deepagents
+# Optional per-org harness profile. Applied to the deepagents
 # stack the harness compiles for this org — org-wide: the CTO system prompt AND
 # every specialist subagent. See pux-harness/pux_harness/agent/profile.py for the
 # schema + AGENTS.md (root) for the field reference.
@@ -22,7 +22,7 @@ system_prompt_suffix: |
   Never edit code you haven't read. No speculative refactors. No "also fix" —
   only the change that was asked for.
 
-# Phase 1 — own the general-purpose subagent. deepagents auto-adds a HEAVY
+# Own the general-purpose subagent. deepagents auto-adds a HEAVY
 # default ``general-purpose`` worker to EVERY graph unless the org opts out.
 # Dev-Bot's specialists (dev-bot-explorer + the coding rubric gate below) ARE
 # the surface — a generic catch-all worker would dilute delegation and ship the
@@ -35,7 +35,7 @@ system_prompt_suffix: |
 general_purpose_subagent:
   enabled: false
 
-# Phase 17.B — the RubricMiddleware verify-gate. After the CTO finishes, a
+# The RubricMiddleware verify-gate. After the CTO finishes, a
 # separate grader runs the `default` rubric below against the change using
 # sandbox tools (run tests, read the diff, grep for regressions) and returns a
 # verdict: satisfied / needs_revision / max_iterations_reached / failed /
@@ -43,7 +43,7 @@ general_purpose_subagent:
 # This IS the tester + reviewer — one non-skippable gate, not a subagent the
 # CTO might skip.
 #
-# The grader's model is resolved by role (Phase 17.B.0): `get_model(role="grader",
+# The grader's model is resolved by role: `get_model(role="grader",
 # org="dev-bot")`. It defaults to mimo-v2.5 (cheap/fast — right for a gate that
 # runs up to ×max_iterations per deliverable). To upgrade this org's grader to
 # the heavy reasoning model, set a top-level `models:` map:

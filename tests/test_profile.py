@@ -1,4 +1,4 @@
-"""Per-org ``HarnessProfile`` wiring (Phase 16.3b).
+"""Per-org ``HarnessProfile`` wiring.
 
 Proves the profile seam through the REAL ``build_graph`` entry point — not just
 the helpers — per the prepare-wiring-e2e-gap rule (a wiring seam proven only by
@@ -129,7 +129,7 @@ def captured_build(monkeypatch):
     monkeypatch.setattr(graph, "shared_backend", lambda: "BACKEND")
     monkeypatch.setattr(graph, "build_native_specialists",
                         lambda *a, **k: list(_SPECIALISTS))
-    # Phase 21: the middleware assembly moved into ``stack.build_stack`` (the
+    # The middleware assembly moved into ``stack.build_stack`` (the
     # factory), so the build_context_layer + RoutingMiddleware +
     # SessionGuideMiddleware stubs target the ``stack`` module's namespace
     # (where ``build_stack`` looks them up), NOT ``graph``'s. ``graph.py`` is
@@ -248,7 +248,7 @@ def test_no_profile_is_byte_identical(fake_tree, captured_build):
 
 
 def test_build_graph_requests_base_and_multimodal_roles(fake_tree, monkeypatch):
-    """Phase 17.B.0 wiring proof (prepare-wiring-e2e-gap): build_graph drives
+    """Wiring proof (prepare-wiring-e2e-gap): build_graph drives
     the model-role spec through the REAL entry point — it asks get_model for the
     ``base`` role (the CTO driver) AND the ``multimodal`` role (describe_image,
     decoupled from base) with the org threaded through. Not assumed from a
@@ -264,7 +264,7 @@ def test_build_graph_requests_base_and_multimodal_roles(fake_tree, monkeypatch):
     monkeypatch.setattr(graph, "shared_backend", lambda: "BACKEND")
     monkeypatch.setattr(graph, "build_native_specialists",
                         lambda *a, **k: list(_SPECIALISTS))
-    # Phase 21: middleware assembly lives in ``stack.build_stack``; stub the
+    # Middleware assembly lives in ``stack.build_stack``; stub the
     # stack-level names so the factory runs to completion. This test only
     # asserts which roles ``graph.get_model`` was asked for at the graph layer
     # — not the middleware shape (that's captured_build's job elsewhere).
@@ -285,10 +285,10 @@ def test_build_graph_requests_base_and_multimodal_roles(fake_tree, monkeypatch):
     assert roles == {"base", "multimodal"}
 
 
-# --- Phase 17.B.3: RubricMiddleware wiring ---------------------------------
+# --- RubricMiddleware wiring ------------------------------------------------
 
 def test_rubric_gate_appends_middleware(fake_tree, captured_build, monkeypatch):
-    """Phase 17.B.3 wiring proof (prepare-wiring-e2e-gap): an org that opts into
+    """An org that opts into
     the rubric gate gets ``RubricMiddleware`` appended after the offload
     middleware, constructed with the GRADER role model, the 3 grader tools, and
     the gate's max_iterations. Drives the REAL build_graph; RubricMiddleware is
@@ -359,7 +359,7 @@ def test_rubric_gate_disabled_mounts_no_middleware(fake_tree, captured_build, mo
     assert captured_build["middleware"] == _BASELINE_MIDDLEWARE
 
 
-# --- Phase 17.B.1: RubricGate + default_rubric (helper level) --------------
+# --- RubricGate + default_rubric (helper level) -----------------------------
 
 def test_load_rubric_gate_parses_block(fake_tree):
     """load_rubric_gate reads the rubric: block into a RubricGate with the
@@ -439,7 +439,7 @@ def test_rubric_block_peeled_from_profile_config(fake_tree):
 
 def test_load_rubric_gate_rejects_legacy_grader_model(fake_tree):
     """no-legacy-left-behind: the OLD ``rubric.grader_model`` form (moved to the
-    top-level ``models:`` map in Phase 17.B.0) is a PERMANENT contract failure,
+    top-level ``models:`` map) is a PERMANENT contract failure,
     not silently ignored. The error points at the new home."""
     (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
         "rubric:\n"
@@ -500,7 +500,7 @@ def test_load_profile_rejects_unknown_key(fake_tree):
 
 
 def test_load_profile_rejects_legacy_subagents_block(fake_tree):
-    """no-legacy-left-behind (Phase 2 fold): the top-level ``subagents:`` block —
+    """no-legacy-left-behind: the top-level ``subagents:`` block —
     the old second partial-override surface — is no longer peeled before
     ``HarnessProfileConfig.from_dict``, so it fails loud as an unknown key (the
     build-time second layer beneath the contract's ``no-legacy-subagents-block``
@@ -537,7 +537,7 @@ def test_validate_profile_round_trips(fake_tree):
 def test_load_subagents_default_profile_none_preserves_behavior(fake_tree):
     """load_subagents(org, tools) with no profile arg preserves the specialist
     whitelist resolution (the regression contract) — the browserish subagent
-    gets exactly its two declared ``browser_*`` tools. Phase 19 additionally
+    gets exactly its two declared ``browser_*`` tools. Additionally
     threads the unified context layer into every subagent, so the retrieval
     tools ``ctx_recall`` + ``ctx_search`` are appended to the whitelist too
     (graph.py retracts the old "main-agent-only" claim — verified against
@@ -549,7 +549,7 @@ def test_load_subagents_default_profile_none_preserves_behavior(fake_tree):
     # The declared specialist whitelist resolved faithfully.
     assert {"pux_sandbox_browser_save_session",
             "pux_sandbox_browser_navigate"} <= names
-    # Phase 19: the context retrieval surface reaches every subagent.
+    # The context retrieval surface reaches every subagent.
     assert {"ctx_recall", "ctx_search"} <= names
     # No surprise specialists leak in (python is NOT in this subagent's whitelist).
     assert "pux_sandbox_python" not in names

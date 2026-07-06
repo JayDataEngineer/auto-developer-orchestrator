@@ -60,7 +60,7 @@ API — POST unless noted:
     /storage            {"action":"get|set|clear",...}   → manage localStorage
     /upload             {"selector":"...","file_path":"..."} → upload file to <input type="file">
     /a11y               {}                               → accessibility tree (role + name per node)
-    /drag               {"strategy":"auto|html5|physics", from_*/to_*|dx/dy} → drag-and-drop (Phase 19)
+    /drag               {"strategy":"auto|html5|physics", from_*/to_*|dx/dy} → drag-and-drop
     /hover              {"index|selector"|"x,y"}         → hover (reveal menus/tooltips)
     /press              {"keys":"Enter|Control+a|ArrowDown", "index|selector"?} → key / hotkey press
     /click_at           {"x,y"|"index|selector", button?, double?, right?} → coordinate / variant click
@@ -304,7 +304,7 @@ SELECT_DROPDOWN_JS = r"""
 """
 
 
-# ── Drag / mouse / keyboard interaction (Phase 19 — SOTA browser agent) ──────
+# ── Drag / mouse / keyboard interaction ──────────────────────────────────────
 # These IIFEs mirror OCCLUSION_CHECK_JS / CDP_TYPE_JS: raw CDP Runtime.evaluate
 # runs them unwrapped, so each is a single arrow-fn expression returning a JSON
 # string. Selenium's native drag_and_drop() does NOT emit the HTML5
@@ -1649,7 +1649,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._err(f"restore_session failed: {e}")
 
-        # ── Drag-and-drop (Phase 19) ───────────────────────────────────────
+        # ── Drag-and-drop ──────────────────────────────────────────────────
         elif path == "/drag":
             if sb is None: return self._err("browser not available")
             strategy = body.get("strategy", "auto")

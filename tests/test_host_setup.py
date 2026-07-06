@@ -1,4 +1,4 @@
-"""Host-side prep-hook runner (Phase 13). Exercises the real ``run_host_setup``
+"""Host-side prep-hook runner. Exercises the real ``run_host_setup``
 code path with the subprocess layer (``host_setup._run``) stubbed — no uv, no
 venv creation, no network. The cache logic is proven by pre-staging the venv
 marker so the install path is observable."""

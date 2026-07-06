@@ -1,4 +1,4 @@
-"""Rubric injection wiring (Phase 17.B.4) — the prepare-wiring-e2e-gap proof.
+"""Rubric injection wiring — the prepare-wiring-e2e-gap proof.
 
 Drives the REAL ``server._execute`` + ``main._run`` entry points (NOT a helper)
 and asserts the rubric lands on the deepagents invoke state. This is the seam
@@ -90,7 +90,7 @@ def test_execute_no_rubric_for_ungated_org(monkeypatch):
 def _stub_run_deps(monkeypatch, tmp_path, graph: _CapturingGraph) -> None:
     """Stub _run's heavy deps: skip the graph build, the prep jobs, and Docker.
 
-    Phase 23: ``_run`` now opens the shared thread store, so point PUX_API_DB at
+    ``_run`` now opens the shared thread store, so point PUX_API_DB at
     a tmp file (hermetic — never the operator's .pux/) and accept the new
     ``saver=`` kwarg on the _build_agent stub."""
     import pux_harness.threads as threads_mod  # noqa: PLC0415

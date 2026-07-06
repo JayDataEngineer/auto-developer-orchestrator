@@ -1,6 +1,6 @@
-"""Phase 2 — per-agent override + ``extends:`` at the RUNTIME layer.
+"""Per-agent override + ``extends:`` at the RUNTIME layer.
 
-Scope is deliberately narrow and NON-duplicative. The other two Phase-2 test
+Scope is deliberately narrow and NON-duplicative. The other two test
 files own their own layers:
 
 * ``pux-harness/tests/test_kit_loaders.py`` — ``_merge_extends`` (every merge
@@ -92,7 +92,7 @@ def fake_tree(tmp_path: Path, monkeypatch):
     return tmp_path
 
 
-# --- runtime: per-agent frontmatter overrides (Phase 2 fold) -------------
+# --- runtime: per-agent frontmatter overrides -----------------------------
 
 
 def test_per_agent_suffix_after_org_wide(fake_tree):

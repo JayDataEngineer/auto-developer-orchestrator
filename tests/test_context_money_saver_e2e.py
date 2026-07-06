@@ -26,7 +26,7 @@ only the model is scripted, so no tokens, no Docker):
    returns the handle — the path for when the agent remembers a detail but
    didn't keep a handle.
 
-This retires the [[prepare-wiring-e2e-gap]] for the Phase-19 unified layer.
+This retires the [[prepare-wiring-e2e-gap]] for the unified context layer.
 """
 from __future__ import annotations
 

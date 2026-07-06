@@ -1,4 +1,4 @@
-"""Phase 6 — skills peeking is unified on the native deepagents path.
+"""Skills peeking is unified on the native deepagents path.
 
 Two things changed:
 
@@ -8,7 +8,7 @@ Two things changed:
    for the body). ``build_stack`` now carries ``supervisor_skills`` and
    ``graph.build_graph`` threads it as ``skills=plan.supervisor_skills or
    None`` (None for a no-skills org → no SkillsMiddleware, byte-identical
-   to pre-Phase-6).
+    to the previous approach).
 2. ``pux_sandbox_load_skill`` is GONE — bodies are no longer a second
    parallel surface. The ``skills-peek-via-read-file`` contract rule makes
    re-introduction a HARD failure.
@@ -106,7 +106,7 @@ def test_build_stack_supervisor_skills_grows_with_own_org_skills(fake_tree, stub
 
 def test_build_stack_no_skills_org_is_empty(tmp_path: Path, monkeypatch, stub_factory):
     """A no-skills org → ``supervisor_skills == []``; the binding turns that
-    into ``skills=None`` (no SkillsMiddleware) — byte-identical to pre-Phase-6."""
+    into ``skills=None`` (no SkillsMiddleware) — byte-identical to the previous approach."""
     (tmp_path / "orgs").mkdir()
     (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
     monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
@@ -160,7 +160,7 @@ def test_build_graph_threads_skills_none_when_empty(monkeypatch):
 
 def test_load_skill_absent_from_registry_and_specialist_names():
     """``load_skill`` is not a declared ToolSpec, and ``pux_sandbox_load_skill``
-    is absent from the derived specialist surface (Phase 6 killed it). Bodies
+    is absent from the derived specialist surface. Bodies
     peek via native ``read_file`` now."""
     slugs = {s.slug for s in REGISTRY}
     assert "load_skill" not in slugs

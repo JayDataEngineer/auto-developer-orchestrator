@@ -1,4 +1,4 @@
-"""Phase 7 — the ``pux-namespace-resolvable`` contract rule.
+"""The ``pux-namespace-resolvable`` contract rule.
 
 The kit-level mechanism (``pux:`` resolution, ``$PUX_ORG_PATHS``, library-base
 inheritance) is proven in ``pux-harness/tests/test_org_library.py``. THIS file
@@ -39,7 +39,7 @@ def _add_org(root: Path, name: str, *, extends: str | None = None,
 
 
 def _add_agent_with_extends(root: Path, slug: str, org: str, extends: str) -> Path:
-    """An agent ``.md`` whose frontmatter carries ``extends:`` (Phase 2/7)."""
+    """An agent ``.md`` whose frontmatter carries ``extends:``."""
     adir = root / "orgs" / org / "agents"
     adir.mkdir(parents=True, exist_ok=True)
     fm = ["---", f'name: "{slug}"', f'description: "{slug}"', f"extends: {extends}", "---"]

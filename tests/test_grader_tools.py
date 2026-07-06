@@ -1,4 +1,4 @@
-"""Grader tool factories (Phase 17.B.2) drive ``exec_client.exec`` with the
+"""Grader tool factories drive ``exec_client.exec`` with the
 right command and surface exit-code + output so the grader can cite evidence.
 
 The grader is a separate sub-agent inside ``RubricMiddleware`` — it does NOT

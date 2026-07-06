@@ -155,7 +155,7 @@ def test_select_dropdown_js_is_iife():
     assert js.startswith("((")
 
 
-# --- Phase 19 interaction JS constants are IIFEs ------------------------------
+# --- Interaction JS constants are IIFEs ------------------------------------
 # Same CDP Runtime.evaluate constraint as the constants above: each must be a
 # single arrow-fn expression so it can be embedded as `return CONST(args)` and
 # re-evaluated without leaking declarations across calls.

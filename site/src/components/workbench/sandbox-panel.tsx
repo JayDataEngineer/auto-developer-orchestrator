@@ -1,5 +1,5 @@
 // Sandbox panel: shows the global pux sandbox state, exposes start/stop +
-// screenshot. Pairs with the VNC tab (Phase 5) for live desktop view.
+// screenshot. Pairs with the VNC tab for live desktop view.
 
 import { useCallback, useEffect, useState, type FC } from "react";
 import { PlayIcon, CircleStopIcon, CameraIcon, Loader2Icon, ExternalLinkIcon } from "lucide-react";

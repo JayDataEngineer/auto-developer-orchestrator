@@ -6,7 +6,7 @@ layer (subprocess spawn, JSON-RPC framing, the ``AgentServerACP(agent=factory)``
 wiring) end-to-end. It spends **no model tokens and boots no sandbox**:
 ``new_session`` only mints a ``session_id``; the factory (which builds the
 graph → model init → lazy sandbox boot) is invoked lazily from ``prompt``, not
-reached here. The full prompt path is proven separately in the Phase 9 verify
+reached here. The full prompt path is proven separately in the verify
 log with a real ``pux acp`` run.
 
 Sync test driving an async handshake via ``asyncio.run`` — the harness test
@@ -126,7 +126,7 @@ def test_acp_handshake_invest() -> None:
 
 
 def test_acp_main_opens_persistent_store_over_stdio(tmp_path) -> None:
-    """Phase 23: ``_acp_main`` opens the shared thread store through the REAL
+    """``_acp_main`` opens the shared thread store through the REAL
     stdio transport, so the sqlite file gains the langgraph ``checkpoints``
     table — the proof ACP no longer dies with an ephemeral ``MemorySaver``.
 
@@ -159,7 +159,7 @@ def test_acp_main_opens_persistent_store_over_stdio(tmp_path) -> None:
 
 
 def test_acp_session_registered_in_pux_threads_over_stdio(tmp_path) -> None:
-    """Phase 23 follow-up: each ACP session is indexed in ``pux_threads`` so it
+    """Each ACP session is indexed in ``pux_threads`` so it
     is visible to ``pux resume`` / ``pux show`` (the deferred session-hook gap,
     now closed by ``_RegisteringAgentServerACP.new_session``).
 

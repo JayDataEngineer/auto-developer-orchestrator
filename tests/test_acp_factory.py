@@ -36,7 +36,7 @@ def test_make_factory_ignores_context():
 
 
 def test_make_factory_uses_persistent_saver():
-    """The factory threads the shared persistent saver into build_graph (Phase 23).
+    """The factory threads the shared persistent saver into build_graph.
 
     ACP no longer mints an ephemeral MemorySaver — it reuses the
     ``AsyncSqliteSaver`` from ``open_thread_store`` so session checkpoints

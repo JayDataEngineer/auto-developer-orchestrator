@@ -1,4 +1,4 @@
-"""Unified thread store (Phase 23.0) — drives the REAL ``open_thread_store``.
+"""Unified thread store — drives the REAL ``open_thread_store``.
 
 Proves: (1) the saver + index tables exist after entry; (2) the live connection
 carries the ``busy_timeout=5000`` pragma; (3) ``register_thread`` round-trips

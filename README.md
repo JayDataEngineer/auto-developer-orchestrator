@@ -18,8 +18,8 @@ consumed by uv as a path dependency (`[tool.uv.sources] pux-harness = { path = "
   script. Native fs/shell tools (`ls` / `read_file` / `write_file` /
   `edit_file` / `glob` / `grep` / `execute`) run through a `PuxSandboxBackend`;
   the 40 specialist tools (`browser_*`, `desktop_*`, `describe_image`,
-  `python`, skills) are native Python too (Phase 8a–8f). `container.py` owns
-  the Docker sandbox lifecycle + declarative policy enforcement (Phase 8g).
+  `python`, skills) are native Python too. `container.py` owns
+  the Docker sandbox lifecycle + declarative policy enforcement.
   The harness boots its own container directly over the Docker SDK — there is
   no Go server.
 - **`pux` console script** (`pux_harness.cli:main`) — the native CLI
@@ -79,19 +79,19 @@ harness drives the Docker sandbox directly over the SDK.
 
 fs/shell is **deepagents-native** (via `PuxSandboxBackend.execute()` → docker
 exec inside the container); all 40 specialists are **`pux_sandbox_*`** native
-Python tools too (Phase 8b–8f). Phase 8g moved the container lifecycle into
-`container.py`; Phase 8i deleted the Go bridge — every model-visible path is
+Python tools too. The container lifecycle moved into
+`container.py`; the Go bridge was deleted — every model-visible path is
 Python:
 
 | Tool | Backed by |
 |------|----------|
 | `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute` | native — `PuxSandboxBackend.execute()` → docker exec (8a) |
 | `python` | native — docker exec `python3 -c` (8b) |
-| `list_skills` | native — host FS `orgs/_shared/skills/` + each `orgs/<name>/skills/` (8c). Discovery aid; bodies peeked via native `read_file` (Phase 6). |
+| `list_skills` | native — host FS `orgs/_shared/skills/` + each `orgs/<name>/skills/` (8c). Discovery aid; bodies peeked via native `read_file`. |
 | `describe_image` | native — **driving-model PRIMARY** (mimo-v2.5 multimodal) → in-sandbox ONNX fallback (8d) |
 | `multimodal` | native — image **or** audio **or** video + a PROMPT → multimodal model (18.B). Returns the model's reasoning or an HONEST error; **no silent fallback** (the value is the prompt-conditioned judgment — e.g. "is this audio intelligible?" — that a generic describer can't give). |
 | `multimodal_mega` | native — resilient sibling of `multimodal`: model first, then a per-type WATERFALL on failure (image→ONNX, audio→honest-unavailable, video→ffmpeg keyframes→per-frame image waterfall) (18.B). Use when you want SOMETHING back even if the model is down. |
-| `browser_*` (autopilot surface) | native — `curl` to in-sandbox `sb_server.py` via docker exec (8e). Navigate/click/type/screenshot/evaluate PLUS the Phase-16 action set: `search`/`scroll`/`go_back`/`wait`/`find_text`/`extract`/`extract_images`/`save_screenshot`/`download`/`upload`/`tabs`/`new_tab`/`switch_tab`/`close_tab`/`dropdown_options`/`select_dropdown`/`save_session`/`restore_session`. Each tool's docstring carries the autopilot knowledge; the shared `browser` agent is a lean loop over them. |
+| `browser_*` (autopilot surface) | native — `curl` to in-sandbox `sb_server.py` via docker exec (8e). Navigate/click/type/screenshot/evaluate PLUS the action set: `search`/`scroll`/`go_back`/`wait`/`find_text`/`extract`/`extract_images`/`save_screenshot`/`download`/`upload`/`tabs`/`new_tab`/`switch_tab`/`close_tab`/`dropdown_options`/`select_dropdown`/`save_session`/`restore_session`. Each tool's docstring carries the autopilot knowledge; the shared `browser` agent is a lean loop over them. |
 | `desktop_screenshot` / `_click` / `_type` / `_key` | native — `xdotool` + `desktop_observe.py` via docker exec (8f) |
 
 All paths the tools report are **inside the sandbox container**; the project is
@@ -167,7 +167,7 @@ uv run pytest -q
 
 The server tests use FastAPI's `TestClient` with a stub graph (no tokens, no
 Docker) to lock the REST envelope + thread/run CRUD; the real LLM-driven run
-is proven end-to-end in the Phase 8i verify log (`pux direct --org general --task "..."`).
+is proven end-to-end in the verify log (`pux direct --org general --task "..."`).
 
 ## Architecture
 
@@ -195,7 +195,7 @@ is proven end-to-end in the Phase 8i verify log (`pux direct --org general --tas
 ```
 
 There is no Go server on this branch. The Go MCP tree + JSON-RPC bridge were
-deleted in Phase 8i — every model-visible path (fs, shell, the 40 specialists,
+deleted — every model-visible path (fs, shell, the 40 specialists,
 and the container lifecycle) lives in the Python harness and drives the sandbox
 directly over the Docker SDK.
 
@@ -227,7 +227,7 @@ Open http://127.0.0.1:5176. See [`site/README.md`](site/README.md) for details.
   context-offload, the entire Go sandbox re-hosted in Python — fs/shell + all
   40 specialists via direct `docker exec`, container lifecycle + policy
   enforcement harness-owned — and the Go MCP server + JSON-RPC bridge deleted).
-  **Phase 9** (TUI as Agent Protocol consumer + SSE) remains.
+  TUI as Agent Protocol consumer + SSE remains.
 - **`master`** — pre-pivot MVP. Slim Go MCP server with in-process agent loop.
 - **`v0.2.0-pre-pi-mono`** — tag of master HEAD before the pivot. Safety net.
 

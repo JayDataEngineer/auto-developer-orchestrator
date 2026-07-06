@@ -1,11 +1,11 @@
-"""Phase 8/19 — event capture pipeline (unified ``ContextMiddleware``).
+"""Event capture pipeline (unified ``ContextMiddleware``).
 
 Proves the ``EventStore`` (SQLite), the unified ``ContextMiddleware`` (sync +
 async — does capture AND offload in one pass), and the ``ctx_search``
 retrieval tool work correctly against a tmp-path database (no real
 ``.pux/events.sqlite``, no Docker, no model tokens).
 
-Phase 19 folded the old separate ``EventCaptureMiddleware`` into
+The unified layer folded the old separate ``EventCaptureMiddleware`` into
 ``ContextMiddleware`` and replaced the ``event_recent``/``event_query`` tool
 pair with the unified ``ctx_search`` (the resume snapshot now owns the
 chronological view; ``ctx_search`` covers query recall over blobs AND events).

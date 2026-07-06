@@ -6,7 +6,7 @@ mocked profile: each build resolves the REAL ``orgs/specialists/*`` tree, the
 REAL full specialist surface (39 tools), and each org's REAL ``profile.yaml`` /
 ``org.yaml`` / ``AGENTS.md``. Only the model + exec_client + the middleware
 CLASSES are stubbed — those are harness-internal and need a Docker container /
-LLM to construct; the ORG CONFIGURATION (the thing the Phase 1-7 system shapes)
+LLM to construct; the ORG CONFIGURATION (the thing the system shapes)
 is real.
 
 If a shipped org's config drifts so the factory can't assemble a well-formed
@@ -81,7 +81,7 @@ def test_every_real_org_builds_a_well_formed_stack(org, stubbed_factory):
     """Each shipped org resolves to a non-empty prompt, a non-empty tool surface
     (the native fs tools are always present), a non-empty middleware stack, and
     a roster that EXACTLY matches its declared ``org_agent_slugs`` (the GP
-    subagent, when present, is a Phase-1 emission, not a declared specialist)."""
+    subagent, when present, is emitted by the harness, not a declared specialist)."""
     plan = _build_real_org(org, stubbed_factory)
     assert plan.supervisor_prompt, f"{org}: empty supervisor prompt"
     # Under the stub, mcp_tools + ctx_tools are empty, so the supervisor surface
@@ -93,7 +93,7 @@ def test_every_real_org_builds_a_well_formed_stack(org, stubbed_factory):
     assert sup_names <= SPECIALIST_TOOL_NAMES, (
         f"{org}: phantom supervisor tools: {sup_names - SPECIALIST_TOOL_NAMES}")
     assert plan.supervisor_middleware, f"{org}: empty supervisor middleware"
-    # Roster matches the real declared specialists (GP excluded — it's Phase 1).
+    # Roster matches the real declared specialists (GP excluded).
     expected = org_agent_slugs(org)
     actual = [s["name"] for s in plan.subagents if s["name"] != "general-purpose"]
     assert actual == expected, f"{org}: roster drift {actual} != {expected}"
@@ -108,7 +108,7 @@ def test_every_real_org_roster_agents_resolve_with_real_tools(org, stubbed_facto
     plan = _build_real_org(org, stubbed_factory)
     for sub in plan.subagents:
         if sub["name"] == "general-purpose":
-            continue  # Phase-1 neutered/customized slot, not a roster specialist
+            continue  # neutered/customized slot, not a roster specialist
         for t in sub.get("tools", []):
             # ``tools`` is a list of StructuredTool objs; each name must be a
             # known specialist (no phantom tool on any roster subagent).
@@ -116,14 +116,14 @@ def test_every_real_org_roster_agents_resolve_with_real_tools(org, stubbed_facto
                 f"{org}/{sub['name']}: phantom tool {t.name!r}")
 
 
-# --- Phase 1 (GP ownership) against the real dev-bot ------------------------
+# --- GP ownership against the real dev-bot ----------------------------------
 
 
 def test_dev_bot_neutered_general_purpose_real(stubbed_factory):
     """dev-bot's REAL profile.yaml declares ``general_purpose_subagent.enabled:
     false``. The factory emits a NEUTERED ``general-purpose`` slot (present so
     deepagents skips the heavy auto-add, but DEAD — empty tools). This is the
-    Phase-1 fix proven against the real org, not a synthetic tree."""
+    fix proven against the real org, not a synthetic tree."""
     plan = _build_real_org("dev-bot", stubbed_factory)
     gp = next((s for s in plan.subagents if s["name"] == "general-purpose"), None)
     assert gp is not None, "dev-bot: no general-purpose slot (deepagents would auto-add)"
@@ -176,7 +176,7 @@ def test_every_real_org_emits_only_registry_middleware(stubbed_factory):
     (routing/session_guide/audit/rubric; ``context`` flattens to nothing under
     the stub; ``browser_vision`` is env-off). If a future change hand-appends a
     middleware in ``build_stack`` outside ``_resolve_toggles`` (the drift the
-    Phase-3 audit removed), this fires — there is exactly ONE stack path."""
+    audit removed), this fires — there is exactly ONE stack path."""
     allowed = {"ROUTE", "GUIDE", "AUDIT", "RUBRIC"}
     for org in REAL_ORGS:
         plan = _build_real_org(org, stubbed_factory)

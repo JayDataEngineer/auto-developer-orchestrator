@@ -1,4 +1,4 @@
-"""Phase 7/19 — proactive context-offload (unified ``ContextMiddleware``).
+"""Proactive context-offload (unified ``ContextMiddleware``).
 
 Proves the unified ``ContextMiddleware.wrap_tool_call`` (sync + async) stashes
 oversized tool results and replaces them with a preview + ``ctx:<id>`` handle,
@@ -6,10 +6,9 @@ small results pass through untouched, ``ctx_recall``/``ctx_search`` retrieve
 them, and the store rejects path-escape handles. All against a tmp-path store
 (no real ``.pux/events.sqlite``, no Docker, no model tokens).
 
-Phase 19 unified the old separate ``ContextOffloadMiddleware`` + ``CtxStore``
-into ``ContextMiddleware`` (one pass: capture + offload) + ``EventStore`` (one
-sqlite store for events AND blobs). These tests were ported from the
-Phase-7 surface; the behaviors are unchanged — only the module paths moved.
+The unified ``ContextMiddleware`` (one pass: capture + offload) + ``EventStore`` (one
+sqlite store for events AND blobs) replaced the old separate ``ContextOffloadMiddleware`` + ``CtxStore``.
+These tests were ported from the earlier surface; the behaviors are unchanged — only the module paths moved.
 """
 from __future__ import annotations
 
@@ -171,7 +170,7 @@ def test_search_caps_results(tmp_path):
 def test_retrieval_tools_are_exempt_from_offload(tmp_path):
     """ctx_recall/ctx_search exist to inject content INTO context, so their
     output must NOT be re-stashed — otherwise recalling a big result traps the
-    agent in a recall->offload->recall loop. Surfaced by the Phase 7 E2E
+    agent in a recall->offload->recall loop. Surfaced by the E2E
     (ctx_recall(12K) returned 10K which got offloaded again); now exempt."""
     store = EventStore(tmp_path / "events.db")
     m = ContextMiddleware(store, threshold=10, preview=5)  # tiny threshold

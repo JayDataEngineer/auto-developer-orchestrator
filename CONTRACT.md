@@ -2,7 +2,7 @@
 
 > **FROZEN `master`-branch reference.** This document specifies the slim Go MCP
 > server that lives on `master` (the pre-pivot MVP). It does **not** describe
-> the `pi-pivot` branch, where that Go server is deleted (Phase 8i) and the
+> the `pi-pivot` branch, where that Go server is deleted and the
 > agent + sandbox layer is the Python deepagents harness — see `CLAUDE.md` and
 > `pux-harness/README.md` for the current surface. Kept here as the frozen contract
 > for `master`.
@@ -139,8 +139,7 @@ edit them (`chmod 0444`).
 
 Skills are operator-authored markdown files at `<project>/skills/<name>/SKILL.md`.
 Each carries YAML frontmatter (`name`, `description`) and a markdown body.
-Progressive disclosure is the **native deepagents** path (Phase 6
-unification): the supervisor's `SkillsMiddleware` injects each skill's
+Progressive disclosure is the **native deepagents** path: the supervisor's `SkillsMiddleware` injects each skill's
 name + description into the prompt at startup, and the agent peeks a body
 on demand with the **native `read_file`** (canonical path). The host-side
 `list_skills` is a discovery aid that complements the middleware by

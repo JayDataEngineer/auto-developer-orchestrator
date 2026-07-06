@@ -1,6 +1,6 @@
 # Per-org default forcing tasks. Each is UN-answerable from the system prompt
 # alone, so the agent must delegate to its specialist — the seam we're proving.
-# Tasks name the NATIVE `execute` tool (Phase 3); `pux_sandbox_bash` is gone.
+# Tasks name the NATIVE `execute` tool; `pux_sandbox_bash` is gone.
 DEFAULT_TASKS: dict[str, str] = {
     "general": (
         "How many Python modules ship under /sandbox/workspace/pux-harness/pux_harness/, "
@@ -25,7 +25,7 @@ DEFAULT_TASKS: dict[str, str] = {
         "frontmatter) and report each name with its file citation. "
         "Report its findings verbatim."
     ),
-    # --- Phase 5: the remaining 7 orgs. Each forces delegation to a named
+    # --- The remaining 7 orgs. Each forces delegation to a named
     # specialist and drives a NATIVE tool against the org's OWN bundled content
     # (no external keys/images needed). Answers are verifiable against the FS.
     "invest": (

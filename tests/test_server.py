@@ -1,4 +1,4 @@
-"""Tests for the Agent Protocol server (Phase 4).
+"""Tests for the Agent Protocol server.
 
 Two tiers, mirroring ``test_org_contract.py``:
 
@@ -8,7 +8,7 @@ Two tiers, mirroring ``test_org_contract.py``:
 * **HTTP routing** (FastAPI ``TestClient``, stub graph — no tokens, no Docker):
   proves the REST envelope + thread/run CRUD plumbing is correct by
   monkeypatching ``build_graph`` with a deterministic stub. The real LLM-driven
-  run is proven end-to-end in the Phase 4 verify log (``/runs/wait`` general →
+  run is proven end-to-end in the verify log (``/runs/wait`` general →
   9 Go files); these tests lock the contract that run exercised.
 """
 from __future__ import annotations

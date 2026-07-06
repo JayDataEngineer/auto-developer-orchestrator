@@ -2,7 +2,7 @@
 
 The studio-director's cycle contract. Drives N iterations of build → QA → decide.
 
-## Phase 0 — BOOTSTRAP (first run only, idempotent)
+## BOOTSTRAP (first run only, idempotent)
 
 ```bash
 python3 /sandbox/surreal_client.py init-schema
@@ -10,7 +10,7 @@ python3 /sandbox/surreal_client.py init-schema
 
 Creates the `studio` namespace, `game-studio` database, and required tables/indexes. Safe to re-run — `DEFINE` is idempotent. Skip once it returns `{"ok": true}`.
 
-## Phase A — START
+## START
 
 ```bash
 TASK_ID=$(python3 /sandbox/surreal_client.py start-task \
@@ -20,7 +20,7 @@ TASK_ID=$(python3 /sandbox/surreal_client.py start-task \
 
 Store `$TASK_ID` for the COMPLETE step at the end.
 
-## Phase B — PLAN
+## PLAN
 
 Lookback: query the last 5 task_runs in this namespace:
 
@@ -35,7 +35,7 @@ Read what was tried, what worked, what didn't. Decide:
 
 Write the plan to `/sandbox/workspace/plan.md` so sub-agents can read it.
 
-## Phase C — DELEGATE-CYCLE (repeat N times)
+## DELEGATE-CYCLE (repeat N times)
 
 For each cycle (default N=3, user-set via prompt):
 
@@ -67,7 +67,7 @@ elif vibe["recommendation"] == "abort":
 # else: iterate, next cycle
 ```
 
-## Phase D — COMPLETE
+## COMPLETE
 
 ```bash
 python3 /sandbox/surreal_client.py complete-task \

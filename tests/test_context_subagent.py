@@ -1,6 +1,6 @@
-"""Phase 19 — the context layer reaches SUBAGENTS (the prepare-wiring-e2e-gap proof).
+"""The context layer reaches SUBAGENTS (the prepare-wiring-e2e-gap proof).
 
-This is the test that RETIRES the old Phase-7 claim that deepagents'
+This is the test that RETIRES the old claim that deepagents'
 ``SubAgentMiddleware`` silently drops a subagent spec's ``middleware`` key, so
 context-offload "can only run on the main agent". That claim was wrong: verified
 against deepagents 0.6.12, ``middleware/subagents.py:494`` builds
