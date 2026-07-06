@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from pux_harness.agent import contract, orgs
+from pux_harness.kit import _paths
 
 
 # --- shared tree helpers (mirror test_org_extends.py) ----------------------
@@ -50,12 +51,23 @@ def _add_agent_with_extends(root: Path, slug: str, org: str, extends: str) -> Pa
 
 @pytest.fixture
 def fake_tree(tmp_path: Path, monkeypatch):
-    """Scratch orgs/ tree; both ``contract._orgs_dir`` AND ``orgs._orgs_dir``
-    patched (the contract's path helpers read ``contract._orgs_dir``, the
-    orgs-shim delegates read ``orgs._orgs_dir``). ``_shared/agents`` exists."""
+    """Scratch orgs/ tree + a test library base; both ``contract._orgs_dir``
+    AND ``orgs._orgs_dir`` patched (the contract's path helpers read
+    ``contract._orgs_dir``, the orgs-shim delegates read ``orgs._orgs_dir``).
+    ``_shared/agents`` exists."""
     (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
     monkeypatch.setattr(contract, "_orgs_dir", lambda: tmp_path / "orgs")
     monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
+    # Install a test library base so valid ``pux:test-base`` / ``pux:test-helper``
+    # references resolve.
+    base = tmp_path / "bases" / "test-base"
+    (base / "agents").mkdir(parents=True)
+    (base / "AGENTS.md").write_text("# test-base\n")
+    (base / "org.yaml").write_text("agents:\n  - test-helper\n")
+    (base / "agents" / "test-helper.md").write_text(
+        "---\nname: test-helper\ndescription: A test helper.\n---\n"
+    )
+    monkeypatch.setattr(_paths, "library_bases_dir", lambda: tmp_path / "bases")
     return tmp_path
 
 
@@ -74,9 +86,9 @@ def test_pux_namespace_clean_by_default():
 
 
 def test_pux_namespace_resolvable_clean_on_valid_refs(fake_tree: Path):
-    """Valid ``pux:`` references (``extends: pux:copilot-kit`` — the real base;
-    ``pux:copilot-helper`` — the real library agent) resolve cleanly."""
-    _add_org(fake_tree, "app", extends="pux:copilot-kit", agents=["pux:copilot-helper"])
+    """Valid ``pux:`` references (``extends: pux:test-base`` — the library base;
+    ``pux:test-helper`` — the library agent) resolve cleanly."""
+    _add_org(fake_tree, "app", extends="pux:test-base", agents=["pux:test-helper"])
     assert _pux_violations(contract._pux_namespace_resolvable()) == []
 
 
