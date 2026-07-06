@@ -9,7 +9,12 @@ web_research:
   kind: mcp
   transport: http
   url: https://cloud.tailb1e597.ts.net:10000/research/mcp
-  tools: [search, fetch, research]
+  # allowlist verified against the LIVE server's tools/list (2026-07-06). The
+  # server exposes `scrape` (read a single page), NOT `fetch` — a phantom
+  # `fetch` here would make _apply_allowlist fail-loud and load ZERO tools,
+  # silently breaking web_research for any org that opts in (caught only by a
+  # live handshake, never by the offline contract).
+  tools: [search, scrape, research]
 
 media:
   kind: mcp

@@ -249,3 +249,85 @@ def test_contract_clean_for_valid_declaration(mcp_tree: Path):
     zero contract errors — the green baseline."""
     _policy(mcp_tree, "  - web\n")
     assert validate_tool_servers("mcp-demo") == []
+
+
+# ===========================================================================
+# Part 4 — McpSessionManager.open(): the live handshake (dict-vs-list crash)
+# ===========================================================================
+
+def test_open_buckets_per_server_via_flat_get_tools(monkeypatch):
+    """``open()`` must call ``get_tools(server_name=...)`` once per spec. The
+    REAL ``MultiServerMCPClient.get_tools`` returns a FLAT list across all
+    servers, NOT a ``dict[str, list]``. The first live handshake (2026-07-06)
+    crashed ``AttributeError: 'list' object has no attribute 'get'`` because
+    ``open()`` indexed the flat list as a dict. The isolation tests above pass
+    ``_apply_allowlist`` a list directly and never drive ``open()``, so the bug
+    slipped through ([[verify-or-die]]: a wiring seam proven only by isolation
+    tests is unproven). This patches ``get_tools`` to the real flat-list shape
+    and proves ``open()`` attributes tools per-server + namespaces + honors the
+    allowlist — with NO network."""
+    import asyncio
+    from langchain_mcp_adapters.client import MultiServerMCPClient
+
+    from pux_harness.agent.mcp_client import McpSessionManager
+
+    async def fake_get_tools(self, *, server_name=None):
+        # REAL shape: a FLAT list (no server bucketing). Distinct tools per
+        # server proves open() attributes by server_name, not positionally.
+        if server_name == "web":
+            return [_tool("search"), _tool("scrape"), _tool("research")]
+        if server_name == "media":
+            return [_tool("transcribe"), _tool("classify")]
+        return []
+
+    monkeypatch.setattr(MultiServerMCPClient, "get_tools", fake_get_tools)
+    specs = [
+        ToolServerSpec(name="web", transport="http", url="https://x/mcp",
+                       tools=["search", "research"]),  # allowlist narrows
+        ToolServerSpec(name="media", transport="sse", url="http://y:8101",
+                       tools=None),                    # take everything
+    ]
+
+    async def _run():
+        mgr = McpSessionManager("o", specs)
+        await mgr.open()
+        return sorted(t.name for t in mgr.tools)
+
+    # web: allowlist keeps search+research, drops scrape; media: takes both.
+    assert asyncio.run(_run()) == [
+        "mcp__media__classify",
+        "mcp__media__transcribe",
+        "mcp__web__research",
+        "mcp__web__search",
+    ]
+
+
+def test_open_one_bad_server_does_not_brick_the_batch(monkeypatch):
+    """A server whose ``tools/list`` raises contributes ZERO tools + a loud log
+    but does NOT crash ``open()`` — the sibling server still loads. This is the
+    per-server isolation a bare ``get_tools()`` (which gathers all servers and
+    raises on the FIRST failure) could NOT provide."""
+    import asyncio
+    from langchain_mcp_adapters.client import MultiServerMCPClient
+
+    from pux_harness.agent.mcp_client import McpSessionManager
+
+    async def fake_get_tools(self, *, server_name=None):
+        if server_name == "dead":
+            raise ConnectionError("server unreachable")
+        if server_name == "live":
+            return [_tool("search")]
+        return []
+
+    monkeypatch.setattr(MultiServerMCPClient, "get_tools", fake_get_tools)
+    specs = [
+        ToolServerSpec(name="dead", transport="http", url="https://dead/mcp"),
+        ToolServerSpec(name="live", transport="http", url="https://live/mcp"),
+    ]
+
+    async def _run():
+        mgr = McpSessionManager("o", specs)
+        await mgr.open()
+        return [t.name for t in mgr.tools]
+
+    assert asyncio.run(_run()) == ["mcp__live__search"]
