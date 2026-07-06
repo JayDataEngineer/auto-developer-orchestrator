@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-_SB_SERVER_PY = Path(__file__).resolve().parents[1] / "sandbox" / "scripts" / "sb_server.py"
+_SB_SERVER_PY = Path(__file__).resolve().parents[2] / "sandbox" / "scripts" / "sb_server.py"
 
 
 def _load_module():

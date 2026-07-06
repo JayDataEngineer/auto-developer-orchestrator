@@ -18,7 +18,7 @@ the source file.
 import re
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 SB_SERVER = REPO_ROOT / "sandbox" / "scripts" / "sb_server.py"
 
 

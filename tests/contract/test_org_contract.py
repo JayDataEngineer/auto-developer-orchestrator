@@ -374,7 +374,7 @@ def test_skill_well_formed_clean(tmp_path):
 def test_check_skill_roots_flags_loose_md(fake_tree, monkeypatch):
     """A loose .md directly under a skills root warns — it's invisible to
     SkillsMiddleware (the stranded-playbook regression)."""
-    monkeypatch.setattr(contract, "PROJECT_ROOT", contract._orgs_dir().parent)
+    monkeypatch.setattr(contract, "project_root", lambda: contract._orgs_dir().parent)
     root = contract._orgs_dir() / "_shared" / "skills"
     _write_skill(root, "good-one")
     (root / "STRAY_PLAYBOOK.md").write_text("# a loose playbook\n")
@@ -387,7 +387,7 @@ def test_check_skill_roots_flags_loose_md(fake_tree, monkeypatch):
 
 def test_check_skill_roots_flags_malformed_skill(fake_tree, monkeypatch):
     """A malformed skill anywhere under a root surfaces as skill-well-formed."""
-    monkeypatch.setattr(contract, "PROJECT_ROOT", contract._orgs_dir().parent)
+    monkeypatch.setattr(contract, "project_root", lambda: contract._orgs_dir().parent)
     root = contract._orgs_dir() / "_shared" / "skills"
     _write_skill(root, "mismatch", name="not-the-dir-name")  # name mismatch
     vs = contract.check_skill_roots()

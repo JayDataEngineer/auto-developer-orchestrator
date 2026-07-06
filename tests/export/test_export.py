@@ -280,15 +280,16 @@ def test_export_org_never_leaks_data_secrets(tmp_path, monkeypatch):
     )
 
     # Point the export module's orgs-layer bindings at the temp tree so export_org
-    # runs end-to-end against "acme" without touching the real orgs/.
-    monkeypatch.setattr(export_mod, "PROJECT_ROOT", root)
+    # runs end-to-end against "acme" without touching the real orgs/. The project
+    # root is threaded explicitly (export_org's new param) — no PROJECT_ROOT
+    # module attribute to monkeypatch anymore (the snapshot was killed).
     monkeypatch.setattr(export_mod, "discover_orgs", lambda: ["acme"])
     monkeypatch.setattr(export_mod, "_org_path", lambda org: org_dir)
     monkeypatch.setattr(export_mod, "_orgs_dir", lambda: root / "orgs")
     monkeypatch.setattr(export_mod, "org_agent_slugs", lambda org: ["worker"])
 
     output = tmp_path / "acme.tar.gz"
-    export_mod.export_org("acme", output)
+    export_mod.export_org("acme", output, project_root=root)
 
     # The archive must contain no data/ members AND no trace of the sentinel.
     names = _tar_names(output)

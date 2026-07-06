@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 # Import scripts.py from the sandbox directory
-_SCRIPTS_PY = Path(__file__).resolve().parents[1] / "sandbox" / "scripts" / "scripts.py"
+_SCRIPTS_PY = Path(__file__).resolve().parents[2] / "sandbox" / "scripts" / "scripts.py"
 
 
 def _load_scripts(tmp_path: Path):

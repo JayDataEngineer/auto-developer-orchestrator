@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-_DESKTOP_PY = Path(__file__).resolve().parents[1] / "sandbox" / "scripts" / "desktop_observe.py"
+_DESKTOP_PY = Path(__file__).resolve().parents[2] / "sandbox" / "scripts" / "desktop_observe.py"
 
 
 def _load_module():

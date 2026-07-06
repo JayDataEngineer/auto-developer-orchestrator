@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import pytest
 
+from pux_harness.kit._paths import project_root
+
+PROJECT_ROOT = project_root()
+
 from pux_harness.tui import (
-    PROJECT_ROOT,
     _PORTED_SUBAGENTS,
     _adapt_cto_prompt,
     _adapt_subagent_prompt,
