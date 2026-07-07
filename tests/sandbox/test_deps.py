@@ -14,8 +14,11 @@ Proves the in-container install step declared by ``policy.yaml``
 
 We exercise ``_install_deps`` as an UNBOUND method with a stub ``self`` whose
 ``_exec`` records the scripts — no Docker, no real container. The real
-``_exec``->``container.exec_run``->apt/pip path is a separate env-gated LIVE
-proof (deferred).
+``_exec``->``container.exec_run``->apt/pip path is PROVEN live against the
+``pux-sandbox`` image: ``python3 -m pip install --no-cache-dir six`` → importable,
+and ``apt-get update -qq && apt-get install -y --no-install-recommends cowsay`` →
+``/usr/games/cowsay`` lands (rc=0; note cowsay installs to ``/usr/games/``, not in
+PATH, so ``which`` is the wrong probe — use the apt rc + ``dpkg -L``).
 """
 from __future__ import annotations
 
