@@ -32,6 +32,31 @@ from pux_harness import server
 
 
 # ---------------------------------------------------------------------------
+# Offline guard — the AG-UI surface must be AVAILABLE (no live key, no model)
+# ---------------------------------------------------------------------------
+
+
+def test_ag_ui_dependency_is_importable() -> None:
+    """Permanent guard against the 76659a0 regression: that commit dropped the
+    ``copilotkit`` dep but left ``from copilotkit import LangGraphAGUIAgent`` in
+    server.py. While copilotkit lingered in the venv it kept working; once a
+    clean ``uv sync`` pruned it, ``_HAS_AG_UI`` flipped False and the ENTIRE
+    ``/agui/*`` surface was silently disabled (the mount loop is gated on it).
+    The live tests below are OPENCODE_API_KEY-gated, so without this guard the
+    regression is invisible in keyless CI. Asserting the import flag directly
+    fails loud the moment ag-ui-langgraph is unresolvable — no key, no model,
+    no tokens."""
+    import pux_harness.server as srv
+
+    assert srv._HAS_AG_UI, (
+        "AG-UI unavailable: importing ag_ui_langgraph (LangGraphAgent + "
+        "add_langgraph_fastapi_endpoint) failed — _HAS_AG_UI is False, which "
+        "silently disables the whole /agui/* mount. Check the ag-ui-langgraph "
+        "dependency in pux-harness/pyproject.toml."
+    )
+
+
+# ---------------------------------------------------------------------------
 # env: source .env NAMES only (never log values), skip without a live key
 # ---------------------------------------------------------------------------
 
