@@ -459,3 +459,37 @@ def test_acp_image_capability_gates_on_base_multimodal(tmp_path, monkeypatch) ->
         "fast-tier general (mimo-v2.5) advertised image=False — a multimodal "
         "base must offer image attach"
     )
+
+
+def test_acp_cancel_flips_cancellation_flag(tmp_path, monkeypatch) -> None:
+    """Cancellation is UPSTREAM-owned: ``AgentServerACP.cancel`` sets
+    ``self._cancelled``; the ``prompt`` loop checks it (loop-top + mid-stream)
+    and returns ``PromptResponse(stop_reason="cancelled")`` — NOT an error.
+    ``_RegisteringAgentServerACP`` overrides NEITHER, so the surface must remain
+    intact on our subclass.
+
+    This locks that invariant in-process (no model, no conn, no flaky mid-stream
+    race): ``_cancelled`` starts False and ``cancel()`` flips it True. If a
+    future override breaks cancellation, this fails before the live wire path
+    does. The full mid-stream ``stop_reason="cancelled"`` wire proof is deferred
+    — it exercises upstream's unmodified ``prompt`` loop, not our code. Audit
+    item (5) of [[protocol-surface-map]]."""
+    import pux_harness.threads as threads_mod
+    from pux_harness.acp import _RegisteringAgentServerACP
+    from pux_harness.threads import open_thread_store
+
+    monkeypatch.setattr(threads_mod, "PUX_API_DB", str(tmp_path / "cancel.sqlite"))
+
+    async def go() -> bool:
+        async with open_thread_store() as store:
+            srv = _RegisteringAgentServerACP(
+                agent=lambda _ctx: None,
+                store=store,
+                org="general",
+                models=[{"value": "x", "name": "x", "description": "x"}],
+            )
+            assert srv._cancelled is False, "flag should start False"
+            await srv.cancel(session_id="any")
+            return srv._cancelled
+
+    assert asyncio.run(go()) is True, "cancel() did not flip _cancelled"
