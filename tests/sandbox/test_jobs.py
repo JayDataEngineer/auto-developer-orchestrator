@@ -141,6 +141,127 @@ def test_args_passed_through() -> None:
     assert "python3 prep.py --input /data --output /out" == calls[0]
 
 
+def test_when_predicate_skips_job() -> None:
+    """A ``when:`` predicate that exits non-zero skips the job (status
+    ``'skipped'``) and the job script is NEVER invoked — the deep-research
+    diarize job relies on this to stay silent when no media is staged."""
+    ran: list[str] = []
+
+    def fake_exec(command: str, *, timeout: int | None = None):
+        ran.append(command)
+        # when-predicate (a shell `ls ... | head -1`) finds no input -> exit 1.
+        if command.startswith("ls "):
+            return ("", 1)
+        return ("", 0)  # reaching the job would be a bug
+
+    pol = policy.Policy(jobs=[_spec(
+        name="diarize",
+        script="audio_client.py",
+        args=["batch", "--input", "/data"],
+        when="ls /data/*.wav 2>/dev/null | head -1",
+    )])
+    ec = SimpleNamespace(exec=fake_exec)
+    results = jobs.run_jobs(pol, ec)
+
+    assert len(results) == 1
+    assert results[0].name == "diarize"
+    assert results[0].status == "skipped"
+    # Only the predicate ran; the job script never did.
+    assert len(ran) == 1
+    assert ran[0].startswith("ls ")
+
+
+def test_when_predicate_runs_job_when_input_present() -> None:
+    """A ``when:`` predicate that exits 0 lets the job proceed normally."""
+    ran: list[str] = []
+
+    def fake_exec(command: str, *, timeout: int | None = None):
+        ran.append(command)
+        if command.startswith("ls "):
+            return ("/data/clip.wav\n", 0)  # input present -> run
+        return ("transcribed\n", 0)
+
+    pol = policy.Policy(jobs=[_spec(
+        name="diarize",
+        script="audio_client.py",
+        when="ls /data/*.wav 2>/dev/null | head -1",
+    )])
+    ec = SimpleNamespace(exec=fake_exec)
+    results = jobs.run_jobs(pol, ec)
+
+    assert len(results) == 1
+    assert results[0].status == "ok"
+    # Predicate then job — two execs, in order.
+    assert len(ran) == 2
+    assert ran[0].startswith("ls ")
+    assert ran[1].startswith("python3 audio_client.py")
+
+
+def test_when_predicate_uses_short_timeout() -> None:
+    """The when-gate must time-box itself (10s) so a hung predicate cannot stall
+    the whole prepare phase; the job itself keeps the spec timeout."""
+    timeouts: list[int | None] = []
+
+    def fake_exec(command: str, *, timeout: int | None = None):
+        timeouts.append(timeout)
+        return ("", 0)
+
+    pol = policy.Policy(jobs=[_spec(
+        name="j", script="x.py", when="ls /data/*.txt | head -1",
+    )])
+    ec = SimpleNamespace(exec=fake_exec)
+    jobs.run_jobs(pol, ec)
+
+    # Predicate runs at 10s; the job inherits the spec timeout (0 -> None).
+    assert timeouts == [10, None]
+
+
+def test_skip_then_run_in_one_pass() -> None:
+    """Mixed pass: a job whose when-predicate fails is skipped and the NEXT job
+    still runs — skipping is non-fatal to the runner (warn-and-continue)."""
+    def fake_exec(command: str, *, timeout: int | None = None):
+        # diarize predicate: no audio -> skip; video predicate: video present -> run.
+        if "wav" in command:
+            return ("", 1)
+        if "mp4" in command:
+            return ("/data/clip.mp4\n", 0)
+        return ("ok\n", 0)
+
+    pol = policy.Policy(jobs=[
+        _spec(name="diarize", script="a.py",
+              when="ls /data/*.wav 2>/dev/null | head -1"),
+        _spec(name="video", script="v.py",
+              when="ls /data/*.mp4 2>/dev/null | head -1"),
+    ])
+    ec = SimpleNamespace(exec=fake_exec)
+    results = jobs.run_jobs(pol, ec)
+
+    assert [r.status for r in results] == ["skipped", "ok"]
+
+
+def test_when_predicate_error_runs_anyway() -> None:
+    """If the when-predicate exec itself blows up (infra failure), the job runs
+    rather than silently vanishing — fail-open on the gate, never on the job."""
+    calls: list[str] = []
+
+    def fake_exec(command: str, *, timeout: int | None = None):
+        calls.append(command)
+        if command.startswith("ls "):
+            raise RuntimeError("docker exec infra down")
+        return ("ok\n", 0)
+
+    pol = policy.Policy(jobs=[_spec(
+        name="j", script="x.py", when="ls /data/*.txt | head -1",
+    )])
+    ec = SimpleNamespace(exec=fake_exec)
+    results = jobs.run_jobs(pol, ec)
+
+    assert len(results) == 1
+    assert results[0].status == "ok"
+    # Predicate errored, then the job ran anyway.
+    assert len(calls) == 2
+
+
 def test_timeout_passed_to_exec() -> None:
     timeouts: list[int | None] = []
 
