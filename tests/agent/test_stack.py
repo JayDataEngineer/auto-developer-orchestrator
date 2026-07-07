@@ -573,6 +573,25 @@ def test_runtime_facts_defaults():
     assert f.autonomous is False
 
 
+@pytest.mark.parametrize("raw,expected", [
+    ("1", True), ("true", True), ("TRUE", True), ("yes", True), (" on ", True),
+    ("0", False), ("false", False), ("", False), ("no", False), ("maybe", False),
+])
+def test_autonomous_from_env(monkeypatch, raw, expected):
+    """``PUX_AUTONOMOUS`` is the cross-entrypoint autonomous signal — the
+    ask_user construction gate keys on it (autonomous → tool dropped). Truthy
+    set is 1/true/yes/on (case-insensitive, whitespace-tolerant); everything
+    else is False."""
+    monkeypatch.setenv("PUX_AUTONOMOUS", raw)
+    assert stack.autonomous_from_env() is expected
+
+
+def test_autonomous_from_env_unset(monkeypatch):
+    """Unset → False (the default interactive flow; ask_user is NOT dropped)."""
+    monkeypatch.delenv("PUX_AUTONOMOUS", raising=False)
+    assert stack.autonomous_from_env() is False
+
+
 # --- validate_overrides (the offline contract surface) ---------------------
 
 def test_validate_overrides_clean_when_no_block(fake_tree, stub_factory):

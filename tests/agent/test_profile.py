@@ -571,3 +571,39 @@ def test_load_subagents_applies_profile(fake_tree):
     kept = next(t for t in sub["tools"]
                 if t.name == "pux_sandbox_browser_save_session")
     assert kept.description == "REDONE"
+
+
+# --- build_graph threads ``facts`` to the ask_user gate (Phase C seam) ------
+
+def _opt_in_ask_user(fake_tree: Path) -> None:
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text("ask_user: true\n")
+
+
+def test_build_graph_threads_acp_facts_to_ask_user(fake_tree, captured_build):
+    """``build_graph`` threads ``facts`` through to ``build_stack`` — the Phase C
+    seam. Opt-in + ``transport="acp"`` (turn-based) → ask_user IS in the tools
+    handed to ``create_deep_agent`` AND the system prompt carries the end-turn
+    suffix. Proves the entrypoint→factory→tool wiring end to end (not just the
+    build_stack unit gate in test_stack.py)."""
+    from pux_harness.agent.stack import RuntimeFacts
+    _opt_in_ask_user(fake_tree)
+    graph.build_graph(
+        "p", checkpointer=None, facts=RuntimeFacts(transport="acp"),
+    )
+    tool_names = {getattr(t, "name", None) for t in captured_build["tools"]}
+    assert "ask_user" in tool_names
+    assert "END your turn" in captured_build["system_prompt"]
+
+
+def test_build_graph_drops_ask_user_when_mcp_active(fake_tree, captured_build):
+    """The runtime gate reaches ``build_graph``: opt-in BUT ``mcp_active`` →
+    ask_user is absent from the compiled tool surface (the MCP caller can't
+    answer it). End-to-end proof of the drop, not just the build_stack unit."""
+    from pux_harness.agent.stack import RuntimeFacts
+    _opt_in_ask_user(fake_tree)
+    graph.build_graph(
+        "p", checkpointer=None,
+        facts=RuntimeFacts(transport="mcp", mcp_active=True),
+    )
+    tool_names = {getattr(t, "name", None) for t in captured_build["tools"]}
+    assert "ask_user" not in tool_names
