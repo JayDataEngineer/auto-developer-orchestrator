@@ -2,12 +2,13 @@
 #
 # general is the general-purpose CTO fallback — no custom sandbox image, no
 # credentials, no egress allowlist of its own. This is intentionally a
-# tool_servers-only policy: the sandbox layer treats "no policy" (NoPolicy) and
+# tool_servers-driven policy: the sandbox layer treats "no policy" (NoPolicy) and
 # "policy with empty sections" as IDENTICAL for execution — egress_rules()
 # returns "" for both (no egress.conf staged → open), and resolve_tier() returns
-# the "isolated" fallback for both. So the SOLE effect of this file is opting
-# general into the foreign MCP tool servers declared in
-# orgs/_shared/tool_servers.yaml. Verified 2026-07-06.
+# the "isolated" fallback for both. So the SOLE execution effect of this file is
+# opting general into the foreign MCP tool servers declared in
+# orgs/_shared/tool_servers.yaml. (`protocols:` below is a non-execution axis —
+# it only selects which client SURFACE pux serves the org on.) Verified 2026-07-06.
 #
 # web_research runs HOST-SIDE (the McpSessionManager makes the HTTP calls from
 # the pux process, not from inside the org's container), so this capability is
@@ -24,3 +25,12 @@
 tool_servers:
   - web_research
   - github
+# Agent-facing client SURFACES general exposes (a separate axis from sandbox
+# execution — this block never affects egress/tier). [acp, agui] is the DEFAULT
+# (an absent `protocols:` resolves to both), declared here explicitly so the org
+# self-describes its intended surface: Toad/Zed/VS Code via `pux acp --org
+# general`; CopilotKit via `pux serve` at /agui/general. An org narrowing to
+# e.g. [acp] is excluded from the AG-UI mount. See policy.DEFAULT_PROTOCOLS.
+protocols:
+  - acp
+  - agui

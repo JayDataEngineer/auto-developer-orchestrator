@@ -435,6 +435,69 @@ def test_known_policy_sections_includes_host_setup() -> None:
     assert "host_setup" in contract.KNOWN_POLICY_SECTIONS
 
 
+# --- protocols (agent-facing client surfaces) ---------------------------------
+
+
+def test_load_protocols_parses(tmp_path: Path) -> None:
+    body = "protocols:\n  - acp\n  - agui\n"
+    p = policy.load("acme", _write_policy(tmp_path, "acme", body))
+    assert p.protocols == ["acp", "agui"]
+
+
+def test_load_protocols_absent_is_empty(tmp_path: Path) -> None:
+    # No `protocols:` -> empty list (resolve_protocols supplies the default).
+    p = policy.load("acme", _write_policy(tmp_path, "acme", "sandbox:\n  tier: isolated\n"))
+    assert p.protocols == []
+
+
+def test_load_protocols_not_a_list_fails(tmp_path: Path) -> None:
+    # A scalar instead of a list — must fail loud, not silently coerce.
+    body = "protocols: acp\n"
+    with pytest.raises(policy.PolicyError):
+        policy.load("bad", _write_policy(tmp_path, "bad", body))
+
+
+def test_load_protocols_entry_not_a_string_coerced(tmp_path: Path) -> None:
+    # Non-string entries are stringified (mirrors tool_servers leniency) — but a
+    # bogus NAME still trips the contract validator downstream (tested in
+    # test_org_contract); here we only assert the loader survives it.
+    body = "protocols:\n  - acp\n  - 42\n"
+    p = policy.load("weird", _write_policy(tmp_path, "weird", body))
+    assert p.protocols == ["acp", "42"]
+
+
+def test_resolve_protocols_default_when_empty() -> None:
+    # Absent/empty -> DEFAULT (both surfaces) — backward-compatible with every
+    # org that predates the `protocols:` section.
+    assert policy.resolve_protocols(policy.Policy()) == ["acp", "agui"]
+    assert policy.resolve_protocols(policy.Policy(protocols=[])) == ["acp", "agui"]
+
+
+def test_resolve_protocols_declared_passthrough() -> None:
+    # Declared non-empty -> returned AS-IS, so a coding org can narrow to ACP only
+    # (and the AG-UI mount skips it). No silent re-addition of the default.
+    assert policy.resolve_protocols(policy.Policy(protocols=["acp"])) == ["acp"]
+
+
+def test_protocols_for_org_declared(tmp_path: Path) -> None:
+    body = "protocols:\n  - acp\n"
+    root = _write_policy(tmp_path, "narrow", body)
+    assert policy.protocols_for_org("narrow", root) == ["acp"]
+
+
+def test_protocols_for_org_no_policy_defaults(tmp_path: Path) -> None:
+    # An org with no policy.yaml keeps today's behavior (all surfaces) — the
+    # declaration is purely opt-in narrowing.
+    assert policy.protocols_for_org("ghost", tmp_path) == ["acp", "agui"]
+
+
+def test_known_protocols_is_the_default_set() -> None:
+    # KNOWN_PROTOCOLS is the contract validator's allowlist; it must equal the
+    # default surface set so the contract never rejects a defaulted policy.
+    assert set(policy.DEFAULT_PROTOCOLS) == set(policy.KNOWN_PROTOCOLS)
+    assert "acp" in policy.KNOWN_PROTOCOLS and "agui" in policy.KNOWN_PROTOCOLS
+
+
 # --- shipped policies (integration) ------------------------------------------
 
 

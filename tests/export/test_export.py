@@ -72,6 +72,26 @@ class TestCollectOrgFiles:
         assert any("profile.yaml" in k for k in files)
         assert any("policy.yaml" in k for k in files)
 
+    def test_general_policy_yaml_carries_protocols_declaration(self):
+        """The org-level ``protocols:`` declaration travels in the export.
+
+        ``_collect_org_files`` returns ``{relname: Path}``; export walks these
+        collected files into the tarball, so whatever general declares in
+        policy.yaml ships verbatim. general now declares ``protocols: [acp,
+        agui]`` — proving an exported org self-describes its client surface
+        (the export-portability half of the protocols contract)."""
+        from pux_harness.agent.orgs import _org_path
+        org_dir = _org_path("general")
+        files = _collect_org_files(org_dir)
+        # Keys are full relative paths ("orgs/general/policy.yaml").
+        pol_key = next((k for k in files if k.endswith("policy.yaml")), None)
+        assert pol_key is not None, "general's policy.yaml not collected for export"
+        body = files[pol_key].read_text()
+        assert "protocols:" in body, (
+            f"protocols declaration missing from collected policy.yaml:\n{body}"
+        )
+        assert "- acp" in body and "- agui" in body
+
 
 # ---------------------------------------------------------------------------
 # Unit tests — shared dep resolution

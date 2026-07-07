@@ -242,8 +242,43 @@ def test_rule5_policy_unknown_section(fake_tree):
     assert any(v.rule == "policy-sections" for v in vs)
     assert KNOWN_POLICY_SECTIONS == {
         "workspace", "egress", "credentials", "sandbox", "browser", "host_setup",
-        "jobs", "tool_servers",
+        "jobs", "tool_servers", "protocols",
     }
+
+
+def test_rule5_policy_unknown_protocol_rejected(fake_tree):
+    """A ``protocols:`` entry that isn't a known surface (acp/agui) is a typo —
+    the contract must flag it rather than silently ignore it (a misspelled
+    surface would otherwise mean the org isn't served where the operator
+    thinks). Proves the ``_validate_protocols`` rule + its ``protocols`` rule
+    string end-to-end through ``check_org``."""
+    add_org, add_agent = fake_tree
+    add_agent("r")
+    add_org("o", agents=["r"], policy="protocols:\n  - acp\n  - telepathy\n")
+    vs = check_org("o")
+    proto_vs = [v for v in vs if v.rule == "protocols"]
+    assert len(proto_vs) == 1, vs
+    assert "telepathy" in proto_vs[0].message
+    # acp is valid — only the bogus entry is flagged. One violation (not two)
+    # is the proof acp passed; the message also lists the allowed set, so we
+    # don't substring-match "acp" there.
+
+
+def test_rule5_policy_known_protocols_ok(fake_tree):
+    """Both known surfaces pass the contract (no protocols violation)."""
+    add_org, add_agent = fake_tree
+    add_agent("r")
+    add_org("o", agents=["r"], policy="protocols:\n  - acp\n  - agui\n")
+    assert check_org("o") == []
+
+
+def test_rule5_policy_protocols_narrow_to_acp_ok(fake_tree):
+    """A single-surface narrowing (ACP only) passes — the org is served on ACP
+    and excluded from the AG-UI mount, but the declaration itself is valid."""
+    add_org, add_agent = fake_tree
+    add_agent("r")
+    add_org("o", agents=["r"], policy="protocols:\n  - acp\n")
+    assert check_org("o") == []
 
 
 def test_rule5_policy_empty_is_ok(fake_tree):
