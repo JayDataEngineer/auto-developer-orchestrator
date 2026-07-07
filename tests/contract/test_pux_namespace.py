@@ -13,62 +13,27 @@ fires on a dangling reference.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-from pux_harness.agent import contract, orgs
+from pux_harness.agent import contract
 from pux_harness.kit import _paths
 
-
-# --- shared tree helpers (mirror test_org_extends.py) ----------------------
-
-
-def _add_org(root: Path, name: str, *, extends: str | None = None,
-             agents: list[str] | None = None, body: str = "# Org\n") -> Path:
-    d = root / "orgs" / name
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "AGENTS.md").write_text(body)
-    lines: list[str] = []
-    if agents is not None:
-        lines.append(f"agents: [{', '.join(agents)}]")
-    if extends is not None:
-        lines.append(f"extends: {extends}")
-    if lines:
-        (d / "org.yaml").write_text("\n".join(lines) + "\n")
-    return d
-
-
-def _add_agent_with_extends(root: Path, slug: str, org: str, extends: str) -> Path:
-    """An agent ``.md`` whose frontmatter carries ``extends:``."""
-    adir = root / "orgs" / org / "agents"
-    adir.mkdir(parents=True, exist_ok=True)
-    fm = ["---", f'name: "{slug}"', f'description: "{slug}"', f"extends: {extends}", "---"]
-    path = adir / f"{slug}.md"
-    path.write_text("\n".join(fm) + "\n\nbody\n")
-    return path
+from tests.conftest import add_agent, add_org, fake_orgs_tree
 
 
 @pytest.fixture
-def fake_tree(tmp_path: Path, monkeypatch):
-    """Scratch orgs/ tree + a test library base; both ``contract._orgs_dir``
-    AND ``orgs._orgs_dir`` patched (the contract's path helpers read
-    ``contract._orgs_dir``, the orgs-shim delegates read ``orgs._orgs_dir``).
-    ``_shared/agents`` exists."""
-    (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
-    monkeypatch.setattr(contract, "_orgs_dir", lambda: tmp_path / "orgs")
-    monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
-    # Install a test library base so valid ``pux:test-base`` / ``pux:test-helper``
-    # references resolve.
-    base = tmp_path / "bases" / "test-base"
+def fake_tree(fake_orgs_tree, monkeypatch):
+    """``fake_orgs_tree`` + a test library base so ``pux:test-base`` /
+    ``pux:test-helper`` references resolve."""
+    base = fake_orgs_tree / "bases" / "test-base"
     (base / "agents").mkdir(parents=True)
     (base / "AGENTS.md").write_text("# test-base\n")
     (base / "org.yaml").write_text("agents:\n  - test-helper\n")
     (base / "agents" / "test-helper.md").write_text(
         "---\nname: test-helper\ndescription: A test helper.\n---\n"
     )
-    monkeypatch.setattr(_paths, "library_bases_dir", lambda: tmp_path / "bases")
-    return tmp_path
+    monkeypatch.setattr(_paths, "library_bases_dir", lambda: fake_orgs_tree / "bases")
+    return fake_orgs_tree
 
 
 def _pux_violations(violations):
@@ -88,7 +53,7 @@ def test_pux_namespace_clean_by_default():
 def test_pux_namespace_resolvable_clean_on_valid_refs(fake_tree: Path):
     """Valid ``pux:`` references (``extends: pux:test-base`` — the library base;
     ``pux:test-helper`` — the library agent) resolve cleanly."""
-    _add_org(fake_tree, "app", extends="pux:test-base", agents=["pux:test-helper"])
+    add_org(fake_tree, "app", extends="pux:test-base", agents=["pux:test-helper"])
     assert _pux_violations(contract._pux_namespace_resolvable()) == []
 
 
@@ -98,7 +63,7 @@ def test_pux_namespace_resolvable_clean_on_valid_refs(fake_tree: Path):
 def test_fires_on_dangling_pux_org_extends(fake_tree: Path):
     """Surface 1 — an org ``extends: pux:<missing>`` that no library base
     provides fires a HARD error."""
-    _add_org(fake_tree, "badorg", extends="pux:no-such-base")
+    add_org(fake_tree, "badorg", extends="pux:no-such-base")
     v = _pux_violations(contract._pux_namespace_resolvable())
     assert len(v) == 1
     assert v[0].severity == "error"
@@ -109,7 +74,7 @@ def test_fires_on_dangling_pux_org_extends(fake_tree: Path):
 def test_fires_on_dangling_pux_roster_slug(fake_tree: Path):
     """Surface 2 — a roster entry ``pux:<missing>`` no library agent provides
     fires a HARD error."""
-    _add_org(fake_tree, "badorg", agents=["pux:no-such-agent"])
+    add_org(fake_tree, "badorg", agents=["pux:no-such-agent"])
     v = _pux_violations(contract._pux_namespace_resolvable())
     assert len(v) == 1
     assert v[0].severity == "error"
@@ -119,8 +84,8 @@ def test_fires_on_dangling_pux_roster_slug(fake_tree: Path):
 def test_fires_on_dangling_pux_agent_extends(fake_tree: Path):
     """Surface 3 — an agent ``.md`` ``extends: pux:<missing>`` no library agent
     provides fires a HARD error (the source-file scan catches it)."""
-    _add_org(fake_tree, "badorg", agents=["spy"])
-    _add_agent_with_extends(fake_tree, "spy", "badorg", extends="pux:no-such-agent")
+    add_org(fake_tree, "badorg", agents=["spy"])
+    add_agent(fake_tree, "spy", "badorg", extends="pux:no-such-agent")
     v = _pux_violations(contract._pux_namespace_resolvable())
     assert len(v) == 1
     assert v[0].severity == "error"
@@ -131,8 +96,8 @@ def test_fires_on_dangling_pux_agent_extends(fake_tree: Path):
 def test_all_three_surfaces_report_together(fake_tree: Path):
     """A single org with all three dangling ``pux:`` refs reports three distinct
     violations — one per surface (no short-circuit; each surface is independent)."""
-    _add_org(fake_tree, "multi", extends="pux:no-base", agents=["pux:no-agent"])
-    _add_agent_with_extends(fake_tree, "pux:no-agent", "multi", extends="pux:no-base2")
+    add_org(fake_tree, "multi", extends="pux:no-base", agents=["pux:no-agent"])
+    add_agent(fake_tree, "pux:no-agent", "multi", extends="pux:no-base2")
     v = _pux_violations(contract._pux_namespace_resolvable())
     assert len(v) == 3
     msgs = "\n".join(x.message for x in v)

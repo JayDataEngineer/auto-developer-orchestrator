@@ -201,6 +201,9 @@ def test_export_output_flag(tmp_path):
 
 def test_export_default_name(tmp_path, monkeypatch):
     """Default output is <org>.tar.gz in the cwd."""
+    from pux_harness.agent import orgs as _orgs_mod
+    _real_root = Path(__file__).resolve().parent.parent.parent
+    monkeypatch.setattr(_orgs_mod, "_orgs_dir", lambda: _real_root / "orgs")
     monkeypatch.chdir(tmp_path)
     result = export_org("general")
     assert result == Path("general.tar.gz")

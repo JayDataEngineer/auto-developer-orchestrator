@@ -22,8 +22,6 @@ from typing import Any
 
 from acp.stdio import spawn_agent_process
 
-HARNESS_DIR = Path(__file__).resolve().parent.parent
-
 
 class _NoopClient:
     """Minimal Client for the handshake — the agent never calls back during
@@ -66,7 +64,7 @@ class _NoopClient:
         return None
 
 
-async def _handshake(org: str) -> Any:
+async def _handshake(org: str, harness_root: Path) -> Any:
     """Spawn ``pux acp --org <org>``, run initialize + new_session, return the
     ``NewSessionResponse`` (carries ``session_id`` + the advertised
     ``config_options`` the editor sees)."""
@@ -77,24 +75,25 @@ async def _handshake(org: str) -> Any:
         "pux_harness.acp",
         "--org",
         org,
-        cwd=str(HARNESS_DIR),
+        cwd=str(harness_root),
     ) as (conn, _proc):
         init = await asyncio.wait_for(conn.initialize(protocol_version=1), timeout=30)
         assert init is not None, "initialize returned None"
         session = await asyncio.wait_for(
-            conn.new_session(cwd=str(HARNESS_DIR)), timeout=30
+            conn.new_session(cwd=str(harness_root)), timeout=30
         )
         return session
 
 
-async def _handshake_with_db(db: Path) -> Any:
+async def _handshake_with_db(db: Path, harness_root: Path) -> Any:
     """Spawn ``pux acp --org general`` with ``PUX_API_DB`` redirected to ``db``,
     run initialize + new_session, return the ``NewSessionResponse``.
 
-    ``PUX_API_DB`` is passed explicitly via ``spawn_agent_process``'s ``env=``
-    (the ACP transport ships a TRIMMED env allowlist, so ``monkeypatch.setenv``
-    on the parent does NOT reach the subprocess). No model tokens, no sandbox
-    boot: the factory fires lazily from ``prompt``, never reached here.
+    ``PUX_API_DB`` and ``PUX_PROJECT_ROOT`` are passed explicitly via
+    ``spawn_agent_process``'s ``env=`` (the ACP transport ships a TRIMMED env
+    allowlist, so ``monkeypatch.setenv`` on the parent does NOT reach the
+    subprocess). No model tokens, no sandbox boot: the factory fires lazily from
+    ``prompt``, never reached here.
     """
     async with spawn_agent_process(
         lambda _agent: _NoopClient(),
@@ -103,29 +102,29 @@ async def _handshake_with_db(db: Path) -> Any:
         "pux_harness.acp",
         "--org",
         "general",
-        cwd=str(HARNESS_DIR),
-        env={"PUX_API_DB": str(db)},
+        cwd=str(harness_root),
+        env={"PUX_API_DB": str(db), "PUX_PROJECT_ROOT": str(harness_root)},
     ) as (conn, _proc):
         init = await asyncio.wait_for(conn.initialize(protocol_version=1), timeout=30)
         assert init is not None, "initialize returned None"
         return await asyncio.wait_for(
-            conn.new_session(cwd=str(HARNESS_DIR)), timeout=30
+            conn.new_session(cwd=str(harness_root)), timeout=30
         )
 
 
-def test_acp_handshake_general() -> None:
+def test_acp_handshake_general(project_root) -> None:
     """initialize + new_session against ``pux acp --org general`` over stdio."""
-    session = asyncio.run(_handshake("general"))
+    session = asyncio.run(_handshake("general", project_root))
     assert isinstance(session.session_id, str) and len(session.session_id) > 0
 
 
-def test_acp_handshake_invest() -> None:
+def test_acp_handshake_invest(project_root) -> None:
     """Second org wires the same way (the factory is org-bound at startup)."""
-    session = asyncio.run(_handshake("invest"))
+    session = asyncio.run(_handshake("invest", project_root))
     assert isinstance(session.session_id, str) and len(session.session_id) > 0
 
 
-def test_acp_main_opens_persistent_store_over_stdio(tmp_path) -> None:
+def test_acp_main_opens_persistent_store_over_stdio(tmp_path, project_root) -> None:
     """``_acp_main`` opens the shared thread store through the REAL
     stdio transport, so the sqlite file gains the langgraph ``checkpoints``
     table — the proof ACP no longer dies with an ephemeral ``MemorySaver``.
@@ -137,7 +136,7 @@ def test_acp_main_opens_persistent_store_over_stdio(tmp_path) -> None:
     import sqlite3
 
     db = tmp_path / "acp.sqlite"
-    session = asyncio.run(_handshake_with_db(db))
+    session = asyncio.run(_handshake_with_db(db, project_root))
     assert session.session_id, "handshake did not complete; store may not have opened"
 
     conn = sqlite3.connect(str(db))
@@ -158,7 +157,7 @@ def test_acp_main_opens_persistent_store_over_stdio(tmp_path) -> None:
     )
 
 
-def test_acp_session_registered_in_pux_threads_over_stdio(tmp_path) -> None:
+def test_acp_session_registered_in_pux_threads_over_stdio(tmp_path, project_root) -> None:
     """Each ACP session is indexed in ``pux_threads`` so it
     is visible to ``pux resume`` / ``pux show`` (the deferred session-hook gap,
     now closed by ``_RegisteringAgentServerACP.new_session``).
@@ -175,7 +174,7 @@ def test_acp_session_registered_in_pux_threads_over_stdio(tmp_path) -> None:
     import sqlite3
 
     db = tmp_path / "acp-session.sqlite"
-    session = asyncio.run(_handshake_with_db(db))
+    session = asyncio.run(_handshake_with_db(db, project_root))
     sid = session.session_id
     assert sid, "handshake did not complete"
 
@@ -196,7 +195,7 @@ def test_acp_session_registered_in_pux_threads_over_stdio(tmp_path) -> None:
     )
 
 
-def test_acp_advertises_mimo_not_openai() -> None:
+def test_acp_advertises_mimo_not_openai(project_root) -> None:
     """The server advertises the org's base-role model (MiMo via OpenCode Go) as a
     session ``config_option`` — NOT OpenAI/ChatGPT. Without ``models=`` at
     construction, Zed's model dropdown falls back to its built-in ChatGPT list
@@ -208,7 +207,7 @@ def test_acp_advertises_mimo_not_openai() -> None:
     """
     from pux_harness.agent.model import resolve_model_id
 
-    session = asyncio.run(_handshake("general"))
+    session = asyncio.run(_handshake("general", project_root))
     expected = resolve_model_id(role="base", org="general")
 
     # Each option is a RootModel wrapping a SessionConfigOptionSelect (`.root`).
