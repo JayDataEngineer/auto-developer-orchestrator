@@ -18,6 +18,7 @@ from __future__ import annotations
 import pytest
 
 from pux_harness.agent import orgs, stack
+from pux_harness.agent.profile import load_ask_user_enabled
 from pux_harness.agent.orgs import _org_path, discover_orgs, org_agent_slugs
 from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES, build_native_specialists
 from pux_harness.sandbox.tools._shared import PUX_PREFIX
@@ -76,6 +77,16 @@ def _declared_surface(org: str) -> set[str]:
     return {PUX_PREFIX + name for name in declared_tool_names(sandbox_dir)}
 
 
+def _ask_user_opted_in_surface(org: str) -> set[str]:
+    """``{"ask_user"}`` when this org opts into the HITL tool (``profile.yaml``
+    ``ask_user: true``), else empty. ``ask_user`` is a SUPERVISOR-only tool
+    injected by ``build_stack`` (not a specialist, not a declared surface), so
+    the phantom-gate allowlist must admit it for opted-in orgs. Reading the
+    profile here (not the built plan) keeps the test honest about what the org's
+    CONFIG opts into, independent of build plumbing (mirrors ``_declared_surface``)."""
+    return {"ask_user"} if load_ask_user_enabled(org) else set()
+
+
 def _build_real_org(org: str, stubbed_factory) -> stack.StackPlan:
     """Build ``org`` with its REAL profile + rubric gate + the full real
     specialist surface. ``stubbed_factory`` is the fixture (forces its setup)."""
@@ -106,7 +117,7 @@ def test_every_real_org_builds_a_well_formed_stack(org, stubbed_factory):
     # that surface is non-empty + phantom-free (no stray tool names leak on).
     sup_names = {t.name for t in plan.supervisor_tools}
     assert sup_names, f"{org}: empty supervisor tool surface"
-    allowed = SPECIALIST_TOOL_NAMES | _declared_surface(org)
+    allowed = SPECIALIST_TOOL_NAMES | _declared_surface(org) | _ask_user_opted_in_surface(org)
     assert sup_names <= allowed, (
         f"{org}: phantom supervisor tools: {sup_names - allowed}")
     assert plan.supervisor_middleware, f"{org}: empty supervisor middleware"
@@ -123,7 +134,7 @@ def test_every_real_org_roster_agents_resolve_with_real_tools(org, stubbed_facto
     names — the universal tool resolver + each org's profile filtering agree).
     This is the per-org contract that the roster honors the tool registry."""
     plan = _build_real_org(org, stubbed_factory)
-    allowed = SPECIALIST_TOOL_NAMES | _declared_surface(org)
+    allowed = SPECIALIST_TOOL_NAMES | _declared_surface(org) | _ask_user_opted_in_surface(org)
     for sub in plan.subagents:
         if sub["name"] == "general-purpose":
             continue  # neutered/customized slot, not a roster specialist

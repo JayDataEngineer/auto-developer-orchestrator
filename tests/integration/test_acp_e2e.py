@@ -137,7 +137,7 @@ def _solid_png_b64(w: int, h: int, rgb: tuple[int, int, int]) -> str:
 
 
 async def _prompt_and_collect(
-    prompt: list[Any] | str, *, tier: str | None = None,
+    prompt: list[Any] | str, *, tier: str | None = None, org: str = "general",
 ) -> tuple[str, list[str], Any]:
     client = _CollectingClient()
     # Forward the parent env so OPENCODE_API_KEY reaches the child past
@@ -158,7 +158,7 @@ async def _prompt_and_collect(
         "-m",
         "pux_harness.acp",
         "--org",
-        "general",
+        org,
         cwd=str(REPO_ROOT),
         env=env,
     ) as (conn, _proc):
@@ -172,6 +172,45 @@ async def _prompt_and_collect(
         # PromptResponse (they arrive as separate JSON-RPC notifications).
         await asyncio.sleep(1.5)
         return _agent_text(client.updates), _update_kinds(client.updates), resp
+
+
+async def _two_turn_ask_user(org: str, ask_prompt: str, reply: str) -> tuple[str, str, list[str]]:
+    """Drive the ACP turn-based ask_user path over ONE stdio session.
+
+    Spawns ``pux acp --org <org>``, sends ``ask_prompt`` (which should make the
+    agent call ``ask_user``), asserts the turn ENDED (the PromptResponse is back
+    — the agent posed its question + stopped per the supervisor prompt suffix),
+    then sends ``reply`` as a SECOND prompt on the SAME session and returns
+    (turn1_text, turn2_text, turn1_kinds). The reply should be incorporated into
+    turn2 — the proof the turn-based pattern round-trips. Raises if turn 1 does
+    not return (the agent didn't end its turn — the ask_user gate failed)."""
+    client = _CollectingClient()
+    env = dict(os.environ)
+    async with spawn_agent_process(
+        lambda _agent: client,
+        sys.executable, "-m", "pux_harness.acp", "--org", org,
+        cwd=str(REPO_ROOT), env=env,
+    ) as (conn, _proc):
+        await asyncio.wait_for(conn.initialize(protocol_version=1), timeout=60)
+        session = await asyncio.wait_for(conn.new_session(cwd=str(REPO_ROOT)), timeout=60)
+        # Turn 1: the agent should call ask_user → pose its question → end turn.
+        await asyncio.wait_for(
+            conn.prompt(prompt=[text_block(ask_prompt)], session_id=session.session_id),
+            timeout=240,
+        )
+        await asyncio.sleep(1.5)
+        turn1_text = _agent_text(client.updates)
+        turn1_kinds = _update_kinds(client.updates)
+        client.updates.clear()
+        # Turn 2: the user's reply, on the same session (same thread_id → the
+        # checkpointer carries turn 1's state, so the agent has context).
+        await asyncio.wait_for(
+            conn.prompt(prompt=[text_block(reply)], session_id=session.session_id),
+            timeout=240,
+        )
+        await asyncio.sleep(1.5)
+        turn2_text = _agent_text(client.updates)
+        return turn1_text, turn2_text, turn1_kinds
 
 
 def test_acp_live_prompt_returns_answer() -> None:
@@ -245,4 +284,48 @@ def test_acp_live_image_prompt_returns_answer() -> None:
         f"reply did not identify the red image — the image_url block likely did "
         f"not reach the model; reply={text!r}"
     )
+
+
+def test_acp_live_ask_user_is_turn_based() -> None:
+    """The ask_user HITL proof over ACP (the editor lane).
+
+    social-media-pipeline opts into ``ask_user`` (``profile.yaml``). Over ACP the
+    editor's permission popover has no free-text field, so the tool takes the
+    TURN-BASED branch: it poses the question as assistant text + the supervisor
+    prompt suffix makes the agent END its turn (no interrupt — the client can't
+    resume one). This test drives that round-trip over the REAL stdio wire:
+
+    1. Turn 1: a prompt that demands the agent ask before acting → the agent
+       calls ``ask_user``, its question lands in the streamed
+       ``agent_message_chunk`` text, AND the turn ends (the PromptResponse
+       returns — the gate worked, the agent stopped).
+    2. Turn 2: the user's reply on the SAME session → the agent incorporates it
+       (the reply appears in turn 2's text).
+
+    The strong assertion is behavioral + model-cooperation-dependent: if MiMo
+    ignores the "ask first" instruction and barrels ahead, turn 1 won't carry a
+    question and the test flags a real gap (the supervisor prompt suffix or the
+    tool description needs tightening), not a silent pass. Skipped without
+    PUX_E2E=1."""
+    ask_prompt = (
+        "I want you to draft a tweet, but FIRST you must ask me a question: "
+        "call the ask_user tool to ask what tone I want (casual or formal), "
+        "then STOP and wait for my answer. Do NOT draft anything yet. You MUST "
+        "call ask_user before doing anything else."
+    )
+    reply = "casual — keep it relaxed and friendly."
+    turn1, turn2, _kinds = asyncio.run(
+        _two_turn_ask_user("social-media-pipeline", ask_prompt, reply)
+    )
+    # Turn 1 carried the agent's question (ask_user posed it as text).
+    assert turn1.strip(), (
+        "turn 1 streamed no text — the agent did not pose its ask_user question"
+    )
+    # The reply was incorporated into turn 2 (the turn-based round-trip closed).
+    assert turn2.strip(), "turn 2 streamed no text — the agent did not respond to the reply"
+    assert "casual" in (turn1 + " " + turn2).lower(), (
+        "the user's 'casual' reply did not surface in the conversation — the "
+        "turn-based pattern did not round-trip"
+    )
+
 

@@ -1,0 +1,9 @@
+# Optional per-org harness profile. Applied to the deepagents stack the harness
+# compiles for this org — org-wide: the CTO system prompt AND every specialist
+# subagent. See pux-harness/pux_harness/agent/profile.py for the schema.
+
+# Opt the supervisor into the ``ask_user`` human-in-the-loop tool. Over the web
+# (AG-UI / CopilotKit) it interrupts + resumes on the human's reply; over an
+# editor (ACP) it poses the question + ends the turn. Dropped automatically on
+# MCP + autonomous runtimes — see hitl.py + stack.build_stack.
+ask_user: true
