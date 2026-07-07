@@ -112,6 +112,44 @@ async def _handshake_with_db(db: Path, harness_root: Path) -> Any:
         )
 
 
+async def _handshake_via_wrapper(org: str, project_root: Path) -> Any:
+    """Spawn through the REAL ``pux`` launcher (bin/pux → ``uv run`` →
+    ``python -m pux_harness.acp``) — the EXACT spawn command editors/dispatchers
+    (Zed, Toad via ``toad acp "pux acp --org …"``, OpenClaw, Hermes) use.
+
+    The other helpers spawn ``python -m pux_harness.acp`` directly, bypassing
+    the ``uv run`` stdout-cleanliness + bin/pux ``.env`` re-source the wrapper
+    adds. If ``uv run`` ever prints to stdout, ACP's JSON-RPC framing breaks and
+    this handshake fails — the Toad/Zed-blocking regression this locks. No model
+    tokens, no sandbox boot (factory fires lazily from ``prompt``)."""
+    pux = project_root / "bin" / "pux"
+    async with spawn_agent_process(
+        lambda _agent: _NoopClient(),
+        str(pux),
+        "acp",
+        "--org",
+        org,
+        cwd=str(project_root),
+    ) as (conn, _proc):
+        init = await asyncio.wait_for(conn.initialize(protocol_version=1), timeout=60)
+        assert init is not None, "initialize returned None"
+        return await asyncio.wait_for(
+            conn.new_session(cwd=str(project_root)), timeout=60
+        )
+
+
+def test_acp_handshake_via_pux_wrapper(project_root) -> None:
+    """The ``pux acp --org general`` WRAPPER (bin/pux + uv run) speaks clean ACP
+    on stdio — the spawn path Toad/Zed/OpenClaw hit. Catches uv-run stdout
+    pollution that the direct-``python -m`` handshake tests cannot see."""
+    session = asyncio.run(_handshake_via_wrapper("general", project_root))
+    assert isinstance(session.session_id, str) and len(session.session_id) > 0
+    opts = getattr(session, "config_options", None) or []
+    assert any(
+        getattr(getattr(o, "root", o), "category", None) == "model" for o in opts
+    ), f"wrapper path did not advertise the model dropdown: {opts!r}"
+
+
 def test_acp_handshake_general(project_root) -> None:
     """initialize + new_session against ``pux acp --org general`` over stdio."""
     session = asyncio.run(_handshake("general", project_root))
