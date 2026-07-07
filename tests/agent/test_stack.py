@@ -103,6 +103,14 @@ def stub_factory(monkeypatch):
     # would bind shared_event_store() and touch the real .pux/events.sqlite). The
     # real class is unit-tested in pux-harness/tests/test_audit.py.
     monkeypatch.setattr(stack, "AuditMiddleware", lambda **kw: "AUDIT")
+    # ModelRetryMiddleware is default-on for every supervisor; stub to a marker
+    # so the resolved-stack tests observe its presence/position without sleeping
+    # on a real backoff. ToolRetryMiddleware is gate-driven (only built when a
+    # tool_retry: block ships); stubbed for the tool_retry-specific test. The
+    # real retry behavior is unit-tested in test_retry_middleware.py (incl. the
+    # real transient retry_on wiring).
+    monkeypatch.setattr(stack, "ModelRetryMiddleware", lambda **kw: "RETRY")
+    monkeypatch.setattr(stack, "ToolRetryMiddleware", lambda **kw: "TOOLRETRY")
 
     def _rubric(**kwargs):
         cap["rubric"].append(kwargs)
@@ -144,7 +152,7 @@ def test_registry_lists_documented_names():
     added the opt-in ``audit`` spec (default OFF)."""
     names = stack.middleware_names()
     assert set(names) == {"audit", "context", "routing", "session_guide",
-                          "rubric", "browser_vision"}
+                          "rubric", "model_retry", "tool_retry", "browser_vision"}
     # No duplicate registrations.
     assert len(names) == len(set(names))
 
@@ -155,7 +163,7 @@ def test_defaults_match_pre_factory_baseline():
     supervisor, context + browser_vision on subagents. (``rubric`` is
     gate-driven, not a default.)"""
     assert stack.DEFAULT_SUPERVISOR == ["context", "routing", "session_guide",
-                                        "browser_vision"]
+                                        "model_retry", "browser_vision"]
     assert stack.DEFAULT_SUBAGENT == ["context", "browser_vision"]
 
 
@@ -165,7 +173,7 @@ def test_registry_scopes_are_correct():
     only (the subagent scope grows when a subagent-scoped middleware is
     registered)."""
     by_name = {s.name: s for s in stack.MIDDLEWARE_REGISTRY}
-    for name in ("routing", "session_guide", "rubric"):
+    for name in ("routing", "session_guide", "rubric", "model_retry", "tool_retry"):
         assert by_name[name].scope == {stack.Scope.SUPERVISOR}, name
     for name in ("audit", "context", "browser_vision"):
         assert by_name[name].scope == {stack.Scope.SUPERVISOR,
@@ -185,7 +193,7 @@ def test_no_profile_byte_identical_baseline(fake_tree, stub_factory):
         rubric_gate=None,
         exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
     sup_names = {t.name for t in plan.supervisor_tools}
     assert {"pux_sandbox_python", "pux_sandbox_browser_navigate"} <= sup_names
     # Prompt is the root + org + harness addendum (the org prose lands).
@@ -320,8 +328,8 @@ def test_browser_vision_mounts_innermost_when_enabled(fake_tree, stub_factory, m
     # mounted on BOTH scopes, INNERMOST (last element)
     assert isinstance(plan.supervisor_middleware[-1], BrowserVisionMiddleware)
     assert isinstance(plan.subagents[0]["middleware"][-1], BrowserVisionMiddleware)
-    # the rest of the stack is the same baseline (ROUTE, GUIDE)
-    assert plan.supervisor_middleware[:-1] == ["ROUTE", "GUIDE"]
+    # the rest of the stack is the same baseline (ROUTE, GUIDE, RETRY)
+    assert plan.supervisor_middleware[:-1] == ["ROUTE", "GUIDE", "RETRY"]
 
 
 def test_browser_vision_absent_when_disabled(fake_tree, stub_factory):
@@ -333,7 +341,7 @@ def test_browser_vision_absent_when_disabled(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
     assert not any(isinstance(m, BrowserVisionMiddleware)
                    for m in plan.supervisor_middleware)
     assert not any(isinstance(m, BrowserVisionMiddleware)
@@ -378,7 +386,7 @@ def test_rubric_gate_armed_appends_rubric(fake_tree, stub_factory):
         rubric_gate=_gate(max_iterations=5), exec_client="EXEC",
     )
     mw = plan.supervisor_middleware
-    assert mw == ["ROUTE", "GUIDE", "RUBRIC"]
+    assert mw == ["ROUTE", "GUIDE", "RUBRIC", "RETRY"]
     assert mw.index("ROUTE") < mw.index("RUBRIC")  # baseline before rubric
     assert stub_factory["rubric"][0]["max_iterations"] == 5
     # Grader model via the role-resolved path (stub_factory → "MODEL"); 3 tools.
@@ -393,7 +401,7 @@ def test_rubric_gate_disabled_mounts_no_rubric(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=_gate(enabled=False), exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
     assert stub_factory["rubric"] == []
 
 
@@ -421,7 +429,7 @@ def test_override_supervisor_remove_drops_routing(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["GUIDE"]
+    assert plan.supervisor_middleware == ["GUIDE", "RETRY"]
 
 
 def test_override_supervisor_add_is_idempotent(fake_tree, stub_factory):
@@ -433,7 +441,7 @@ def test_override_supervisor_add_is_idempotent(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
 
 
 def test_override_add_wins_over_remove(fake_tree, stub_factory):
@@ -456,7 +464,7 @@ def test_override_empty_block_is_byte_identical(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
 
 
 # --- the opt-in ``audit`` spec ---------------------------------------------
@@ -488,7 +496,7 @@ def test_audit_opt_in_supervisor_mounts_outermost(fake_tree, stub_factory):
     mw = plan.supervisor_middleware
     assert mw[0] == "AUDIT", mw  # outermost
     # the default-on baseline still follows, unchanged, in registry order
-    assert mw[1:] == ["ROUTE", "GUIDE"], mw
+    assert mw[1:] == ["ROUTE", "GUIDE", "RETRY"], mw
 
 
 def test_audit_opt_in_subagent_scope_allowed(fake_tree, stub_factory):
@@ -516,7 +524,7 @@ def test_excluded_middleware_field_honored(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=cfg,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["GUIDE"]
+    assert plan.supervisor_middleware == ["GUIDE", "RETRY"]
 
 
 # --- fail-loud: unknown names + wrong scopes -------------------------------
@@ -641,8 +649,8 @@ def test_context_mounts_outermost_and_emits_tools(fake_tree, stub_factory, monke
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    # context outermost, then routing, session_guide (browser_vision env-off).
-    assert plan.supervisor_middleware == ["CONTEXT", "ROUTE", "GUIDE"]
+    # context outermost, then routing, session_guide, model_retry (vision off).
+    assert plan.supervisor_middleware == ["CONTEXT", "ROUTE", "GUIDE", "RETRY"]
     # The retrieval tool escaped the spec into the supervisor surface.
     assert "ctx_recall" in {t.name for t in plan.supervisor_tools}
 
@@ -660,7 +668,7 @@ def test_context_is_now_removable(fake_tree, stub_factory, monkeypatch):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
     assert "ctx_recall" not in {t.name for t in plan.supervisor_tools}
 
 
@@ -676,7 +684,7 @@ def test_browser_vision_is_now_removable_when_enabled(fake_tree, stub_factory, m
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
     assert not any(isinstance(m, BrowserVisionMiddleware)
                    for m in plan.supervisor_middleware)
 
@@ -697,7 +705,7 @@ def test_full_supervisor_order_is_canonical_registry_order(fake_tree, stub_facto
     mw = plan.supervisor_middleware
     assert mw[:4] == ["CONTEXT", "ROUTE", "GUIDE", "RUBRIC"]
     assert isinstance(mw[-1], BrowserVisionMiddleware)
-    assert len(mw) == 5  # exactly: context, routing, session_guide, rubric, browser_vision
+    assert len(mw) == 6  # context, routing, session_guide, rubric, model_retry, browser_vision
 
 
 # --- ask_user HITL construction gate (opt-in AND not mcp/autonomous) --------
@@ -775,3 +783,220 @@ def test_ask_user_dropped_when_autonomous_even_if_opted_in(fake_tree, stub_facto
         facts=stack.RuntimeFacts(transport="serve", autonomous=True),
     )
     assert "ask_user" not in _names(plan)
+
+
+# --- configurable retry middleware (ModelRetry default-on + ToolRetry opt-in) -
+
+def _write_profile(fake_tree: Path, body: str) -> None:
+    """Write arbitrary content to org ``p``'s profile.yaml (not just a
+    ``middleware:`` block) — for the model_retry/tool_retry config tests."""
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(body)
+
+
+def _retry_ctx(*, model_retry=None, tool_retry=None) -> "stack.StackCtx":
+    """A minimal StackCtx carrying only the retry configs — for driving the
+    REAL ``_build_model_retry`` / ``_build_tool_retry`` against a fake handler
+    (the verify-or-die mechanism proof, no factory / Docker needed)."""
+    from pux_harness.agent.profile import ModelRetryConfig
+    return stack.StackCtx(
+        org="t",
+        facts=stack.RuntimeFacts(),
+        rubric_gate=None,
+        exec_client=None,
+        model_retry_cfg=model_retry if model_retry is not None else ModelRetryConfig(),
+        tool_retry_cfg=tool_retry,
+    )
+
+
+def test_model_retry_retries_transient_then_succeeds():
+    """The REAL ModelRetryMiddleware, built the way the factory builds it,
+    RETRIES a transient provider error and succeeds — the mechanism proof (not
+    just a wiring assert). Delays zeroed so the test is instant; the retry_on
+    is the shipped transient set (same as the fallback chain)."""
+    import openai
+    import httpx
+    from pux_harness.agent.profile import ModelRetryConfig
+    from pux_harness.agent.model import _TRANSIENT_EXCEPTIONS
+    # Zero the backoff so time.sleep(0); keep max_retries=2, on_failure=error.
+    cfg = ModelRetryConfig(initial_delay=0.0, backoff_factor=0.0, jitter=False)
+    mw = stack._build_model_retry(_retry_ctx(model_retry=cfg), stack.Scope.SUPERVISOR)
+    assert mw is not None
+    assert mw.retry_on == _TRANSIENT_EXCEPTIONS  # one transient definition
+
+    calls = {"n": 0}
+
+    def handler(_req):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise openai.APITimeoutError(
+                request=httpx.Request("GET", "https://x.test"))
+        return "OK"
+
+    assert mw.wrap_model_call(object(), handler) == "OK"
+    assert calls["n"] == 2  # one transient failure → retried once → success
+
+
+def test_model_retry_does_not_retry_non_transient():
+    """A NON-transient error (not in the retry_on set) is NOT retried; with the
+    shipped ``on_failure='error'`` it re-raises immediately — three layers
+    exhausted means fail-loud, never inject error text as content."""
+    from pux_harness.agent.profile import ModelRetryConfig
+    cfg = ModelRetryConfig(initial_delay=0.0, backoff_factor=0.0, jitter=False)
+    mw = stack._build_model_retry(_retry_ctx(model_retry=cfg), stack.Scope.SUPERVISOR)
+    calls = {"n": 0}
+
+    def handler(_req):
+        calls["n"] += 1
+        raise ValueError("not transient — a request/config bug")
+
+    with pytest.raises(ValueError):
+        mw.wrap_model_call(object(), handler)
+    assert calls["n"] == 1  # no retry on a non-transient error
+
+
+def test_model_retry_continue_returns_ai_message_on_exhaustion():
+    """``on_failure='continue'`` (an org's opt-in for extra autonomous
+    resilience) returns an AIMessage describing the error after retries
+    exhaust, instead of re-raising — letting the agent loop adapt."""
+    from langchain_core.messages import AIMessage
+    from pux_harness.agent.profile import ModelRetryConfig
+    import openai
+    import httpx
+    cfg = ModelRetryConfig(max_retries=1, on_failure="continue",
+                           initial_delay=0.0, backoff_factor=0.0, jitter=False)
+    mw = stack._build_model_retry(_retry_ctx(model_retry=cfg), stack.Scope.SUPERVISOR)
+    calls = {"n": 0}
+
+    def handler(_req):
+        calls["n"] += 1
+        raise openai.APITimeoutError(
+            request=httpx.Request("GET", "https://x.test"))
+
+    out = mw.wrap_model_call(object(), handler)
+    # on_failure='continue' → a ModelResponse wrapping an AIMessage that
+    # describes the exhausted retry (NOT a bare AIMessage, NOT a re-raise).
+    inner = getattr(out, "result", out)
+    if isinstance(inner, list):
+        inner = inner[0]
+    assert isinstance(inner, AIMessage)
+    assert "failed" in inner.content.lower()
+    assert calls["n"] == 2  # initial + 1 retry, then gave up → AIMessage
+
+
+def test_model_retry_default_on_supervisor_not_subagent(fake_tree, stub_factory):
+    """No ``model_retry:`` block → the shipped default config → RETRY is built
+    and mounted on the supervisor (default-on conservative). It is
+    SUPERVISOR-scoped, so the subagent tree does NOT get it (subagents already
+    carry the fallback chain in their model)."""
+    plan = stack.build_stack("p", specialists=list(_SPECIALISTS),
+                             profile=None, rubric_gate=None, exec_client="EXEC")
+    assert "RETRY" in plan.supervisor_middleware
+    assert "RETRY" not in plan.subagents[0]["middleware"]
+
+
+def test_model_retry_disabled_via_config_block(fake_tree, stub_factory):
+    """``model_retry: {enabled: false}`` → no RETRY (the per-org disable)."""
+    _write_profile(fake_tree, "model_retry:\n  enabled: false\n")
+    plan = stack.build_stack("p", specialists=list(_SPECIALISTS),
+                             profile=None, rubric_gate=None, exec_client="EXEC")
+    assert "RETRY" not in plan.supervisor_middleware
+
+
+def test_model_retry_disabled_via_bool_shorthand(fake_tree, stub_factory):
+    """``model_retry: false`` (the bool shorthand) → disabled."""
+    _write_profile(fake_tree, "model_retry: false\n")
+    plan = stack.build_stack("p", specialists=list(_SPECIALISTS),
+                             profile=None, rubric_gate=None, exec_client="EXEC")
+    assert "RETRY" not in plan.supervisor_middleware
+
+
+def test_model_retry_removable_via_middleware_block(fake_tree, stub_factory):
+    """``middleware.supervisor.remove: [model_retry]`` drops it — the uniform
+    toggle surface (removable like every other default-on middleware, no
+    special-cased kill switch)."""
+    _write_profile(fake_tree,
+                   "middleware:\n  supervisor:\n    remove: [model_retry]\n")
+    plan = stack.build_stack("p", specialists=list(_SPECIALISTS),
+                             profile=None, rubric_gate=None, exec_client="EXEC")
+    assert "RETRY" not in plan.supervisor_middleware
+
+
+def test_tool_retry_is_opt_in_gate_driven(fake_tree, stub_factory):
+    """No ``tool_retry:`` block → no TOOLRETRY (opt-in). WITH a block → mounted
+    (gate-driven, like rubric), scoped to the declared tool names."""
+    plan = stack.build_stack("p", specialists=list(_SPECIALISTS),
+                             profile=None, rubric_gate=None, exec_client="EXEC")
+    assert "TOOLRETRY" not in plan.supervisor_middleware
+
+    _write_profile(fake_tree,
+                   "tool_retry:\n  tools: [mcp__web_research__search]\n"
+                   "  max_retries: 3\n")
+    plan2 = stack.build_stack("p", specialists=list(_SPECIALISTS),
+                              profile=None, rubric_gate=None, exec_client="EXEC")
+    assert "TOOLRETRY" in plan2.supervisor_middleware
+
+
+def test_tool_retry_mechanism_retries_scoped_transient():
+    """The REAL ToolRetryMiddleware, built the way the factory builds it,
+    retries a transient transport error (httpx) on a SCOPED tool. The factory
+    hard-pins retry_on to the network set + on_failure='continue'."""
+    import types
+    import httpx
+    from pux_harness.agent.profile import ToolRetryConfig
+    cfg = ToolRetryConfig(
+        tools=("flaky_search",),
+        max_retries=2, initial_delay=0.0, backoff_factor=0.0, jitter=False,
+    )
+    mw = stack._build_tool_retry(_retry_ctx(tool_retry=cfg), stack.Scope.SUPERVISOR)
+    assert mw is not None
+    assert mw.retry_on == stack._TOOL_TRANSIENT_EXCEPTIONS
+    assert mw.on_failure == "continue"
+    # The scoped tool filter lives in ``_tool_filter`` (``.tools`` is the
+    # unrelated AgentMiddleware ADD-tools hook, always []).
+    assert mw._tool_filter == ["flaky_search"]
+
+    calls = {"n": 0}
+
+    def handler(_req):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.HTTPError("transient transport error")
+        return "DONE"
+
+    req = types.SimpleNamespace(tool=None, tool_call={"name": "flaky_search", "id": "1"})
+    assert mw.wrap_tool_call(req, handler) == "DONE"
+    assert calls["n"] == 2
+
+
+def test_model_retry_config_tuning_parsed(fake_tree, stub_factory):
+    """The ``model_retry:`` block tunes max_retries + on_failure (the only
+    knobs an operator reaches for; retry_on is hard-pinned to the transient
+    set, NOT configurable)."""
+    from pux_harness.agent import profile
+    _write_profile(fake_tree,
+                   "model_retry:\n  max_retries: 5\n  on_failure: continue\n")
+    cfg = profile.load_model_retry("p")
+    assert cfg.enabled is True
+    assert cfg.max_retries == 5
+    assert cfg.on_failure == "continue"
+
+
+def test_model_retry_malformed_rejected(fake_tree, stub_factory):
+    """A malformed ``model_retry:`` block fails loud at load / contract time
+    (unknown key, bad on_failure) — no silent skip."""
+    from pux_harness.agent import profile
+    _write_profile(fake_tree, "model_retry:\n  bogus: 1\n")
+    with pytest.raises(TypeError, match="unknown key"):
+        profile.load_model_retry("p")
+    _write_profile(fake_tree, "model_retry:\n  on_failure: explode\n")
+    with pytest.raises(TypeError, match="on_failure"):
+        profile.load_model_retry("p")
+
+
+def test_tool_retry_requires_nonempty_tools(fake_tree, stub_factory):
+    """``tool_retry:`` WITHOUT a non-empty ``tools:`` list is rejected —
+    tool-retry is NEVER global (a schema error must not loop)."""
+    from pux_harness.agent import profile
+    _write_profile(fake_tree, "tool_retry:\n  max_retries: 2\n")
+    with pytest.raises(TypeError, match="tools"):
+        profile.load_tool_retry("p")
