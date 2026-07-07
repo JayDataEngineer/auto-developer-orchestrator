@@ -330,13 +330,16 @@ async def _session_load_list(db: Path, harness_root: Path) -> Any:
 
 
 def test_acp_advertises_session_load_and_list(tmp_path, project_root) -> None:
-    """initialize advertises the session surfaces we ACTUALLY back:
+    """initialize advertises ONLY the surfaces we ACTUALLY back:
     ``load_session=True`` + ``session_capabilities.list`` set, with
-    ``fork``/``resume``/``close`` left UNSET (UNSTABLE in the spec + unbacked).
+    ``fork``/``resume``/``close`` left UNSET (UNSTABLE in the spec + unbacked),
+    ``prompt_capabilities.image=False`` (text-only base), and
+    ``mcp_capabilities.{http,sse}=False`` (client-MCP not honored).
 
     Truthful-capability surface — a client (Hermes/acpx) only offers resume/list
-    paths that exist. This is the audit-row-3 + audit-row-7 close from
-    [[protocol-surface-map]]. Drives the REAL stdio transport; no tokens, no
+    paths that exist, and never sends image/MCP payloads we'd silently drop.
+    This is the audit-row close from [[protocol-surface-map]] (#68 load/list,
+    #69 image, #71 mcp). Drives the REAL stdio transport; no tokens, no
     sandbox."""
     init, *_ = asyncio.run(_session_load_list(tmp_path / "cap.sqlite", project_root))
     caps = init.agent_capabilities
@@ -356,6 +359,24 @@ def test_acp_advertises_session_load_and_list(tmp_path, project_root) -> None:
     assert init.agent_capabilities.prompt_capabilities.image is False, (
         "default-tier general advertised image=True — a text-only base must not "
         "offer image attach to the editor"
+    )
+    # Truthful MCP cap (#71): we do NOT back client-passed ``mcp_servers`` yet
+    # — deepagents-acp 0.0.8 drops them (``new_session`` accepts the param then
+    # never stores it; ``AgentSessionContext`` is a frozen dataclass with only
+    # cwd/mode/model, so the factory can't receive them either). Per-session
+    # honoring needs a per-session graph rebuild + ``McpSessionManager``
+    # lifecycle; deferred until a dispatcher (Zed/Toad/acpx/OpenClaw/Hermes)
+    # actually requires it. So we MUST NOT advertise ``mcp_capabilities`` True —
+    # a client seeing True would send MCP servers we silently ignore. This
+    # locks the schema default into a deliberate contract: flip it True only
+    # alongside the backing work, never before.
+    mcp = caps.mcp_capabilities
+    assert mcp is not None, "mcp_capabilities missing"
+    assert mcp.http is False, (
+        f"mcp_capabilities.http advertised True but client-MCP is unbacked: {mcp!r}"
+    )
+    assert mcp.sse is False, (
+        f"mcp_capabilities.sse advertised True but client-MCP is unbacked: {mcp!r}"
     )
 
 
