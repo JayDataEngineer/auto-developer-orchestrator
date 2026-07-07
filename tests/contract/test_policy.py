@@ -90,6 +90,33 @@ sandbox:
     assert p.sandbox.tier == "isolated"
 
 
+def test_load_sandbox_deps_apt_and_pip(tmp_path: Path) -> None:
+    body = """
+sandbox:
+  deps:
+    apt:
+      - ripgrep
+      - jq
+    pip:
+      - rich
+      - httpx==0.27
+"""
+    p = policy.load("deps-org", _write_policy(tmp_path, "deps-org", body))
+    assert p.sandbox.deps.apt == ["ripgrep", "jq"]
+    assert p.sandbox.deps.pip == ["rich", "httpx==0.27"]
+
+
+def test_load_sandbox_deps_default_empty(tmp_path: Path) -> None:
+    # No deps block -> both lists empty (today's default; install hook no-ops).
+    body = """
+sandbox:
+  tier: isolated
+"""
+    p = policy.load("nodeps", _write_policy(tmp_path, "nodeps", body))
+    assert p.sandbox.deps.apt == []
+    assert p.sandbox.deps.pip == []
+
+
 def test_load_empty_file_is_empty_policy(tmp_path: Path) -> None:
     # An empty (but present) policy.yaml is valid — opts in with no sections.
     p = policy.load("blank", _write_policy(tmp_path, "blank", ""))

@@ -1422,10 +1422,12 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "langchain-mcp-adapters", specifier = ">=0.3.0" },
     { name = "langchain-openai" },
+    { name = "langfuse", marker = "extra == 'observability'", specifier = ">=3.0" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.1.0" },
     { name = "pyyaml" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.49.0" },
 ]
+provides-extras = ["observability"]
 
 [package.metadata.requires-dev]
 dev = [
