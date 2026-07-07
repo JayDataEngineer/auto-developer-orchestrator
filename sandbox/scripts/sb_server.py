@@ -944,6 +944,22 @@ class Handler(BaseHTTPRequestHandler):
                 "chromium": self.state.use_chromium,
                 "tabs": safe(lambda: len(self.state.sb.driver.window_handles), 0) if alive else 0,
             })
+        elif self.path == "/warmup":
+            # Force browser init NOW (Chrome attach via sb_cdp.Chrome) so the
+            # first agent-driven tool call doesn't pay the cold start. Unlike
+            # /status — a cheap alive check that NEVER inits — /warmup actually
+            # calls ensure(). Used by the pre-run warmup_browser job declared
+            # by browser-using orgs (general, dev-bot) to move the SeleniumBase
+            # attach latency out of the LLM turn budget.
+            warmed = self.state.ensure()
+            alive = self.state.sb is not None
+            if warmed:
+                url = safe(lambda: self.state.sb.get_current_url() or "", "")
+                self._ok({"warmed": True, "alive": alive, "url": url,
+                          "stealth": self.state.stealth,
+                          "chromium": self.state.use_chromium})
+            else:
+                self._err("warmup failed: browser not available", 503)
         elif self.path.startswith("/file/"):
             file_path = self.path[6:]
             if not file_path.startswith("/"): file_path = "/" + file_path

@@ -17,3 +17,16 @@
 # github tools; dev-bot still starts.
 tool_servers:
   - github
+
+# Pre-run: warm the in-container SeleniumBase Chrome so the first browser tool
+# call (dev-bot's `web-agent`) doesn't pay the SeleniumBase CDP-attach cold
+# start — that latency is moved out of the LLM turn budget so it can't trip the
+# 60s browser timeout (browser.py _BROWSER_TIMEOUT). sb_server runs in the base
+# sandbox image (supervisord priority 70); this job polls /status then hits
+# /warmup, which calls ensure(). Warn-and-continue: an unreachable sb_server is
+# logged, not fatal (the agent then cold-starts on first use, as before).
+jobs:
+  - name: warmup_browser
+    script: orgs/_shared/sandbox/warmup_browser.py
+    timeout: 90
+    description: "Pre-warm the in-container SeleniumBase Chrome (sb_server /warmup) so the first browser tool call skips cold-start latency"
