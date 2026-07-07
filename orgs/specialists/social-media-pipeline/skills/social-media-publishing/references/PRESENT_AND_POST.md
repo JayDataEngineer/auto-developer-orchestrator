@@ -4,30 +4,45 @@ How the CTO presents options to the user and triggers posting.
 
 ## Use ask_user With Structured Options
 
-The `ask_user` tool blocks waiting for the user to pick from a list:
+`ask_user` poses a question to the human and blocks until they reply. The reply
+text is returned to the agent. Signature (separate args):
 
 ```python
-ask_user({
-    "question": "Which option should I post?",
-    "options": [
+ask_user(
+    question="Which option should I post?",
+    options=[
         "A — contrarian take: \"Everyone says agents will replace devs...\"",
         "B — listicle thread: \"5 things I learned shipping agents...\"",
         "C — hot take: \"By end of 2026 every SaaS will ship an agent...\"",
-        "D — Cancel, don't post anything"
+        "D — Cancel, don't post anything",
     ],
-    "default": "D — Cancel, don't post anything"
-})
+    default="D — Cancel, don't post anything",
+)
 ```
 
 Rules:
-- Provide at least 2 options (tool rejects 1 or 0)
-- Include "Cancel" as the last option always
-- Show the option letter + angle + first 60 chars of text in each option label
-- The user can type free text if none of the options fit (handled by the tool)
+- `options` is optional — pass a list when the choices are enumerable, or omit it
+  to ask an open question (the human types a free reply).
+- When listing options, include "Cancel" as the last one.
+- Show the option letter + angle + first ~60 chars of text in each option label.
+- The human is never locked to a listed option — over the web they can type free
+  text in the card; over the editor their next message can be anything.
 
-## How It Appears in the TUI
+## How It Reaches the Human (transport-aware)
 
-The TUI renders `ask_user` as an interactive picker. The user uses arrow keys to select + Enter to confirm. The selected option text is returned to the agent.
+There is no in-harness picker UI. `ask_user` is transport-aware:
+
+- **Web (AG-UI / CopilotKit):** the call interrupts the run. CopilotKit's
+  `useInterrupt` card surfaces the question + options; the human's reply
+  (a selected option or typed text) resumes the run and becomes the tool's
+  return value.
+- **Editor (ACP — Zed/Toad):** the editor's permission popover has no free-text
+  field, so the tool poses the question as chat text and ENDS the turn. The
+  human's next message is the reply. The supervisor prompt makes you stop after
+  asking — do not call further tools until they answer.
+
+In both cases the tool returns the human's reply as plain text; route it per the
+table below.
 
 ## Routing the Selection
 
