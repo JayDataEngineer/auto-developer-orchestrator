@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from acp.helpers import text_block
+from acp.helpers import image_block, text_block
 from acp.schema import RequestPermissionResponse
 from acp.stdio import spawn_agent_process
 
@@ -105,7 +105,40 @@ def _update_kinds(updates: list[Any]) -> list[str]:
     return [str(getattr(u, "session_update", None)) for u in updates]
 
 
-async def _prompt_and_collect(prompt_text: str) -> tuple[str, list[str], Any]:
+def _solid_png_b64(w: int, h: int, rgb: tuple[int, int, int]) -> str:
+    """A valid solid-color RGB PNG (base64) from stdlib alone — no PIL dep.
+
+    The image-prompt test needs REAL, decodable image bytes (a malformed blob
+    could make the model error for the wrong reason and muddy the proof).
+    Hand-encoding a PNG is error-prone, so we synthesize a valid one: 8-bit
+    color-type-2 (RGB) IHDR + a zlib-compressed scanline stream + IEND. The
+    same recipe any PNG encoder uses."""
+    import base64
+    import struct
+    import zlib
+
+    def chunk(typ: bytes, data: bytes) -> bytes:
+        c = typ + data
+        return (
+            struct.pack(">I", len(data))
+            + c
+            + struct.pack(">I", zlib.crc32(c) & 0xFFFFFFFF)
+        )
+
+    raw = b"".join(b"\x00" + bytes(rgb) * w for _ in range(h))
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)  # 8-bit, RGB, default
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+    return base64.b64encode(png).decode()
+
+
+async def _prompt_and_collect(
+    prompt: list[Any] | str, *, tier: str | None = None,
+) -> tuple[str, list[str], Any]:
     client = _CollectingClient()
     # Forward the parent env so OPENCODE_API_KEY reaches the child past
     # ``acp.transports.default_environment``'s POSIX allowlist (which strips
@@ -113,6 +146,12 @@ async def _prompt_and_collect(prompt_text: str) -> tuple[str, list[str], Any]:
     # bare ``python -m pux_harness.acp`` the test spawns does not, so without
     # this the factory boots keyless and ``session/prompt`` returns
     # "Internal error". This mirrors Zed, which passes the editor env through.
+    # ``tier`` (e.g. "fast" → multimodal base) is threaded via PUX_TIER so the
+    # subprocess resolves a different base model without a separate launch path.
+    env = dict(os.environ)
+    if tier is not None:
+        env["PUX_TIER"] = tier
+    blocks = [text_block(prompt)] if isinstance(prompt, str) else list(prompt)
     async with spawn_agent_process(
         lambda _agent: client,
         sys.executable,
@@ -121,15 +160,12 @@ async def _prompt_and_collect(prompt_text: str) -> tuple[str, list[str], Any]:
         "--org",
         "general",
         cwd=str(REPO_ROOT),
-        env=os.environ,
+        env=env,
     ) as (conn, _proc):
         await asyncio.wait_for(conn.initialize(protocol_version=1), timeout=60)
         session = await asyncio.wait_for(conn.new_session(cwd=str(REPO_ROOT)), timeout=60)
         resp = await asyncio.wait_for(
-            conn.prompt(
-                prompt=[text_block(prompt_text)],
-                session_id=session.session_id,
-            ),
+            conn.prompt(prompt=blocks, session_id=session.session_id),
             timeout=240,
         )
         # Drain any session/update notifications still queued behind the
@@ -167,4 +203,46 @@ def test_acp_live_streams_tool_call() -> None:
     assert "tool_call" in kinds or any(
         k and "tool" in k for k in kinds
     ), f"no tool_call session_update streamed; kinds={kinds!r}"
+
+
+def test_acp_live_image_prompt_returns_answer() -> None:
+    """An image sent as an ACP ``ImageContentBlock`` reaches the multimodal BASE
+    model (mimo-v2.5, fast tier) and elicits a reply — the BACKING proof for the
+    ``prompt_capabilities.image=True`` we advertise for multimodal bases (#69).
+
+    Why this is a SEPARATE proof from browser-vision: the ACP path
+    (``convert_image_block_to_content_blocks``) emits the OpenAI ``image_url``
+    data-URI shape ``{"type":"image_url","image_url":{"url":"data:..."}}``,
+    NOT the canonical ``{"type":"image","base64",...}`` shape
+    ``BrowserVisionMiddleware`` already proved MiMo ingests. So ingestion of the
+    ACP image_url shape was genuinely UNVERIFIED — the audit row said
+    "advertised True — BACKING UNVERIFIED". This drives the REAL ACP stdio path
+    (ImageContentBlock → conversion → HumanMessage → MiMo) under PUX_TIER=fast
+    (multimodal base) and asserts the model replies. The synthesized PNG is a
+    valid 16×16 solid red, so a failure points at the image_url→model path, not
+    a malformed image. Skipped without PUX_E2E=1."""
+    prompt = [
+        text_block(
+            "I attached an image. In one short sentence, say what single color "
+            "fills it, then stop. Use no tools."
+        ),
+        image_block(
+            data=_solid_png_b64(16, 16, (255, 0, 0)), mime_type="image/png"
+        ),
+    ]
+    text, _kinds, resp = asyncio.run(_prompt_and_collect(prompt, tier="fast"))
+    assert resp is not None, "prompt returned None"
+    assert text.strip(), (
+        "agent streamed no reply to the image prompt — the image_url block was "
+        "likely rejected/ignored by the multimodal model (#69 image-backing gap)"
+    )
+    # The actual INGESTION proof (not just "didn't crash"): the prompt gave the
+    # model NO color hint, only "say what single color fills it". If the
+    # image_url block reached the multimodal base, the reply names red; if the
+    # block were silently dropped, the model would have to guess — so a missing
+    # "red" flags a real image_url→model gap, not a model-phrasing artifact.
+    assert "red" in text.lower(), (
+        f"reply did not identify the red image — the image_url block likely did "
+        f"not reach the model; reply={text!r}"
+    )
 

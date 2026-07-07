@@ -350,6 +350,13 @@ def test_acp_advertises_session_load_and_list(tmp_path, project_root) -> None:
         f"fork/resume/close advertised but unbacked — untruthful: "
         f"fork={sc.fork!r} resume={sc.resume!r} close={sc.close!r}"
     )
+    # Truthful image cap (#69): default-tier general's base model is glm-5.2
+    # (text-only) → image must be False over the wire, not the base class's
+    # hardcoded True. (The True branch is covered in-process below.)
+    assert init.agent_capabilities.prompt_capabilities.image is False, (
+        "default-tier general advertised image=True — a text-only base must not "
+        "offer image attach to the editor"
+    )
 
 
 def test_acp_session_load_and_list_roundtrip(tmp_path, project_root) -> None:
@@ -388,4 +395,46 @@ def test_acp_session_load_and_list_roundtrip(tmp_path, project_root) -> None:
     # resume.
     assert bogus_err is not None, (
         "load_session(bogus id) did NOT raise — the existence guard is missing"
+    )
+
+
+def test_acp_image_capability_gates_on_base_multimodal(tmp_path, monkeypatch) -> None:
+    """``prompt_capabilities.image`` is truthful: True only when the org's BASE
+    (supervisor) model is multimodal.
+
+    The base class hardcodes ``image=True`` for every org; we gate it on
+    ``driver_multimodal(role="base", org=...)`` — the SAME seam
+    ``BrowserVisionMiddleware`` uses. So a text-only base (glm-5.2, default
+    tier) does NOT advertise image-attach to the editor, while a multimodal base
+    (mimo-v2.5, fast tier) does. Backing for the multimodal case is LIVE-PROVEN
+    by the browser-vision work; the point here is the TRUTHFUL gate, not
+    re-proving image ingestion. In-process (no subprocess, no tokens). #69."""
+    import pux_harness.threads as threads_mod
+    from pux_harness.acp import _RegisteringAgentServerACP
+    from pux_harness.threads import open_thread_store
+
+    monkeypatch.setattr(threads_mod, "PUX_API_DB", str(tmp_path / "img.sqlite"))
+
+    async def image_flag() -> bool:
+        async with open_thread_store() as store:
+            srv = _RegisteringAgentServerACP(
+                agent=lambda _ctx: None,
+                store=store,
+                org="general",
+                models=[{"value": "x", "name": "x", "description": "x"}],
+            )
+            resp = await srv.initialize(protocol_version=1)
+            return resp.agent_capabilities.prompt_capabilities.image
+
+    # default tier → base glm-5.2 (text-only) → image must be False
+    monkeypatch.delenv("PUX_TIER", raising=False)
+    assert asyncio.run(image_flag()) is False, (
+        "default-tier general (glm-5.2) advertised image=True — a text-only "
+        "base must not offer image attach"
+    )
+    # fast tier → base mimo-v2.5 (multimodal) → image must be True
+    monkeypatch.setenv("PUX_TIER", "fast")
+    assert asyncio.run(image_flag()) is True, (
+        "fast-tier general (mimo-v2.5) advertised image=False — a multimodal "
+        "base must offer image attach"
     )
