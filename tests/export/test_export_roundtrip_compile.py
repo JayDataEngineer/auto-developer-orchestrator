@@ -23,35 +23,13 @@ import io
 import json
 import tarfile
 from pathlib import Path
-from typing import Any
-
 import pytest
 import yaml
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
 
 from pux_harness.agent.orgs import discover_orgs
 from pux_harness.export import _TEXT_SUFFIXES, _normalize_specialists_refs, export_org
 from pux_harness.kit import compile_org
-
-
-# --- a scripted model (offline; compile-time only, never invoked here) ------
-
-class _ScriptedModel(BaseChatModel):
-    """Minimal BaseChatModel. ``compile_org`` builds the graph structure without
-    invoking the model, so this never runs — it just has to satisfy the type."""
-
-    @property
-    def _llm_type(self) -> str:
-        return "scripted"
-
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "_ScriptedModel":
-        return self
-
-    def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None,
-                  **kwargs: Any) -> ChatResult:
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="ok"))])
+from pux_harness.kit._testing import ScriptedModel
 
 
 # --- the content-rewrite helper --------------------------------------------
@@ -119,7 +97,7 @@ def test_exported_org_recompiles_from_unpack_tree(org, tmp_path, project_root):
 
     unpack_root = _extract_archive(archive, tmp_path / "unpack")
     # compile from the FOREIGN unpacked tree — not the orchestrator root.
-    graph = compile_org(org, project_root=unpack_root, model=_ScriptedModel(), tools=[])
+    graph = compile_org(org, project_root=unpack_root, model=ScriptedModel(), tools=[])
     assert graph is not None, f"{org}: compile_org returned None"
     # The compiled object must carry a graph (CompiledStateGraph / subclass).
     assert hasattr(graph, "ainvoke"), f"{org}: not a runnable graph: {type(graph)}"
