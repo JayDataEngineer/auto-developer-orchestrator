@@ -53,6 +53,12 @@ def stubbed_factory(monkeypatch):
     monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
     monkeypatch.setattr(stack, "AuditMiddleware", lambda **kw: "AUDIT")
     monkeypatch.setattr(stack, "RubricMiddleware", lambda **kw: "RUBRIC")
+    # model_retry is default-on for every supervisor (#84) — stub it so the
+    # build emits a stable marker instead of a real ModelRetryMiddleware
+    # (distinct object per build would break the idempotency check). tool_retry
+    # is opt-in/gated, but stubbed for symmetry.
+    monkeypatch.setattr(stack, "ModelRetryMiddleware", lambda **kw: "RETRY")
+    monkeypatch.setattr(stack, "ToolRetryMiddleware", lambda **kw: "TOOLRETRY")
     monkeypatch.setattr(stack, "get_model", lambda *a, **k: "MODEL")
     monkeypatch.setattr(stack, "build_grader_tools", lambda *a, **k: ["g1"])
     monkeypatch.setattr(orgs, "get_model", lambda *a, **k: "WORKER_MODEL")
@@ -203,11 +209,12 @@ def test_all_real_orgs_build_in_one_session(stubbed_factory):
 def test_every_real_org_emits_only_registry_middleware(stubbed_factory):
     """No real org's stack carries a middleware instance that bypassed the
     registry. Every emitted marker is one of the stubbed registry builders
-    (routing/session_guide/audit/rubric; ``context`` flattens to nothing under
-    the stub; ``browser_vision`` is env-off). If a future change hand-appends a
+    (routing/session_guide/audit/rubric; ``model_retry`` is default-on for every
+    supervisor per #84; ``context`` flattens to nothing under the stub;
+    ``browser_vision`` is env-off). If a future change hand-appends a
     middleware in ``build_stack`` outside ``_resolve_toggles`` (the drift the
     audit removed), this fires — there is exactly ONE stack path."""
-    allowed = {"ROUTE", "GUIDE", "AUDIT", "RUBRIC"}
+    allowed = {"ROUTE", "GUIDE", "AUDIT", "RUBRIC", "RETRY"}
     for org in REAL_ORGS:
         plan = _build_real_org(org, stubbed_factory)
         emitted = {str(m) for m in plan.supervisor_middleware}
