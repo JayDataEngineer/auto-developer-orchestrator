@@ -550,10 +550,11 @@ def test_supervisor_only_middleware_rejected_on_subagent(fake_tree, stub_factory
 # --- the rules seam (runtime-facts policy layer) ---------------------------
 
 def test_rules_seam_is_identity_today():
-    """No rule is wired yet — ``_apply_rules`` returns the names unchanged
-    regardless of the runtime facts. The seam is explicit + tested so the
-    policy layer is legible when the motivating rule (MCP → drop ask_user)
-    lands."""
+    """``_apply_rules`` is the MIDDLEWARE-level seam and stays identity: the
+    runtime-facts rule that landed (drop ``ask_user`` over MCP/autonomous) is
+    TOOL-level, so it's construction-gated in ``build_stack`` rather than
+    filtered through here. A future rule that toggles a MIDDLEWARE on transport
+    would wire into this function; until then it returns the names unchanged."""
     names = ["routing", "session_guide"]
     facts = stack.RuntimeFacts(transport="acp", mcp_active=True)
     assert stack._apply_rules(facts, stack.Scope.SUPERVISOR, names) == names
@@ -563,11 +564,13 @@ def test_rules_seam_is_identity_today():
 
 
 def test_runtime_facts_defaults():
-    """The default RuntimeFacts is the serve-transport, no-MCP baseline
-    (build_graph threads nothing today → this default is used)."""
+    """The default RuntimeFacts is the serve-transport, no-MCP, non-autonomous
+    baseline (correct for the runner + AG-UI web path; the ACP / direct / mcp
+    entrypoints pass a real RuntimeFacts)."""
     f = stack.RuntimeFacts()
     assert f.transport == "serve"
     assert f.mcp_active is False
+    assert f.autonomous is False
 
 
 # --- validate_overrides (the offline contract surface) ---------------------
@@ -676,3 +679,80 @@ def test_full_supervisor_order_is_canonical_registry_order(fake_tree, stub_facto
     assert mw[:4] == ["CONTEXT", "ROUTE", "GUIDE", "RUBRIC"]
     assert isinstance(mw[-1], BrowserVisionMiddleware)
     assert len(mw) == 5  # exactly: context, routing, session_guide, rubric, browser_vision
+
+
+# --- ask_user HITL construction gate (opt-in AND not mcp/autonomous) --------
+
+def _opt_in_ask_user(fake_tree: Path) -> None:
+    """Write ``ask_user: true`` to org ``p``'s profile.yaml — the ORG opt-in half
+    of the construction gate. (``build_stack`` reads it via ``load_ask_user_enabled``
+    independent of the ``profile`` param, which stays ``None`` here.)"""
+    (fake_tree / "orgs" / "p" / "profile.yaml").write_text("ask_user: true\n")
+
+
+def _names(plan) -> set[str]:
+    return {t.name for t in plan.supervisor_tools}
+
+
+def test_ask_user_absent_when_not_opted_in(fake_tree, stub_factory):
+    """No ``ask_user:`` flag → the tool is absent from the supervisor surface
+    (the byte-identical default). The model can't call what isn't there."""
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+        facts=stack.RuntimeFacts(transport="serve"),
+    )
+    assert "ask_user" not in _names(plan)
+
+
+def test_ask_user_present_when_opted_in_over_web(fake_tree, stub_factory):
+    """Opt-in + web transport + not mcp/autonomous → ask_user IS in the
+    supervisor surface. The web branch interrupts (the reply resumes the graph),
+    so the supervisor prompt is NOT amended with the end-turn suffix."""
+    _opt_in_ask_user(fake_tree)
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+        facts=stack.RuntimeFacts(transport="serve"),
+    )
+    assert "ask_user" in _names(plan)
+    assert "END your turn" not in plan.supervisor_prompt
+
+
+def test_ask_user_over_editor_appends_end_turn_suffix(fake_tree, stub_factory):
+    """Opt-in + editor transport (acp) → ask_user present AND the supervisor
+    prompt gains the end-turn suffix (the editor can't free-text in a permission
+    popover, so the agent must stop + the user answers next turn)."""
+    _opt_in_ask_user(fake_tree)
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+        facts=stack.RuntimeFacts(transport="acp"),
+    )
+    assert "ask_user" in _names(plan)
+    assert "END your turn" in plan.supervisor_prompt
+
+
+def test_ask_user_dropped_over_mcp_even_if_opted_in(fake_tree, stub_factory):
+    """The MCP caller can't answer an ask_user → the tool is DROPPED at
+    construction (absent from the surface), not constructed-then-no-op'd. The
+    org flag is the opt-in half; the runtime gate (``mcp_active``) is the other."""
+    _opt_in_ask_user(fake_tree)
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+        facts=stack.RuntimeFacts(transport="mcp", mcp_active=True),
+    )
+    assert "ask_user" not in _names(plan)
+
+
+def test_ask_user_dropped_when_autonomous_even_if_opted_in(fake_tree, stub_factory):
+    """Headless/autonomous runtimes have no human to resume an interrupt →
+    ask_user is dropped at construction."""
+    _opt_in_ask_user(fake_tree)
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+        facts=stack.RuntimeFacts(transport="serve", autonomous=True),
+    )
+    assert "ask_user" not in _names(plan)
