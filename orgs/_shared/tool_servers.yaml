@@ -34,3 +34,31 @@ media:
   url: ${PUX_MCP_MEDIA_URL}
   # Env: PUX_MCP_MEDIA_URL — the SSE endpoint of the media-analysis MCP server
   # (vision/audio/video tools), e.g. http://<host>:8101.
+
+github:
+  kind: mcp
+  transport: stdio
+  command: github-mcp-server
+  args: [stdio]
+  env:
+    # github-mcp-server authenticates with a PAT read from
+    # GITHUB_PERSONAL_ACCESS_TOKEN. .env exports GITHUB_TOKEN; map it here. If
+    # GITHUB_TOKEN is unset, _substitute_spec fails LOUD at load (no silent
+    # empty-PAT) and McpSessionManager.open() skips this server (per-server
+    # isolation). The token needs repo + read:org scopes for the toolsets below.
+    GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+  # No `tools:` allowlist yet — take everything the server exposes (verified
+  # against the LIVE tools/list in Phase E; narrow to a curated set as a
+  # follow-on once the tool count is known). See _apply_allowlist.
+  github:
+    # Release-bootstrap source: when `github-mcp-server` is NOT on PATH,
+    # mcp_bootstrap.ensure_server fetches this release asset for the host's
+    # {os}/{arch}, extracts the binary to .pux/mcp-servers/github/<version>/,
+    # and rewrites `command` to it. Idempotent (PATH → cache → download
+    # fallback). `version: latest` follows /releases/latest; pin (e.g. v1.5.0)
+    # for reproducibility — the cache is keyed by version.
+    repo: github/github-mcp-server
+    asset: "github-mcp-server_*{os}*{arch}*.tar.gz"
+    binary: github-mcp-server
+    version: latest
+

@@ -353,31 +353,45 @@ def test_open_one_bad_server_does_not_brick_the_batch(monkeypatch):
 # ===========================================================================
 
 def test_general_ships_web_research(monkeypatch):
-    """The MCP consumer gap is CLOSED: a shipped org actually declares a foreign
-    MCP server. ``general`` (the general-purpose CTO fallback) opts into
-    ``web_research`` via ``orgs/general/policy.yaml``. This runs against the REAL
-    orchestrator ``orgs/`` tree (no tmp fixture) so it proves the production
-    wiring end-to-end at the resolver — if the declaration is removed or the
-    catalog ref drifts, this fails. The live handshake + the agent invoking the
-    tool are proven separately (wild run 2026-07-06); this is the offline lock
-    that the wiring ships and resolves.
+    """The MCP consumer gap is CLOSED: a shipped org actually declares foreign
+    MCP servers. ``general`` (the general-purpose CTO fallback) opts into BOTH
+    ``web_research`` (http) and ``github`` (stdio) via ``orgs/general/policy.yaml``.
+    This runs against the REAL orchestrator ``orgs/`` tree (no tmp fixture) so it
+    proves the production wiring end-to-end at the resolver — if either
+    declaration is removed or a catalog ref drifts, this fails. The live handshake
+    + the agent invoking the tool are proven separately (wild run 2026-07-06 + the
+    github release-bootstrap live proof); this is the offline lock that the wiring
+    ships and resolves.
 
-    web_research's URL is env-injected (``${PUX_MCP_WEB_RESEARCH_URL}``), not
-    git-tracked — the strict runtime path needs the var set, so this test sets
-    it. The offline contract passes WITHOUT it (permissive) — see
+    web_research's URL is env-injected (``${PUX_MCP_WEB_RESEARCH_URL}``); github's
+    PAT is mapped from ``${GITHUB_TOKEN}``. Both are env-injected (not git-tracked)
+    — the strict runtime path needs both vars set, so this test sets them. The
+    offline contract passes WITHOUT them (permissive) — see
     ``test_placeholder_url_passes_contract_but_fails_strict_without_env``."""
     monkeypatch.setenv("PUX_MCP_WEB_RESEARCH_URL", "https://injected.example/mcp")
-    specs = resolve_tool_servers("general")
-    assert len(specs) == 1
-    spec = specs[0]
-    assert spec.name == "web_research"
-    assert spec.transport == "http"
+    # Resolver-only placeholder: this is a pure-data offline resolution test (no
+    # network, no server fork), so a fake token satisfies _substitute_spec's
+    # strict path. github's LIVE handshake is proven in the bootstrap live proof.
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_resolver-only-not-a-live-key")
+    specs = {s.name: s for s in resolve_tool_servers("general")}
+    # web_research — the original MCP consumer wiring (http, env-injected URL).
+    web = specs["web_research"]
+    assert web.transport == "http"
     # The URL is the env-injected value, NOT a git-tracked literal.
-    assert spec.url == "https://injected.example/mcp"
+    assert web.url == "https://injected.example/mcp"
     # The catalog allowlist (verified against the live server's tools/list):
     # the server exposes scrape, not fetch.
-    assert spec.tools == ["search", "scrape", "research"]
-    # The declaration is contract-clean (valid catalog ref, no dangling name).
+    assert web.tools == ["search", "scrape", "research"]
+    # github — the stdio release-bootstrap server (PAT mapped, binary fetched
+    # on-demand). Proves the github: block survives resolution intact for the
+    # bootstrap seam (mcp_bootstrap.ensure_server) to consume at open() time.
+    gh = specs["github"]
+    assert gh.transport == "stdio"
+    assert gh.command == "github-mcp-server"
+    assert gh.env["GITHUB_PERSONAL_ACCESS_TOKEN"] == "ghp_resolver-only-not-a-live-key"
+    assert gh.github["repo"] == "github/github-mcp-server"
+    assert gh.github["binary"] == "github-mcp-server"
+    # Both declarations are contract-clean (valid catalog refs, no dangling names).
     assert validate_tool_servers("general") == []
 
 

@@ -1,0 +1,19 @@
+# Declarative policy for the dev-bot org.
+#
+# dev-bot is the coding org (the Claude-Code-equivalent CTO). Like general, this
+# is intentionally a tool_servers-only policy: the sandbox layer treats "no
+# policy" (NoPolicy) and "policy with empty sections" as IDENTICAL for execution
+# — egress_rules() returns "" for both (no egress.conf staged → open), and
+# resolve_tier() returns the "isolated" fallback for both. So the SOLE effect of
+# this file is opting dev-bot into the foreign MCP tool servers declared in
+# orgs/_shared/tool_servers.yaml — dev-bot keeps its existing sandbox behavior
+# and only gains the github server. Verified 2026-07-06.
+#
+# github is a stdio server: McpSessionManager forks the github-mcp-server binary
+# HOST-SIDE (independent of dev-bot's container egress). The binary is fetched
+# on-demand from the GitHub release when not on PATH (the mcp_bootstrap
+# fallback); its PAT is mapped from .env's GITHUB_TOKEN in the catalog entry.
+# Per-server isolation: a missing token or failed bootstrap logs ERROR + zero
+# github tools; dev-bot still starts.
+tool_servers:
+  - github

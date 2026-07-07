@@ -14,5 +14,13 @@
 # independent of general's sandbox egress. If the server is unreachable from a
 # given deployment, McpSessionManager.open() logs a loud ERROR and contributes
 # zero tools — general still starts and works (per-server isolation).
+#
+# github is a stdio server: McpSessionManager forks the github-mcp-server binary
+# HOST-SIDE (also independent of the container egress). Its binary is fetched
+# on-demand from the GitHub release when not on PATH (the mcp_bootstrap
+# fallback), and its PAT is mapped from .env's GITHUB_TOKEN in the catalog
+# entry. Same per-server isolation: a missing token or failed bootstrap logs
+# ERROR + zero github tools; general still starts.
 tool_servers:
   - web_research
+  - github
