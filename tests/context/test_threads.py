@@ -135,3 +135,58 @@ def test_persistence_survives_close_reopen(tmp_path):
             assert row is not None and row[0] == "invest"
 
     asyncio.run(go())
+
+
+def test_list_threads_filters_by_org_and_orders_newest_first(tmp_path):
+    """``list_threads`` backs the ACP ``session/list`` surface: returns every row
+    (newest-first by created_at), and narrows to one org when asked — so an ACP
+    client enumerating general's sessions never sees invest's. Each row carries
+    the four index columns as a dict (the shape load_session/list_sessions read)."""
+
+    async def go():
+        db = tmp_path / "list.sqlite"
+        async with open_thread_store(db) as store:
+            await store.register_thread("g1", "general", {"source": "acp"})
+            await store.register_thread("i1", "invest", {"source": "acp"})
+            await store.register_thread("g2", "general", {"source": "direct"})
+
+            all_rows = await store.list_threads()
+            assert {r["thread_id"] for r in all_rows} == {"g1", "i1", "g2"}
+            # newest-first: g2 was registered last → it leads
+            assert all_rows[0]["thread_id"] == "g2", (
+                f"list_threads not newest-first: {[r['thread_id'] for r in all_rows]}"
+            )
+            # row shape — the keys load/list read
+            assert set(all_rows[0]) == {"thread_id", "org", "metadata", "created_at"}
+
+            general = await store.list_threads(org="general")
+            assert {r["thread_id"] for r in general} == {"g1", "g2"}
+            assert all(r["org"] == "general" for r in general)
+
+            invest = await store.list_threads(org="invest")
+            assert {r["thread_id"] for r in invest} == {"i1"}
+
+    asyncio.run(go())
+
+
+def test_get_thread_returns_row_or_none(tmp_path):
+    """``get_thread`` backs the ACP ``session/load`` existence + org check: the
+    row for a known id (with its org, so load can reject a cross-org request),
+    and None for an unknown id (so load raises RequestError, not a phantom handle)."""
+
+    async def go():
+        db = tmp_path / "get.sqlite"
+        async with open_thread_store(db) as store:
+            await store.register_thread("known", "general", {"source": "acp"})
+
+            hit = await store.get_thread("known")
+            assert hit is not None
+            assert hit["thread_id"] == "known"
+            assert hit["org"] == "general"
+            assert json.loads(hit["metadata"]) == {"source": "acp"}
+            assert hit["created_at"]
+
+            miss = await store.get_thread("no-such-id")
+            assert miss is None
+
+    asyncio.run(go())

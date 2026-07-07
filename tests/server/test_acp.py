@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from acp.exceptions import RequestError
 from acp.stdio import spawn_agent_process
 
 
@@ -270,3 +271,121 @@ def test_acp_advertises_mimo_not_openai(project_root) -> None:
         s for s in surface if "openai" in str(s).lower() or "gpt" in str(s).lower()
     ]
     assert not leaked, f"OpenAI/ChatGPT model leaked into advertisement: {leaked!r}"
+
+
+# ---------------------------------------------------------------------------
+# session/load + session/list (#68) — survive-restart resume primitive
+# ---------------------------------------------------------------------------
+#
+# Hermes (daemon-backed sessions that survive editor close) + acpx (parallel
+# workstreams / k8s-batch session isolation) BOTH depend on session/load +
+# session/list: pick a prior thread back up after pux exits, and enumerate an
+# org's threads. deepagents-acp 0.0.8 advertises neither (the latest PyPI
+# release, so no upgrade path) — pux hand-rolls both against the shared
+# pux_threads index + persistent checkpointer. These drive the REAL stdio
+# transport. No model tokens, no sandbox boot: the factory fires lazily from
+# ``prompt``, which none of these exercises.
+
+
+async def _session_load_list(db: Path, harness_root: Path) -> Any:
+    """initialize + new_session + list_sessions + load_session(good) +
+    load_session(bogus) over the REAL stdio transport against a tmp PUX_API_DB.
+
+    Returns ``(init, new, listed, loaded, bogus_err)``. The bogus load is
+    EXPECTED to raise ``RequestError`` (the existence guard); ``bogus_err`` is
+    ``None`` if it did not (a bug). One ``spawn_agent_process`` context serves
+    all five calls — list/load must run on the SAME connection that minted the
+    session. Mirrors ``_handshake_with_db``'s explicit ``env=`` (the ACP
+    transport ships a TRIMMED env allowlist; ``monkeypatch.setenv`` on the
+    parent does not reach the subprocess)."""
+    async with spawn_agent_process(
+        lambda _agent: _NoopClient(),
+        sys.executable,
+        "-m",
+        "pux_harness.acp",
+        "--org",
+        "general",
+        cwd=str(harness_root),
+        env={"PUX_API_DB": str(db), "PUX_PROJECT_ROOT": str(harness_root)},
+    ) as (conn, _proc):
+        init = await asyncio.wait_for(conn.initialize(protocol_version=1), timeout=30)
+        assert init is not None, "initialize returned None"
+        new = await asyncio.wait_for(conn.new_session(cwd=str(harness_root)), timeout=30)
+        listed = await asyncio.wait_for(conn.list_sessions(), timeout=30)
+        loaded = await asyncio.wait_for(
+            conn.load_session(cwd=str(harness_root), session_id=new.session_id),
+            timeout=30,
+        )
+        bogus_err: RequestError | None = None
+        try:
+            await asyncio.wait_for(
+                conn.load_session(
+                    cwd=str(harness_root), session_id="no-such-session-zzz"
+                ),
+                timeout=30,
+            )
+        except RequestError as exc:
+            bogus_err = exc
+        return init, new, listed, loaded, bogus_err
+
+
+def test_acp_advertises_session_load_and_list(tmp_path, project_root) -> None:
+    """initialize advertises the session surfaces we ACTUALLY back:
+    ``load_session=True`` + ``session_capabilities.list`` set, with
+    ``fork``/``resume``/``close`` left UNSET (UNSTABLE in the spec + unbacked).
+
+    Truthful-capability surface — a client (Hermes/acpx) only offers resume/list
+    paths that exist. This is the audit-row-3 + audit-row-7 close from
+    [[protocol-surface-map]]. Drives the REAL stdio transport; no tokens, no
+    sandbox."""
+    init, *_ = asyncio.run(_session_load_list(tmp_path / "cap.sqlite", project_root))
+    caps = init.agent_capabilities
+    assert caps.load_session is True, (
+        f"load_session not advertised (got {caps.load_session!r})"
+    )
+    assert caps.session_capabilities is not None, "session_capabilities missing"
+    sc = caps.session_capabilities
+    assert sc.list is not None, "session_capabilities.list not advertised"
+    assert sc.fork is None and sc.resume is None and sc.close is None, (
+        f"fork/resume/close advertised but unbacked — untruthful: "
+        f"fork={sc.fork!r} resume={sc.resume!r} close={sc.close!r}"
+    )
+
+
+def test_acp_session_load_and_list_roundtrip(tmp_path, project_root) -> None:
+    """A session created via new_session is LISTABLE + LOADABLE over the REAL
+    stdio transport, and load_session on a bogus id raises RequestError.
+
+    list_sessions returns the just-created session (with a cwd + updated_at);
+    load_session on the real id succeeds and re-renders the model config_option
+    (mirrors new_session); load_session on a bogus id is rejected (the
+    existence + org-isolation guard Hermes/acpx rely on to never hand out a
+    handle to a foreign or stale session). No tokens, no sandbox."""
+    _init, new, listed, loaded, bogus_err = asyncio.run(
+        _session_load_list(tmp_path / "load-list.sqlite", project_root)
+    )
+    sid = new.session_id
+    assert sid, "new_session produced no session_id"
+
+    # list_sessions shows the just-created session, with a cwd + updated_at
+    ids = [s.session_id for s in listed.sessions]
+    assert sid in ids, f"new session {sid!r} absent from list_sessions: {ids!r}"
+    row = next(s for s in listed.sessions if s.session_id == sid)
+    assert row.cwd, "listed session carries no cwd"
+    assert row.updated_at, "listed session carries no updated_at (created_at)"
+
+    # load_session on the real id re-renders the model config_option (the
+    # same dropdown new_session returns) — proves load mirrors new's per-session
+    # state hydration, which a subsequent prompt needs.
+    opts = getattr(loaded, "config_options", None) or []
+    cats = [getattr(getattr(o, "root", o), "category", None) for o in opts]
+    assert "model" in cats, (
+        f"load_session did not re-render the model config_option: {opts!r}"
+    )
+
+    # load_session on a bogus id is rejected — the survive-restart existence
+    # guard. Without it a client could load a phantom session and get an empty
+    # resume.
+    assert bogus_err is not None, (
+        "load_session(bogus id) did NOT raise — the existence guard is missing"
+    )
