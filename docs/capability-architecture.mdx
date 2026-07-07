@@ -117,6 +117,41 @@ Async bridge: `pux-harness/pux_harness/agent/mcp_client.py` (`McpSessionManager`
 Per-server isolation: a server that is unreachable or fails `tools/list` contributes **zero**
 tools + a loud `ERROR` log; it does not crash the org.
 
+**Release-bootstrap for stdio binaries.** A stdio server needs a local binary
+on `command`. A catalog entry may carry a `github:` block so the harness fetches
+that binary on demand when it is not already present:
+
+```yaml
+github:
+  kind: mcp
+  transport: stdio
+  command: github-mcp-server          # resolved: PATH → .pux cache → release download
+  args: [stdio]
+  env:
+    GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}   # .env → the server's own auth
+  github:
+    repo: github/github-mcp-server
+    asset: "github-mcp-server_*{os}*{arch}*.tar.gz"  # {os}/{arch} tokens glob the host asset
+    binary: github-mcp-server
+    version: latest                    # /releases/latest; or pin "v1.5.0" (cache is keyed by it)
+```
+
+`McpSessionManager.open()` calls `mcp_bootstrap.ensure_server(spec)` for each
+stdio spec with a `github:` block, **before** forking: `shutil.which` (happy
+path, zero network) → cache hit at `.pux/mcp-servers/<name>/<version>/<binary>`
+(warm `.pux/`, zero network) → FALLBACK download from the GitHub release
+(atomic scratch→move so the cache never holds a partial). On a resolved path the
+spec's `command` is rewritten to it; a failed download is indistinguishable from
+a broken server (the existing per-server isolation absorbs it). The release
+fetch is OPTIONAL-auth: a `GITHUB_TOKEN` lifts the rate limit, but public
+releases work with no token — a present-but-invalid token (expired PAT) is
+dropped on 401 and retried unauth. The `env` block is the server's OWN auth
+(a separate concern): `${GITHUB_TOKEN}` is substituted at load and reaches the
+forked process via `env = dict(os.environ, **spec.env)`.
+
+First consumer: `github-mcp-server` for `general` + `dev-bot` (the coding org).
+The `github:` block is generic — any release-hosted binary server reuses it.
+
 ### 3c. Sandbox scripts — in-container, unstructured
 
 Plain Python (or any) programs in `orgs/<org>/sandbox/`, invoked by the agent through its
