@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from pux_harness.agent.orgs import discover_orgs
-from pux_harness.export import _KIT_DIR, _KIT_RUNTIME_FILES, export_org
+from pux_harness.pack import _KIT_DIR, _KIT_RUNTIME_FILES, pack_org
 
 # The kit files that MUST vendor (the portable compiler surface). Mirrors
 # ``export._KIT_RUNTIME_FILES``; asserting here too catches a drift where the
@@ -53,7 +53,7 @@ def test_archive_carries_runnable_scaffold(org, tmp_path, project_root):
     """Every export vendors the slim kit + pyproject + run.py + README, and the
     manifest inventories them under ``runtime_scaffold``."""
     archive = tmp_path / f"{org}.tar.gz"
-    export_org(org, archive, project_root=project_root)
+    pack_org(org, archive, project_root=project_root)
     with tarfile.open(archive, "r:gz") as tar:
         names = {m.name.removeprefix(f"{org}/") for m in tar.getmembers() if m.isfile()}
         mf_file = tar.extractfile(f"{org}/manifest.json")
@@ -82,7 +82,7 @@ def test_vendored_kit_matches_source_kit(tmp_path, project_root):
     If a kit file changes, the snapshot travels with the next export. Guards that
     ``_KIT_RUNTIME_FILES`` stays in sync with the runtime surface."""
     archive = tmp_path / "general.tar.gz"
-    export_org("general", archive, project_root=project_root)
+    pack_org("general", archive, project_root=project_root)
     with tarfile.open(archive, "r:gz") as tar:
         for name in _KIT_RUNTIME_FILES:
             member = tar.extractfile(f"general/pux_harness/kit/{name}")
@@ -103,7 +103,7 @@ def test_vendored_kit_compiles_org_standalone(tmp_path, project_root):
     the unpack dir, NOT the installed pux-harness) — proving the archive runs
     without pux-harness on the path."""
     archive = tmp_path / "general.tar.gz"
-    export_org("general", archive, project_root=project_root)
+    pack_org("general", archive, project_root=project_root)
     unpack = _extract(archive, tmp_path / "unpack")
 
     script = (
@@ -139,7 +139,7 @@ def test_runner_check_compiles_offline(tmp_path, project_root):
     a scripted model — the offline smoke a consumer runs with no key. Proves the
     runner wires the vendored kit + org together end-to-end."""
     archive = tmp_path / "general.tar.gz"
-    export_org("general", archive, project_root=project_root)
+    pack_org("general", archive, project_root=project_root)
     unpack = _extract(archive, tmp_path / "unpack")
 
     result = subprocess.run(
@@ -162,7 +162,7 @@ def test_pyproject_declares_lean_runtime_deps(tmp_path, project_root):
     and carries NO heavy harness deps (docker / fastapi / uvicorn / ag-ui /
     fastmcp / deepagents-acp) — the export must stay slim + runnable."""
     archive = tmp_path / "general.tar.gz"
-    export_org("general", archive, project_root=project_root)
+    pack_org("general", archive, project_root=project_root)
     with tarfile.open(archive, "r:gz") as tar:
         member = tar.extractfile("general/pyproject.toml")
         assert member is not None, "pyproject.toml missing from archive"
@@ -192,7 +192,7 @@ def test_runner_seamless_dotenv_load(tmp_path, project_root, monkeypatch):
     present + the vendored kit ships the helper) — the live load behavior is
     pinned in ``tests/harness/test_bootstrap.py``."""
     archive = tmp_path / "general.tar.gz"
-    export_org("general", archive, project_root=project_root)
+    pack_org("general", archive, project_root=project_root)
     with tarfile.open(archive, "r:gz") as tar:
         run_py = tar.extractfile("general/run.py").read().decode("utf-8")
         bootstrap_src = tar.extractfile(

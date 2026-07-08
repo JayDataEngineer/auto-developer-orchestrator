@@ -1,6 +1,6 @@
-"""``export_org(project_root=…)`` honors a FOREIGN project root.
+"""``pack_org(project_root=…)`` honors a FOREIGN project root.
 
-This is the portability contract: ``export_org`` must package an org from
+This is the portability contract: ``pack_org`` must package an org from
 *wherever it lives* — a standalone consumer app's tree that is NOT the
 orchestrator — using ONLY the ``project_root`` argument. Before the env-pin
 fix, ``project_root`` was accepted but silently ignored: every downstream
@@ -8,7 +8,7 @@ resolver (``discover_orgs`` / ``_org_path`` / ``_resolve_shared_agents`` /
 ``_resolve_tool_servers``) funneled through ``kit._paths.project_root()`` ←
 ``$PUX_PROJECT_ROOT`` ← CWD, so exporting from a foreign root raised
 ``FileNotFoundError`` (the org was never discovered there). The sibling test
-``test_export_org_never_leaks_data_secrets`` masked the bug by monkeypatching
+``test_pack_org_never_leaks_data_secrets`` masked the bug by monkeypatching
 those resolvers onto a tmp tree.
 
 These tests prove the fix WITHOUT monkeypatching any resolver: the process
@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from pux_harness.export import export_org
+from pux_harness.pack import pack_org
 
 # The real orchestrator root — where the process CWD is parked so the default
 # (CWD-based) resolver would look HERE, not in the foreign tmp tree. "foreign"
@@ -86,7 +86,7 @@ def _manifest(tar_path: Path, org: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def test_export_from_foreign_root_without_monkeypatch(tmp_path, monkeypatch):
-    """``export_org(project_root=foreign)`` discovers + packages an org that
+    """``pack_org(project_root=foreign)`` discovers + packages an org that
     does NOT exist in the orchestrator, with CWD parked at the orchestrator.
 
     Without the env-pin fix this raises FileNotFoundError (the org is absent
@@ -105,7 +105,7 @@ def test_export_from_foreign_root_without_monkeypatch(tmp_path, monkeypatch):
     }, "test前提 broken: 'foreign' must not be a real orchestrator org"
 
     output = tmp_path / "foreign.tar.gz"
-    result = export_org("foreign", output, project_root=foreign)
+    result = pack_org("foreign", output, project_root=foreign)
 
     assert result == output
     assert output.is_file()
@@ -174,10 +174,10 @@ def test_project_root_env_is_restored_no_bleed(tmp_path, monkeypatch):
 
     out_a = tmp_path / "a.tar.gz"
     out_b = tmp_path / "b.tar.gz"
-    export_org("alpha", out_a, project_root=root_a)
+    pack_org("alpha", out_a, project_root=root_a)
     # Env must be unset again before the second call — proves restore fired.
-    assert _ENV not in os.environ, "PUX_PROJECT_ROOT bled past export_org"
-    export_org("beta", out_b, project_root=root_b)
+    assert _ENV not in os.environ, "PUX_PROJECT_ROOT bled past pack_org"
+    pack_org("beta", out_b, project_root=root_b)
     assert _ENV not in os.environ, "PUX_PROJECT_ROOT bled past second export"
 
     names_a = _tar_files(out_a)
@@ -199,7 +199,7 @@ def test_foreign_root_default_uses_cwd_when_unset(tmp_path, monkeypatch):
     monkeypatch.delenv(_ENV, raising=False)
 
     output = tmp_path / "cwdorg.tar.gz"
-    export_org("cwdorg", output)  # no project_root kwarg
+    pack_org("cwdorg", output)  # no project_root kwarg
     assert output.is_file()
     assert "cwdorg/orgs/cwdorg/org.yaml" in _tar_files(output)
 
@@ -215,7 +215,7 @@ def test_archive_extracts_to_a_readable_tree(tmp_path, monkeypatch):
     monkeypatch.delenv(_ENV, raising=False)
 
     output = tmp_path / "xorg.tar.gz"
-    export_org("xorg", output, project_root=foreign)
+    pack_org("xorg", output, project_root=foreign)
 
     unpack = tmp_path / "unpack"
     unpack.mkdir()

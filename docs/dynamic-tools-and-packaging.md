@@ -6,8 +6,16 @@
 real-org contract builds green; `pux check-contract` clean for all 10 orgs). **P2 shipped**
 (2026-07-08): graduation (`pux promote-function`, c→b, lib→git-tracked `sandbox/functions/`)
 + pruning (`pux archive-function`, reversible `.archive/`) — proven (9 unit tests incl. a
-real-python3 graduation proof; live CLI round-trip on `invest`). Part 2 (manifest-driven OCI
-packaging engine) remains design — feeds the `upstream-protocol-pivot` **P4 (export rework)**.
+real-python3 graduation proof; live CLI round-trip on `invest`). **P3 shipped (2026-07-08):**
+declarative manifest (`pux_harness/manifest.py` — default-deny `package.include` globs +
+PERMANENT `HARD_EXCLUDE`) drives `pux pack` (renamed from `export`, which now HARD-ERRORs —
+Decision 5); `pux lock` + `org.lock.yaml` (github MCP refs → commit SHAs via host-side
+`git ls-remote`, best-effort; declared pip/apt deps snapshotted) pin the org's external deps
+(committed by default — Decision 4) and ship in the pack. Proven (50 manifest/lockfile unit
+tests incl. the pack-contents==manifest contract + the legacy-allowlist-removed permanent
+failure; 128 export/cli tests; live `pux lock --org general` resolved a real SHA; `pux pack`
+ships `org.lock.yaml`; `pux export` hard-errors exit 1). Part 2's remaining phases (P4 hooks,
+P5 OCI, P6 signing) stay design — feed the `upstream-protocol-pivot` **P4 (export rework)**.
 
 **Posture (the headline):** reuse upstream packaging primitives; own only the thin pux
 glue. OCI-via-`oras` (mature), gitleaks/`ruff`/`uv` (already in repo), APS manifest
@@ -217,7 +225,20 @@ covers the library layer; gitleaks scrubs `lib/functions/*.py`. Consumer unpacks
   is deferred (the manual archive mechanism + reversibility landed). Proven: promoted fn runs
   in-container from its tracked location (real-python3 value=60); promoted fn's usage/success
   history preserved across graduation; 9 unit tests + live CLI round-trip on `invest`.
-- **P3 — Manifest + lockfile + default-deny pack:** `package:`/`capabilities:`/`dependencies:`; `org.lock.yaml` (uv); replace allowlist. Prove: pack contents == manifest (contract test; old allowlist test → permanent failure).
+- **P3 — Manifest + lockfile + default-deny pack ✅ SHIPPED (2026-07-08):** `pux_harness/manifest.py`
+  drives `pux pack` via default-deny `package.include` globs + PERMANENT `HARD_EXCLUDE`
+  (`data/`/`.pux/`/`__pycache__` — the credential-leak contract). APS-shaped schema
+  (`manifest_version`/`package`/`capabilities`/`dependencies`). `export.py` → `pack.py`
+  (`pux export` HARD-ERRORS — Decision 5, no alias); the old `_collect_org_files` allowlist is
+  a `NotImplementedError` stub. **`pux lock`** (`pux_harness/lockfile.py`) pins github MCP refs
+  to commit SHAs via host-side `git ls-remote` (best-effort, never fatal offline — unresolved
+  refs recorded honestly) + snapshots declared `sandbox.deps.{pip,apt}` into `org.lock.yaml`
+  (committed by default — Decision 4; a `DEFAULT_INCLUDE`, so it ships in the pack). Proven:
+  pack contents == manifest (contract test); old allowlist → permanent `NotImplementedError`
+  failure; 50 manifest/lockfile unit tests; live `pux lock --org general` resolved
+  `github/github-mcp-server@latest` to a real SHA; `pux export` hard-errors (exit 1).
+  *(Note: pip resolution is as-declared for now — operators pin the critical ones; full
+  `uv lock`-driven resolution is a follow-up.)*
 - **P4 — Hook pipeline:** Schema/`ruff`-AST/gitleaks/Provenance via `PACK_HOOK_REGISTRY`; scrub `lib/functions/*.py`. Prove: fake key in a function → pack refuses; broken AST → pack refuses.
 - **P5 — OCI artifact via `oras` (shell-out) + provenance:** emit layered OCI artifact; `org.pux.*` annotations; `oras` records SHA-256 layer digests into `provenance.json` → artifact is immutable/tamper-evident now (signing slots reserved — Decision 3). Prove: `oras`/`crane` inspect/push; tamper a `lib/` blob → digest mismatch on verify.
 - **P6 — (Stretch) signing + registry:** Cosign/Ed25519 signing hook via OCI manifest annotations (Decision 3); `oras push`/pull round-trip through GHCR.

@@ -1,7 +1,7 @@
 """The portability contract that was missing: an exported archive must not just
 contain files — it must RECOMPILE into a runnable graph from the unpacked tree.
 
-``test_export_project_root.py`` proves ``export_org(project_root=…)`` honors a
+``test_export_project_root.py`` proves ``pack_org(project_root=…)`` honors a
 foreign root with *synthetic* tmp orgs. ``test_export.py`` proves every shipped
 org *archives* with the right files. NEITHER proves the archive is
 self-consistent enough that ``compile_org`` reconstructs the graph from it —
@@ -27,7 +27,7 @@ import pytest
 import yaml
 
 from pux_harness.agent.orgs import discover_orgs
-from pux_harness.export import _TEXT_SUFFIXES, _normalize_specialists_refs, export_org
+from pux_harness.pack import _TEXT_SUFFIXES, _normalize_specialists_refs, pack_org
 from pux_harness.kit import compile_org
 from pux_harness.kit._testing import ScriptedModel
 
@@ -80,7 +80,7 @@ class TestNormalizeSpecialistsRefs:
 def _extract_archive(archive: Path, dest: Path) -> Path:
     """Untar <archive> into <dest>; return the top-level <org>/ dir."""
     with tarfile.open(archive, "r:gz") as tar:
-        # Controlled test fixture — member paths are owned by export_org.
+        # Controlled test fixture — member paths are owned by pack_org.
         tar.extractall(dest, filter="data")  # type: ignore[arg-type]
     members = [p.name for p in dest.iterdir()]
     assert len(members) == 1, f"expected one top-level org dir, got {members}"
@@ -93,7 +93,7 @@ def test_exported_org_recompiles_from_unpack_tree(org, tmp_path, project_root):
     succeeds. tools=[] — this proves the graph STRUCTURE (agents/skills/policy)
     resolves against the unpacked tree; tool wiring is the consumer's job."""
     archive = tmp_path / f"{org}.tar.gz"
-    export_org(org, archive, project_root=project_root)
+    pack_org(org, archive, project_root=project_root)
 
     unpack_root = _extract_archive(archive, tmp_path / "unpack")
     # compile from the FOREIGN unpacked tree — not the orchestrator root.
@@ -109,7 +109,7 @@ def test_exported_archive_has_no_stale_specialists_refs(org, tmp_path, project_r
     references ``orgs/specialists/`` — the tree and every content ref agree on
     the flattened ``orgs/<name>/`` layout. A stale ref would dangle on unpack."""
     archive = tmp_path / f"{org}.tar.gz"
-    export_org(org, archive, project_root=project_root)
+    pack_org(org, archive, project_root=project_root)
 
     offenders: list[str] = []
     with tarfile.open(archive, "r:gz") as tar:
@@ -160,7 +160,7 @@ def test_exported_archive_captures_every_shared_script_ref(org, tmp_path, projec
     resolves to a member — host-independent (the archive's own self-consistency).
     """
     archive = tmp_path / f"{org}.tar.gz"
-    export_org(org, archive, project_root=project_root)
+    pack_org(org, archive, project_root=project_root)
     with tarfile.open(archive, "r:gz") as tar:
         members = tar.getmembers()
         names = [m.name for m in members]
@@ -193,7 +193,7 @@ def test_dev_bot_export_includes_warmup_browser_job_script(tmp_path, project_roo
     parametrized invariant above always has a concrete failing example if the
     bug returns."""
     archive = tmp_path / "dev-bot.tar.gz"
-    export_org("dev-bot", archive, project_root=project_root)
+    pack_org("dev-bot", archive, project_root=project_root)
     with tarfile.open(archive, "r:gz") as tar:
         names = [m.name for m in tar.getmembers()]
     assert any("warmup_browser.py" in n for n in names), (

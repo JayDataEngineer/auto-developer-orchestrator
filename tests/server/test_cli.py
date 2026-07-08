@@ -560,15 +560,29 @@ class TestMainDispatch:
         cli.main()
         assert seen == ["invest"]
 
-    def test_export(self, cli, monkeypatch, tmp_path):
+    def test_export_is_deprecated_hard_error(self, cli, monkeypatch, tmp_path, capsys):
+        # `pux export` is GONE (P3 manifest rework) → a HARD ERROR, no alias. The
+        # verb stays registered as a parser so the migration message is clear
+        # (not an opaque argparse "invalid choice"). Decision 5: there is NO
+        # silent fallback to `pack` — invoking export always fails deliberately,
+        # forcing scripts/muscle memory off the un-validated path.
+        monkeypatch.setattr(sys, "argv", ["pux", "export", "--org", "general",
+                                          "-o", str(tmp_path / "general.tar.gz")])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code != 0
+        err = capsys.readouterr().err
+        assert "pux pack" in err, f"deprecation must point at `pack`: {err}"
+
+    def test_pack(self, cli, monkeypatch, tmp_path):
         output_path = tmp_path / "general.tar.gz"
-        # Create a valid empty tar.gz so the open/read path in main() works.
+        # Create a valid empty tar.gz so the open/read summary path in main() works.
         import tarfile
         with tarfile.open(output_path, "w:gz") as tar:
             pass
-        monkeypatch.setattr("pux_harness.export.export_org",
+        monkeypatch.setattr("pux_harness.pack.pack_org",
                             lambda org, output=None, **kw: output or output_path)
-        monkeypatch.setattr(sys, "argv", ["pux", "export", "--org", "general",
+        monkeypatch.setattr(sys, "argv", ["pux", "pack", "--org", "general",
                                           "-o", str(output_path)])
         cli.main()
 
