@@ -12,6 +12,7 @@ The shipped-policy integration test also re-proves (against the live
 ``orgs/*/policy.yaml`` files) that every operator-authored policy parses cleanly
 through the new engine — the schema-drift catcher.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -162,7 +163,9 @@ def test_load_empty_file_is_empty_policy(tmp_path: Path) -> None:
 def test_load_unknown_top_level_keys_ignored(tmp_path: Path) -> None:
     # Go's yaml.v3 ignores unknown keys (lenient). The Python port matches;
     # the *contract* (contract.py rule 5) adds the strict unknown-section check.
-    p = policy.load("loose", _write_policy(tmp_path, "loose", "bogus: whatever\nsandbox:\n  tier: isolated\n"))
+    p = policy.load(
+        "loose", _write_policy(tmp_path, "loose", "bogus: whatever\nsandbox:\n  tier: isolated\n")
+    )
     assert p.sandbox.tier == "isolated"
 
 
@@ -179,9 +182,7 @@ def test_validate_env_all_present(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_validate_env_missing_lists_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PRESENT_ONE", "x")
     p = policy.Policy(
-        credentials=policy.Credentials(
-            required=["PRESENT_ONE", "MISSING_ONE", "MISSING_TWO"]
-        )
+        credentials=policy.Credentials(required=["PRESENT_ONE", "MISSING_ONE", "MISSING_TWO"])
     )
     with pytest.raises(policy.MissingCreds) as ei:
         policy.validate_env(p)
@@ -197,9 +198,7 @@ def test_env_vars_required_and_optional(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("OPT_SET", "ov")
     # OPT_UNSET intentionally not set.
     p = policy.Policy(
-        credentials=policy.Credentials(
-            required=["REQ"], optional=["OPT_SET", "OPT_UNSET"]
-        )
+        credentials=policy.Credentials(required=["REQ"], optional=["OPT_SET", "OPT_UNSET"])
     )
     got = set(policy.env_vars(p))
     assert got == {"REQ=rv", "OPT_SET=ov"}
@@ -218,6 +217,24 @@ def test_env_vars_cookies_env_absent_skipped(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.delenv("TWITTER_COOKIES_B64", raising=False)
     p = policy.Policy(browser=policy.BrowserSpec(cookies_env="TWITTER_COOKIES_B64"))
     assert "SEED_COOKIES_ENV=TWITTER_COOKIES_B64" not in policy.env_vars(p)
+
+
+def test_env_vars_cookies_env_dedup_when_also_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    # When cookies_env is also in credentials.required, the value is injected
+    # exactly once (via the required-creds path) — not duplicated by the
+    # browser.cookies_env path. SEED_COOKIES_ENV pointer is still added.
+    monkeypatch.setenv("TWITTER_COOKIES_B64", "eyJmb28iOiAiYmFyIn0=")
+    p = policy.Policy(
+        credentials=policy.Credentials(required=["TWITTER_COOKIES_B64"]),
+        browser=policy.BrowserSpec(cookies_env="TWITTER_COOKIES_B64"),
+    )
+    out = policy.env_vars(p)
+    # Value appears exactly once.
+    val_entries = [e for e in out if e.startswith("TWITTER_COOKIES_B64=")]
+    assert len(val_entries) == 1
+    assert val_entries[0] == "TWITTER_COOKIES_B64=eyJmb28iOiAiYmFyIn0="
+    # Pointer is always added.
+    assert "SEED_COOKIES_ENV=TWITTER_COOKIES_B64" in out
 
 
 def test_env_vars_none_is_empty() -> None:
@@ -303,7 +320,9 @@ def test_egress_rules_container_resolved_host() -> None:
     # host.docker.internal is a Docker-internal /etc/hosts entry — must pass
     # through verbatim, NOT hit DNS (would fail offline), NOT get a refresh
     # comment (the refresh script would try to re-resolve it host-side + fail).
-    p = policy.Policy(egress=policy.Egress(allow=[policy.Rule(host="host.docker.internal", port=8000)]))
+    p = policy.Policy(
+        egress=policy.Egress(allow=[policy.Rule(host="host.docker.internal", port=8000)])
+    )
     assert policy.egress_rules(p) == "host.docker.internal 8000\n"
 
 
@@ -345,9 +364,7 @@ def test_egress_rules_dns_resolution_real() -> None:
 
 def test_egress_rules_dns_failure_is_error() -> None:
     p = policy.Policy(
-        egress=policy.Egress(
-            allow=[policy.Rule(host="this-host-does-not-exist.invalid", port=443)]
-        )
+        egress=policy.Egress(allow=[policy.Rule(host="this-host-does-not-exist.invalid", port=443)])
     )
     with pytest.raises(policy.PolicyError):
         policy.egress_rules(p)
@@ -464,13 +481,17 @@ def test_load_sandbox_build_not_a_mapping_fails(tmp_path: Path) -> None:
 
 
 def test_build_spec_absent_is_none(tmp_path: Path) -> None:
-    p = policy.load("nobuild", _write_policy(tmp_path, "nobuild", "sandbox:\n  image: foo:latest\n"))
+    p = policy.load(
+        "nobuild", _write_policy(tmp_path, "nobuild", "sandbox:\n  image: foo:latest\n")
+    )
     assert policy.build_spec(p) is None
 
 
 def test_build_spec_no_dockerfile_is_none(tmp_path: Path) -> None:
     # A build mapping with no dockerfile == no build requested.
-    p = policy.load("empty", _write_policy(tmp_path, "empty", "sandbox:\n  build:\n    context: orgs/x\n"))
+    p = policy.load(
+        "empty", _write_policy(tmp_path, "empty", "sandbox:\n  build:\n    context: orgs/x\n")
+    )
     assert policy.build_spec(p) is None
 
 
@@ -495,6 +516,7 @@ def test_known_policy_sections_includes_host_setup() -> None:
     # twitter/video-production policy.yaml carrying it would trip the
     # unknown-section rule.
     from pux_harness.agent import contract
+
     assert "host_setup" in contract.KNOWN_POLICY_SECTIONS
 
 
@@ -600,3 +622,18 @@ def test_shipped_policies_parse_cleanly() -> None:
             pass
     if count == 0:
         pytest.skip("no shipped policy.yaml files found")
+
+
+def test_twitter_agent_has_warmup_browser_job() -> None:
+    """The twitter-agent is a browser-heavy org — its policy.yaml must declare
+    the warmup_browser job so the SeleniumBase Chrome stack is pre-warmed before
+    the agent runs (matching general and dev-bot)."""
+    repo_root = Path(__file__).resolve().parents[2]
+    pol_path = repo_root / "orgs" / "specialists" / "twitter-agent" / "policy.yaml"
+    if not pol_path.is_file():
+        pytest.skip("twitter-agent policy.yaml not found")
+    p = policy.load("twitter-agent", repo_root)
+    job_names = [j.name for j in p.jobs]
+    assert "warmup_browser" in job_names, (
+        f"twitter-agent must declare warmup_browser job; found: {job_names}"
+    )

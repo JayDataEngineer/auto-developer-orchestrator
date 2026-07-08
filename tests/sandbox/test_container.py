@@ -6,6 +6,7 @@ decision functions don't need a Docker daemon. The create/destroy path is
 proven end-to-end by ``pux sandbox start`` against a live Docker (see the
 verify log), not asserted here.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -60,9 +61,10 @@ def test_cache_volume_name_deterministic():
 
 def test_cache_volume_name_matches_live_container():
     # Verified against the live container's bind 2026-07-03.
-    assert C.cache_volume_name(
-        "/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator"
-    ) == "pux-cache-c6f1b24fe47c2162"
+    assert (
+        C.cache_volume_name("/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator")
+        == "pux-cache-c6f1b24fe47c2162"
+    )
 
 
 def test_cache_volume_name_differs_per_project():
@@ -196,9 +198,7 @@ def test_create_runs_host_setup_before_validate_env(monkeypatch):
         lambda: (
             C.policy.Policy(
                 host_setup=[
-                    C.policy.HostSetupHook(
-                        name="h", helper_script="x.py", exports={"X": "stdout"}
-                    )
+                    C.policy.HostSetupHook(name="h", helper_script="x.py", exports={"X": "stdout"})
                 ]
             ),
             "isolated",
@@ -234,9 +234,6 @@ def test_create_exports_flow_into_environ(monkeypatch):
     assert seen["TWITTER_COOKIES_B64"] == "FROM-HOOK"
 
 
-# --- _ensure_image build path -----------------------------------------------
-
-
 class _FakeImages:
     def __init__(self, *, present=False):
         self.present = present
@@ -260,11 +257,65 @@ class _FakeClient:
         self.images = images
 
 
+# --- bridged tier DISPLAY passthrough removal ---------------------------------
+
+
+def test_bridged_tier_does_not_inject_host_display(monkeypatch):
+    """Even with host DISPLAY=:0 set, the bridged tier must not pass it through
+    to the container env or mount /tmp/.X11-unix. The container runs its own
+    Xvfb on :99 (Dockerfile ENV DISPLAY=:99)."""
+    monkeypatch.setenv("DISPLAY", ":0")
+
+    # Bypass policy loading, validation, and host_setup.
+    monkeypatch.setattr(C.host_setup, "run_host_setup", lambda pol, root: {})
+    monkeypatch.setattr(C.policy, "validate_env", lambda pol, env=None: None)
+    monkeypatch.setattr(C.policy, "resolve_mounts", lambda pol: [])
+
+    captured: dict = {}
+
+    class _FakeContainers:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            raise _AbortBeforeDocker  # stop before start()
+
+        def get(self, name):
+            raise C.NotFound("no container")
+
+        def list(self, **kwargs):
+            return []
+
+    class _FakeClientWithContainers(_FakeClient):
+        def __init__(self):
+            super().__init__(_FakeImages(present=True))
+            self.containers = _FakeContainers()
+
+        def info(self):
+            return {}
+
+    sb = C.SandboxContainer(org="x", project_path="/proj", client=_FakeClientWithContainers())
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (None, "bridged"))
+    monkeypatch.setattr(sb, "_remove_stale", lambda: None)
+    monkeypatch.setattr(sb, "_build_binds", lambda pol: [])
+    monkeypatch.setattr(C, "_is_runsc_available", lambda client: False)
+
+    with pytest.raises(_AbortBeforeDocker):
+        sb.create()
+
+    env_list = captured.get("environment", [])
+    # No DISPLAY= entry should be injected by the harness.
+    display_entries = [e for e in env_list if e.startswith("DISPLAY=")]
+    assert display_entries == [], f"bridged tier injected host DISPLAY: {display_entries}"
+    # No /tmp/.X11-unix mount.
+    volumes = captured.get("volumes", [])
+    x11_mounts = [v for v in volumes if ".X11-unix" in v]
+    assert x11_mounts == [], f"bridged tier mounted /tmp/.X11-unix: {x11_mounts}"
+    # Host networking IS still set for bridged.
+    assert captured.get("network_mode") == "host"
+
+
 def test_ensure_image_builds_when_spec_set_and_absent():
     images = _FakeImages(present=False)
-    sb = C.SandboxContainer(
-        org="x", project_path="/proj", client=_FakeClient(images)
-    )
+    sb = C.SandboxContainer(org="x", project_path="/proj", client=_FakeClient(images))
     build = C.policy.BuildSpec(
         dockerfile="orgs/specialists/video-production/Dockerfile",
         context="orgs/specialists/video-production",
@@ -278,9 +329,7 @@ def test_ensure_image_builds_when_spec_set_and_absent():
 
 def test_ensure_image_context_defaults_to_dockerfile_dir():
     images = _FakeImages(present=False)
-    sb = C.SandboxContainer(
-        org="x", project_path="/proj", client=_FakeClient(images)
-    )
+    sb = C.SandboxContainer(org="x", project_path="/proj", client=_FakeClient(images))
     # No context → defaults to the Dockerfile's parent, resolved project-relative.
     build = C.policy.BuildSpec(dockerfile="orgs/specialists/video-production/Dockerfile")
     sb._ensure_image("vp:latest", build)
@@ -290,9 +339,7 @@ def test_ensure_image_context_defaults_to_dockerfile_dir():
 
 def test_ensure_image_present_skips_build_and_pull():
     images = _FakeImages(present=True)
-    sb = C.SandboxContainer(
-        org="x", project_path="/proj", client=_FakeClient(images)
-    )
+    sb = C.SandboxContainer(org="x", project_path="/proj", client=_FakeClient(images))
     sb._ensure_image("vp:latest", C.policy.BuildSpec(dockerfile="x/Dockerfile"))
     assert images.built == {}
     assert images.pulled == []
@@ -300,9 +347,7 @@ def test_ensure_image_present_skips_build_and_pull():
 
 def test_ensure_image_pulls_when_no_build_spec():
     images = _FakeImages(present=False)
-    sb = C.SandboxContainer(
-        org="x", project_path="/proj", client=_FakeClient(images)
-    )
+    sb = C.SandboxContainer(org="x", project_path="/proj", client=_FakeClient(images))
     sb._ensure_image("pux-sandbox:latest", None)
     assert images.pulled == ["pux-sandbox:latest"]
     assert images.built == {}
@@ -347,7 +392,10 @@ def test_resolve_watch_url_bridged_uses_container_port_directly():
     sb = C.SandboxContainer(org="", project_path="/proj")
     disp = C.policy.DisplaySpec(watch=True, backend="standard")
     # host networking: no published binding; the container's 6080 IS the host's.
-    assert sb._resolve_watch_url(_fake_container(), disp, "bridged") == "http://127.0.0.1:6080/vnc.html"
+    assert (
+        sb._resolve_watch_url(_fake_container(), disp, "bridged")
+        == "http://127.0.0.1:6080/vnc.html"
+    )
 
 
 def test_resolve_watch_url_kasm_is_tls_root_path():
