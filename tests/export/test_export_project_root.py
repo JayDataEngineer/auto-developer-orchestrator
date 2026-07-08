@@ -143,7 +143,21 @@ def test_export_from_foreign_root_without_monkeypatch(tmp_path, monkeypatch):
     mf = _manifest(output, "foreign")
     assert mf["org"] == "foreign"
     assert mf["agent_roster"] == ["worker"]
-    assert mf["total_files"] == len(expected) - 1  # manifest not in `files`
+    # The manifest inventories primitives AND the runtime scaffold (F3: the
+    # vendored slim kit + pyproject + run.py + README turn the archive into a
+    # runnable package). Every primitive is still accounted for; the scaffold
+    # adds the rest.
+    primitive_rels = [
+        e[len("foreign/"):] for e in expected if e != "foreign/manifest.json"
+    ]
+    assert all(rel in mf["files"] for rel in primitive_rels), (
+        f"primitive missing from manifest files: "
+        f"{[r for r in primitive_rels if r not in mf['files']]}"
+    )
+    assert mf["categories"]["runtime_scaffold"], "runtime scaffold not emitted"
+    assert mf["total_files"] == len(primitive_rels) + len(
+        mf["categories"]["runtime_scaffold"]
+    )
 
 
 def test_project_root_env_is_restored_no_bleed(tmp_path, monkeypatch):
