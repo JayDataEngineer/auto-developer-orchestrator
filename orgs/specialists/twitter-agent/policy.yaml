@@ -40,3 +40,13 @@ credentials:
 
 browser:
   cookies_env: TWITTER_COOKIES_B64
+
+# Pre-run: warm the in-container SeleniumBase Chrome so the first browser tool
+# call doesn't pay the SeleniumBase CDP-attach cold start. sb_server runs in the
+# base sandbox image (supervisord priority 70); this job polls /status then hits
+# /warmup. Warn-and-continue: an unreachable sb_server is logged, not fatal.
+jobs:
+  - name: warmup_browser
+    script: orgs/_shared/sandbox/warmup_browser.py
+    timeout: 90
+    description: "Pre-warm the in-container SeleniumBase Chrome (sb_server /warmup) so the first browser tool call skips cold-start latency"
