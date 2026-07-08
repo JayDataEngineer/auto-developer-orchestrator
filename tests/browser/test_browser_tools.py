@@ -162,6 +162,39 @@ def test_browser_click_at_requires_target(cap):
     assert "x,y OR index/selector" in out
 
 
+# --- trusted input (isTrusted=true CDP) flag forwarding ----------------------
+# trusted is OPT-IN: present in the POST body only when the model sets it. The
+# default path (every org today) must stay byte-identical — no "trusted": false
+# noise, no behavior change — so this guards both directions.
+
+
+def test_browser_click_forwards_trusted_flag(cap):
+    t = _browser_tools()["browser_click"]
+    # default: trusted absent (existing orgs see no change)
+    t.invoke({"selector": "#go"})
+    assert "trusted" not in cap.calls[0][1]
+    assert cap.calls[0] == ("/click", {"selector": "#go"})
+    # opt-in: trusted forwarded
+    t.invoke({"selector": "#go", "trusted": True})
+    assert cap.calls[1][1]["trusted"] is True
+
+
+def test_browser_type_forwards_trusted_flag(cap):
+    t = _browser_tools()["browser_type"]
+    t.invoke({"selector": "#q", "text": "hi"})
+    assert "trusted" not in cap.calls[0][1]
+    t.invoke({"selector": "#q", "text": "hi", "trusted": True})
+    assert cap.calls[1][1]["trusted"] is True
+
+
+def test_browser_click_at_forwards_trusted_flag(cap):
+    t = _browser_tools()["browser_click_at"]
+    t.invoke({"x": 5, "y": 6})
+    assert "trusted" not in cap.calls[0][1]
+    t.invoke({"x": 5, "y": 6, "trusted": True})
+    assert cap.calls[1][1]["trusted"] is True
+
+
 def test_browser_scroll_into_view_accepts_index(cap):
     _browser_tools()["browser_scroll_into_view"].invoke({"index": 9})
     assert cap.calls[0] == ("/scroll_into_view", {"index": 9})

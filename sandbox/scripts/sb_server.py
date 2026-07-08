@@ -427,6 +427,53 @@ def _trusted_cdp_drag(sb, x1, y1, x2, y2, steps=40, button="left"):
     sb.loop.run_until_complete(_run())
 
 
+def _trusted_cdp_click(sb, x, y, button="left", click_count=1):
+    """Trusted click via CDP Input.dispatchMouseEvent — the anti-bot primitive
+    Selenium's ``sb.click()`` and ``CLICK_AT_JS`` can't provide (both emit
+    untrusted events that Cloudflare Turnstile / behavioral fingerprinting
+    silently ignore; only ``isTrusted=true`` input passes). Mirrors
+    ``_trusted_cdp_drag``'s CDP shape (proven in this image):
+    mouseMoved → mousePressed → mouseReleased at the element's viewport center.
+    ``click_count=2`` for a double-click, ``button="right"`` for a context menu.
+    Caller MUST scroll the element into view first and pass post-scroll viewport
+    coords — ``dispatchMouseEvent`` hits nothing off-screen.
+
+    This is the value OpenComputer ships that pux lacked: every other click path
+    here (Selenium, JS ``.click()``, ``CLICK_AT_JS``) is untrusted. Drag already
+    used this primitive; click/type now do too, opt-in via ``trusted: true``."""
+    import mycdp as cdp  # vendored by seleniumbase; container-only
+
+    async def _run():
+        tab = sb.page
+        btn = cdp.input_.MouseButton(button)
+        held = 1 if button == "left" else 2  # buttons bitmask: left=1, right=2
+        await tab.send(cdp.input_.dispatch_mouse_event("mouseMoved", x=x, y=y))
+        await asyncio.sleep(0.04)
+        await tab.send(cdp.input_.dispatch_mouse_event(
+            "mousePressed", x=x, y=y, button=btn, buttons=held, click_count=click_count))
+        await asyncio.sleep(0.04)
+        await tab.send(cdp.input_.dispatch_mouse_event(
+            "mouseReleased", x=x, y=y, button=btn, buttons=held, click_count=click_count))
+
+    sb.loop.run_until_complete(_run())
+
+
+def _trusted_cdp_type(sb, text):
+    """Trusted typing via CDP ``Input.insertText`` — fires a real (isTrusted)
+    ``input`` event through the browser's editing pipeline, so React/Vue
+    controlled inputs update WITHOUT the native-value-setter workaround in
+    ``CDP_TYPE_JS`` (the trusted path is strictly more correct, not a
+    fallback). Caller MUST focus (+ optionally clear) the target first —
+    ``insertText`` lands at the caret of the focused editable element."""
+    import mycdp as cdp  # vendored by seleniumbase; container-only
+
+    async def _run():
+        tab = sb.page
+        await tab.send(cdp.input_.insert_text(text))
+
+    sb.loop.run_until_complete(_run())
+
+
 # Hover (mouseover/mousemove/mouseenter) over a selector OR raw x,y.
 HOVER_JS = r"""
 ((selector, x, y) => {
@@ -1080,29 +1127,47 @@ class Handler(BaseHTTPRequestHandler):
             if sb is None: return self._err("browser not available")
             selector, err = self._resolve_selector(body)
             if err: return self._err(err, 400)
+            trusted = bool(body.get("trusted"))
 
             before_handles, _ = self._capture_tabs_info(sb)
             self.state.snapshot_before()
 
-            # Occlusion-aware click: try Selenium click, fall back to JS click
-            click_method = "selenium"
-            try:
-                # Check if element is occluded
-                occ_result = safe(lambda: json.loads(sb.execute_script(f'{OCCLUSION_CHECK_JS}("{selector.replace(chr(34), chr(92)+chr(34))}")') or "{}"), {})
-                if occ_result.get("occluded"):
-                    log(f"element occluded by {occ_result.get('blocker')}, using JS click")
-                    sb.execute_script(f'document.querySelector("{selector.replace(chr(34), chr(92)+chr(34))}").click()')
-                    click_method = "js_fallback"
-                else:
-                    sb.click(selector)
-            except Exception:
-                # If Selenium click fails, try JS click as fallback
+            if trusted:
+                # Trusted CDP click (isTrusted=true) for anti-bot sites that
+                # ignore Selenium/JS synthetic clicks (Cloudflare Turnstile,
+                # behavioral fingerprinting). Scroll into view first —
+                # dispatchMouseEvent hits nothing off-screen — then drive the
+                # real cursor at the element's viewport center.
+                safe(lambda: sb.execute_script(f"{SCROLL_INTO_VIEW_JS}({js_str(selector)})"))
+                ctr = safe(lambda: json.loads(
+                    sb.execute_script(f"{ELEMENT_CENTER_JS}({js_str(selector)})") or "{}"), {})
+                if not ctr.get("ok"):
+                    return self._err("trusted click: " + ctr.get("error", "element not found"), 400)
                 try:
-                    escaped = selector.replace('"', '\\"')
-                    sb.execute_script(f'document.querySelector("{escaped}").click()')
-                    click_method = "js_fallback"
+                    _trusted_cdp_click(sb, ctr["x"], ctr["y"])
+                    click_method = "trusted_cdp"
                 except Exception as e:
-                    return self._err(f"click failed (both Selenium and JS): {e}")
+                    return self._err(f"trusted click failed: {e}")
+            else:
+                # Occlusion-aware click: try Selenium click, fall back to JS click
+                click_method = "selenium"
+                try:
+                    # Check if element is occluded
+                    occ_result = safe(lambda: json.loads(sb.execute_script(f'{OCCLUSION_CHECK_JS}("{selector.replace(chr(34), chr(92)+chr(34))}")') or "{}"), {})
+                    if occ_result.get("occluded"):
+                        log(f"element occluded by {occ_result.get('blocker')}, using JS click")
+                        sb.execute_script(f'document.querySelector("{selector.replace(chr(34), chr(92)+chr(34))}").click()')
+                        click_method = "js_fallback"
+                    else:
+                        sb.click(selector)
+                except Exception:
+                    # If Selenium click fails, try JS click as fallback
+                    try:
+                        escaped = selector.replace('"', '\\"')
+                        sb.execute_script(f'document.querySelector("{escaped}").click()')
+                        click_method = "js_fallback"
+                    except Exception as e:
+                        return self._err(f"click failed (both Selenium and JS): {e}")
 
             sb.sleep(1)
 
@@ -1122,21 +1187,43 @@ class Handler(BaseHTTPRequestHandler):
             if not text: return self._err("missing text", 400)
             submit = body.get("submit", False)
             clear = body.get("clear", True)
+            trusted = bool(body.get("trusted"))
 
             self.state.snapshot_before()
 
-            # Single path: the CDP native-value-setter (React/Vue compatible).
-            # No silent fallback to sb.type() — that's a no-fallbacks-no-aliases
-            # violation AND it masked the dead CDP_TYPE_JS for the whole pre-fix
-            # run (the multi-line `return {X_JS}` bug made it throw every time,
-            # the handler swallowed it, and sb.type papered over the gap). If the
-            # setter fails, surface the error so the caller knows typing failed.
-            escaped_sel = selector.replace("\\", "\\\\").replace("'", "\\'")
-            escaped_text = text.replace("\\", "\\\\").replace("'", "\\'")
-            js_code = f'{CDP_TYPE_JS}(\'{escaped_sel}\', \'{escaped_text}\', {str(clear).lower()})'
-            result = safe(lambda: json.loads(sb.execute_script(js_code) or "{}"), {})
-            if not isinstance(result, dict) or not result.get("ok"):
-                return self._err("type failed: " + (result.get("error") if isinstance(result, dict) else "no result"))
+            if trusted:
+                # Trusted typing via CDP Input.insertText — fires a real
+                # (isTrusted) input event through the browser editing pipeline,
+                # so React/Vue controlled inputs update WITHOUT the
+                # native-value-setter workaround in CDP_TYPE_JS. Focus + clear
+                # via JS first (insertText lands at the caret of the focused
+                # editable). The trusted path is strictly more correct than the
+                # setter, not a fallback — opt-in via trusted: true for
+                # keystroke-fingerprinting defenses.
+                escaped_sel = selector.replace("\\", "\\\\").replace("'", "\\'")
+                safe(lambda: sb.execute_script(
+                    f'(() => {{ const el = document.querySelector(\'{escaped_sel}\'); '
+                    f'if (!el) return; el.scrollIntoView({{block:"center"}}); el.focus(); '
+                    f'if ({str(clear).lower()}) {{ el.value = ""; '
+                    f'el.dispatchEvent(new Event("input", {{bubbles:true}})); }} }})()'
+                ))
+                try:
+                    _trusted_cdp_type(sb, text)
+                except Exception as e:
+                    return self._err(f"trusted type failed: {e}")
+            else:
+                # Single path: the CDP native-value-setter (React/Vue compatible).
+                # No silent fallback to sb.type() — that's a no-fallbacks-no-aliases
+                # violation AND it masked the dead CDP_TYPE_JS for the whole pre-fix
+                # run (the multi-line `return {X_JS}` bug made it throw every time,
+                # the handler swallowed it, and sb.type papered over the gap). If the
+                # setter fails, surface the error so the caller knows typing failed.
+                escaped_sel = selector.replace("\\", "\\\\").replace("'", "\\'")
+                escaped_text = text.replace("\\", "\\\\").replace("'", "\\'")
+                js_code = f'{CDP_TYPE_JS}(\'{escaped_sel}\', \'{escaped_text}\', {str(clear).lower()})'
+                result = safe(lambda: json.loads(sb.execute_script(js_code) or "{}"), {})
+                if not isinstance(result, dict) or not result.get("ok"):
+                    return self._err("type failed: " + (result.get("error") if isinstance(result, dict) else "no result"))
 
             if submit:
                 try:
@@ -1805,11 +1892,16 @@ class Handler(BaseHTTPRequestHandler):
 
         elif path == "/click_at":
             if sb is None: return self._err("browser not available")
+            trusted = bool(body.get("trusted"))
             x = body.get("x"); y = body.get("y")
             if x is None or y is None:
                 if body.get("selector") or body.get("index"):
                     selector, err = self._resolve_selector(body)
                     if err: return self._err(err, 400)
+                    if trusted:
+                        # Trusted coordinate click needs the element on-screen
+                        # (off-screen dispatchMouseEvent hits nothing).
+                        safe(lambda: sb.execute_script(f"{SCROLL_INTO_VIEW_JS}({js_str(selector)})"))
                     r = safe(lambda: json.loads(sb.execute_script(
                         f"{ELEMENT_CENTER_JS}({js_str(selector)})") or "{}"), {})
                     if not r.get("ok"): return self._err("click_at: " + r.get("error", "not found"))
@@ -1821,8 +1913,19 @@ class Handler(BaseHTTPRequestHandler):
             is_right = "true" if body.get("right") else "false"
             before_handles, _ = self._capture_tabs_info(sb)
             self.state.snapshot_before()
-            res = safe(lambda: json.loads(sb.execute_script(
-                f"{CLICK_AT_JS}({x}, {y}, {button}, {is_double}, {is_right})") or "{}"), {})
+            if trusted:
+                # Trusted CDP click_at (isTrusted=true) — same primitive as
+                # /click trusted, honoring button/right/double flags.
+                btn_name = "right" if is_right == "true" else "left"
+                count = 2 if is_double == "true" else 1
+                try:
+                    _trusted_cdp_click(sb, x, y, button=btn_name, click_count=count)
+                    res = {"ok": True, "method": "trusted_cdp"}
+                except Exception as e:
+                    res = {"ok": False, "error": str(e)}
+            else:
+                res = safe(lambda: json.loads(sb.execute_script(
+                    f"{CLICK_AT_JS}({x}, {y}, {button}, {is_double}, {is_right})") or "{}"), {})
             if not res.get("ok"): return self._err("click_at failed: " + res.get("error", ""))
             sb.sleep(0.8)
             tab_info = self._detect_and_handle_new_tab(sb, before_handles)
@@ -1931,6 +2034,7 @@ def main():
     use_chromium = "--use-chromium" in sys.argv
     state = BrowserState(stealth=stealth, use_chromium=use_chromium)
     Handler.state = state
+    server = HTTPServer(("127.0.0.1", port), Handler)
     details = []
     if stealth: details.append("stealth")
     if use_chromium: details.append("chromium")

@@ -5,9 +5,11 @@ Handler), and the JS constants structure. No browser, no Docker needed.
 """
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import re
+import sys
 import types
 from pathlib import Path
 
@@ -202,6 +204,140 @@ def test_physics_drag_uses_trusted_cdp_not_iife():
         "physics drag must use CDP Input.dispatchMouseEvent (isTrusted=true), "
         "not a synthetic in-page mousemove chain"
     )
+
+
+def test_main_creates_httpserver_bound_to_server():
+    """main() MUST construct the HTTPServer and bind it to ``server`` before
+    serve_forever()/server_close() reference it.
+
+    Why this exists (regression born 2026-07-07): an earlier refactor of
+    ``main()`` (adding the ``--use-chromium`` flag + details-log formatting)
+    silently DROPPED the ``server = HTTPServer(...)`` line. The file AST-parsed
+    fine and every unit test passed (the suite mocks seleniumbase and never
+    executes ``main()``), so the only ``NameError: name 'server' is not
+    defined`` surfaced at runtime in-container — a pure verify-or-die gap. The
+    image's BAKED copy still had the assignment, which masked the host bug until
+    a ``docker cp`` overwrote it. This AST check walks ``main``'s body and
+    refuses to ship without a real ``server = HTTPServer(...)`` assignment, so
+    the bug class can't hide behind a passing unit suite again.
+    """
+    import ast
+
+    tree = ast.parse(_SB_SERVER_PY.read_text())
+    main_fn = next(
+        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"),
+        None,
+    )
+    assert main_fn is not None, "sb_server.py must define main()"
+
+    found = False
+    for node in ast.walk(main_fn):
+        if not isinstance(node, ast.Assign):
+            continue
+        # target must be a bare `server =` (Name), value an HTTPServer(...) call
+        targets_named_server = [
+            t for t in node.targets
+            if isinstance(t, ast.Name) and t.id == "server"
+        ]
+        if not targets_named_server:
+            continue
+        call = node.value
+        if (isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Name)
+                and call.func.id == "HTTPServer"):
+            found = True
+    assert found, (
+        "main() must bind `server = HTTPServer(...)` before serve_forever() — "
+        "the dropped-assignment NameError crashloop must never recur"
+    )
+
+
+# --- trusted CDP click / type (OpenComputer value extraction P2) -------------
+# _trusted_cdp_click mirrors _trusted_cdp_drag: the ONLY isTrusted=true click
+# primitive in the codebase (Selenium sb.click + CLICK_AT_JS are untrusted).
+# _trusted_cdp_type uses Input.insertText. Proven LIVE against a real page
+# (see project_trusted_input memory); these unit tests pin the CDP call SHAPE
+# (event sequence, button bitmask, click_count, insert_text payload) so a
+# regression that silently breaks anti-bot input is caught without a browser.
+
+_FAKE_MYCDP = types.ModuleType("mycdp")
+
+
+class _FakeInput:
+    """Records every dispatch_mouse_event / insert_text call as (type, kwargs)."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    def MouseButton(self, name):  # real API returns an enum; the name is enough here
+        return name
+
+    def dispatch_mouse_event(self, type, **kw):
+        self.events.append((type, kw))
+        yield  # mycdp commands are generators yielding the JSON-RPC payload
+
+    def insert_text(self, text):
+        self.events.append(("insert_text", {"text": text}))
+        yield
+
+
+class _FakeTab:
+    """``sb.page`` stand-in: ``send`` consumes a mycdp generator command."""
+
+    def __init__(self, inp: _FakeInput) -> None:
+        self._inp = inp
+
+    async def send(self, gen):
+        for _ in gen:
+            pass
+
+
+def _fake_sb(inp: _FakeInput) -> types.SimpleNamespace:
+    _FAKE_MYCDP.input_ = inp
+    sys.modules["mycdp"] = _FAKE_MYCDP  # the helpers do `import mycdp as cdp`
+    return types.SimpleNamespace(page=_FakeTab(inp), loop=asyncio.new_event_loop())
+
+
+def test_trusted_cdp_click_helpers_exist_and_use_cdp_input():
+    """Static guard mirroring test_physics_drag_uses_trusted_cdp_not_iife."""
+    assert hasattr(mod, "_trusted_cdp_click"), "trusted CDP click helper must exist"
+    assert hasattr(mod, "_trusted_cdp_type"), "trusted CDP type helper must exist"
+    src = _SB_SERVER_PY.read_text()
+    assert src.count("dispatch_mouse_event") >= 4, (
+        "trusted click must drive CDP Input.dispatchMouseEvent "
+        "(mouseMoved + mousePressed + mouseReleased)"
+    )
+    assert "insert_text" in src, "trusted type must use CDP Input.insertText"
+
+
+def test_trusted_cdp_click_dispatches_move_press_release():
+    inp = _FakeInput()
+    mod._trusted_cdp_click(_fake_sb(inp), 10, 20, button="right", click_count=2)
+    assert [t for t, _ in inp.events] == [
+        "mouseMoved", "mousePressed", "mouseReleased",
+    ]
+    press = dict(inp.events[1][1])
+    assert press["x"] == 10 and press["y"] == 20
+    assert press["button"] == "right"          # MouseButton("right") pass-through
+    assert press["buttons"] == 2               # right → bitmask 2
+    assert press["click_count"] == 2           # double
+    release = dict(inp.events[2][1])
+    assert release["button"] == "right" and release["click_count"] == 2
+
+
+def test_trusted_cdp_click_left_default_uses_button_mask_1():
+    inp = _FakeInput()
+    mod._trusted_cdp_click(_fake_sb(inp), 5, 5)  # defaults: left, single
+    press = dict(inp.events[1][1])
+    assert press["button"] == "left"
+    assert press["buttons"] == 1               # left → bitmask 1
+    assert press["click_count"] == 1
+
+
+def test_trusted_cdp_type_uses_insert_text_with_payload():
+    inp = _FakeInput()
+    mod._trusted_cdp_type(_fake_sb(inp), "hello@world.com")
+    assert inp.events == [("insert_text", {"text": "hello@world.com"})]
 
 
 def test_no_execute_script_uses_return_iife_pattern():
