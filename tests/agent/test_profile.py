@@ -59,14 +59,15 @@ def _ctx() -> dict:
 # The middleware ``build_graph`` ALWAYS mounts, in order, regardless of profile:
 # the unified context layer's middleware (capture+offload in one
 # ContextMiddleware — graph.py calls ``build_context_layer()``) PLUS
-# RoutingMiddleware + SessionGuideMiddleware. The ``captured_build`` fixture
-# stubs ``build_context_layer`` to empty + the two named middleware to marker
-# strings, so a captured ``middleware`` list with no rubric gate is exactly
-# this. Asserted in the no-gate / disabled-gate tests; updating the baseline
-# lives here, once. (The capture+offload behavior itself is proven in
-# test_context_offload.py — here it's stubbed away to keep the profile test
-# focused on the wiring shape.)
-_BASELINE_MIDDLEWARE = ["ROUTE", "GUIDE"]
+# RoutingMiddleware + SessionGuideMiddleware + ModelRetryMiddleware (default-ON
+# for every supervisor — the time-dimension retry layer; disable per-org via
+# ``model_retry: {enabled: false}``). The ``captured_build`` fixture stubs
+# ``build_context_layer`` to empty + the named middleware to marker strings, so
+# a captured ``middleware`` list with no rubric gate is exactly this. Asserted
+# in the no-gate / disabled-gate tests; updating the baseline lives here, once.
+# (The capture/offload behavior itself is proven in test_context_offload.py —
+# here it's stubbed away to keep the profile test focused on the wiring shape.)
+_BASELINE_MIDDLEWARE = ["ROUTE", "GUIDE", "RETRY"]
 
 
 @pytest.fixture
@@ -142,6 +143,10 @@ def captured_build(monkeypatch):
     monkeypatch.setattr(stack, "build_context_layer", lambda: ([], []))
     monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
     monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
+    # ModelRetryMiddleware is default-ON for every supervisor (mounted after
+    # routing+session_guide); stub it to the ``"RETRY"`` marker so the no-gate
+    # baseline stays a clean list of marker strings (not a raw object).
+    monkeypatch.setattr(stack, "ModelRetryMiddleware", lambda *a, **k: "RETRY")
     monkeypatch.setattr(stack, "get_model", lambda *a, **k: "MODEL")
     monkeypatch.setattr(
         graph, "create_deep_agent",

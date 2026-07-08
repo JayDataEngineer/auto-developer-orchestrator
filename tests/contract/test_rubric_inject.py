@@ -1,9 +1,9 @@
 """Rubric injection wiring — the prepare-wiring-e2e-gap proof.
 
-Drives the REAL ``server._execute`` + ``main._run`` entry points (NOT a helper)
-and asserts the rubric lands on the deepagents invoke state. This is the seam
-[[feedback_prepare_wiring_e2e_gap]] demands: a wiring change proven only by an
-isolated unit test of a helper is unproven — the injection must be driven
+Drives the REAL ``server._invoke_once`` + ``main._run`` entry points (NOT a
+helper) and asserts the rubric lands on the deepagents invoke state. This is the
+seam [[feedback_prepare_wiring_e2e_gap]] demands: a wiring change proven only by
+an isolated unit test of a helper is unproven — the injection must be driven
 through the actual call path the operator + the CLI hit.
 
 What must hold for an org that opted into the gate (``dev-bot``):
@@ -43,8 +43,13 @@ class _CapturingGraph:
         msg = types.SimpleNamespace(content="ok", type="ai", name="", tool_calls=None)
         return {"messages": [msg]}
 
+    async def aget_state(self, config: Any = None) -> Any:
+        # ``_invoke_once`` reads snap.next + snap.tasks after ainvoke; return a
+        # finished snapshot (no interrupts) so the run completes normally.
+        return types.SimpleNamespace(next=(), tasks=())
 
-# --- server._execute (the `pux dispatch` / Agent Protocol path) -------------
+
+# --- server._invoke_once (the `pux serve` / Agent Protocol path) ------------
 
 def test_execute_injects_default_rubric_for_gated_org(monkeypatch):
     """dev-bot (gate enabled) + a bare task string -> the server injects the
@@ -53,7 +58,8 @@ def test_execute_injects_default_rubric_for_gated_org(monkeypatch):
     g = _CapturingGraph()
     monkeypatch.setattr(server, "_get_graph", lambda org: g)
 
-    asyncio.run(server._execute("dev-bot", "t1", "do the task", 60))
+    body = server.EphemeralRun(agent_id="dev-bot", input="do the task")
+    asyncio.run(server._invoke_once("dev-bot", "t1", body, 60))
 
     state = g.captured["state"]
     assert state["rubric"] == default_rubric("dev-bot")
@@ -69,7 +75,8 @@ def test_execute_rubric_override_wins(monkeypatch):
     monkeypatch.setattr(server, "_get_graph", lambda org: g)
 
     raw = {"messages": [{"role": "user", "content": "x"}], "rubric": "MINE"}
-    asyncio.run(server._execute("dev-bot", "t1", raw, 60))
+    body = server.EphemeralRun(agent_id="dev-bot", input=raw)
+    asyncio.run(server._invoke_once("dev-bot", "t1", body, 60))
 
     assert g.captured["state"]["rubric"] == "MINE"
 
@@ -80,7 +87,8 @@ def test_execute_no_rubric_for_ungated_org(monkeypatch):
     g = _CapturingGraph()
     monkeypatch.setattr(server, "_get_graph", lambda org: g)
 
-    asyncio.run(server._execute("general", "t1", "do the task", 60))
+    body = server.EphemeralRun(agent_id="general", input="do the task")
+    asyncio.run(server._invoke_once("general", "t1", body, 60))
 
     assert "rubric" not in g.captured["state"]
 

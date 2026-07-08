@@ -101,6 +101,9 @@ class _StubSnapshot:
     def __init__(self, values: dict[str, Any], nxt: tuple[str, ...] = ()) -> None:
         self.values = values
         self.next = nxt
+        # ``_invoke_once`` reads ``snap.tasks`` for interrupt payloads (empty
+        # here → the stub run is always 'finished', never 'interrupted').
+        self.tasks: tuple[Any, ...] = ()
         self.config = {"configurable": {"checkpoint_id": "cp-1"}}
         self.parent_config = None
 
