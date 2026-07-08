@@ -117,6 +117,42 @@ sandbox:
     assert p.sandbox.deps.pip == []
 
 
+def test_load_sandbox_display_watch_off_by_default(tmp_path: Path) -> None:
+    # No display block -> watch off (the security default: x11vnc is -nopw, so
+    # the watchable desktop is opt-in only and never auto-published).
+    body = """
+sandbox:
+  tier: isolated
+"""
+    p = policy.load("nodisplay", _write_policy(tmp_path, "nodisplay", body))
+    assert p.sandbox.display.watch is False
+    assert p.sandbox.display.backend == "standard"
+
+
+def test_load_sandbox_display_watch_on(tmp_path: Path) -> None:
+    body = """
+sandbox:
+  display:
+    watch: true
+    backend: kasm
+"""
+    p = policy.load("watch-org", _write_policy(tmp_path, "watch-org", body))
+    assert p.sandbox.display.watch is True
+    assert p.sandbox.display.backend == "kasm"
+
+
+def test_load_sandbox_display_rejects_unknown_backend(tmp_path: Path) -> None:
+    # An unknown backend would silently map to the wrong VNC-web port -> loud.
+    body = """
+sandbox:
+  display:
+    watch: true
+    backend: spice
+"""
+    with pytest.raises(policy.PolicyError, match="backend 'spice'"):
+        policy.load("bad-backend", _write_policy(tmp_path, "bad-backend", body))
+
+
 def test_load_empty_file_is_empty_policy(tmp_path: Path) -> None:
     # An empty (but present) policy.yaml is valid — opts in with no sections.
     p = policy.load("blank", _write_policy(tmp_path, "blank", ""))

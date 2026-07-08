@@ -306,3 +306,75 @@ def test_ensure_image_pulls_when_no_build_spec():
     sb._ensure_image("pux-sandbox:latest", None)
     assert images.pulled == ["pux-sandbox:latest"]
     assert images.built == {}
+
+
+# --- sandbox.display watchable desktop (OpenComputer value extraction P1) -----
+# display_port() + _resolve_watch_url() are pure decisions over a (container,
+# DisplaySpec, tier) triple — no Docker daemon. The full port-publish path
+# (create_kwargs["ports"]) is proven LIVE by `pux sandbox ensure` + curl
+# against the pux-sandbox image (the image already runs the noVNC stack under
+# supervisord); not asserted here, matching this file's create-path philosophy.
+
+from types import SimpleNamespace  # noqa: E402
+
+
+def _fake_container(ports: dict | None = None):
+    """Stand-in docker container for ``_resolve_watch_url`` (reload/ports only)."""
+    return SimpleNamespace(reload=lambda *a, **k: None, ports=ports or {})
+
+
+def test_display_port_per_backend():
+    assert C.display_port("standard") == 6080
+    assert C.display_port("kasm") == 8444
+    assert C.display_port("unknown") == 6080  # safe fallback to the noVNC port
+
+
+def test_resolve_watch_url_none_when_watch_off():
+    sb = C.SandboxContainer(org="", project_path="/proj")
+    # disp=None (watch off) -> no URL regardless of container/tier.
+    assert sb._resolve_watch_url(_fake_container(), None, "isolated") is None
+
+
+def test_resolve_watch_url_isolated_reads_published_port():
+    sb = C.SandboxContainer(org="", project_path="/proj")
+    disp = C.policy.DisplaySpec(watch=True, backend="standard")
+    # docker published 6080/tcp -> 127.0.0.1:49152 (ephemeral host port).
+    c = _fake_container({"6080/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49152"}]})
+    assert sb._resolve_watch_url(c, disp, "isolated") == "http://127.0.0.1:49152/vnc.html"
+
+
+def test_resolve_watch_url_bridged_uses_container_port_directly():
+    sb = C.SandboxContainer(org="", project_path="/proj")
+    disp = C.policy.DisplaySpec(watch=True, backend="standard")
+    # host networking: no published binding; the container's 6080 IS the host's.
+    assert sb._resolve_watch_url(_fake_container(), disp, "bridged") == "http://127.0.0.1:6080/vnc.html"
+
+
+def test_resolve_watch_url_kasm_is_tls_root_path():
+    sb = C.SandboxContainer(org="", project_path="/proj")
+    disp = C.policy.DisplaySpec(watch=True, backend="kasm")
+    c = _fake_container({"8444/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49153"}]})
+    # KasmVNC serves its own TLS web client on the port (https, root path).
+    assert sb._resolve_watch_url(c, disp, "isolated") == "https://127.0.0.1:49153/"
+
+
+def test_resolve_watch_url_isolated_no_binding_returns_none():
+    sb = C.SandboxContainer(org="", project_path="/proj")
+    disp = C.policy.DisplaySpec(watch=True, backend="standard")
+    # Port declared but not yet published (queried mid-start) -> None, no crash.
+    assert sb._resolve_watch_url(_fake_container(), disp, "isolated") is None
+
+
+def test_watch_url_none_when_display_watch_off(monkeypatch):
+    # Default Policy (no display block) -> watch_url None, no docker lookup.
+    sb = C.SandboxContainer(org="x", project_path="/proj")
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (C.policy.Policy(), "isolated"))
+    assert sb.watch_url is None
+
+
+def test_watch_url_returns_create_cache_without_docker():
+    # After create() caches _watch_url, the property short-circuits — proven by
+    # not needing any client/container to resolve it.
+    sb = C.SandboxContainer(org="", project_path="/proj")
+    sb._watch_url = "http://127.0.0.1:9999/vnc.html"
+    assert sb.watch_url == "http://127.0.0.1:9999/vnc.html"
