@@ -1,5 +1,8 @@
 # Declarative sandbox policy for org invest.
 # Tightens prod egress to just Alpaca + FRED; injects API keys via env only.
+tool_servers:
+  - equibles
+  - web_research
 
 egress:
   allow:

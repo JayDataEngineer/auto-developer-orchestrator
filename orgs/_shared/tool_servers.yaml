@@ -15,6 +15,9 @@
 # one unset var can't brick the org). Set the documented PUX_MCP_* vars in
 # your shell / env manager before `pux serve|acp|direct`.
 
+# ── web_research (research-mcp) ──────────────────────────────────────────────
+# Source: https://github.com/JayDataEngineer/research-mcp
+# Docker Compose service — no standalone binary; deploy via the repo's compose file.
 web_research:
   kind: mcp
   transport: http
@@ -25,16 +28,34 @@ web_research:
   # silently breaking web_research for any org that opts in (caught only by a
   # live handshake, never by the offline contract).
   # Env: PUX_MCP_WEB_RESEARCH_URL — the Streamable-HTTP endpoint of the
-  # web-research MCP server (e.g. https://<host>/research/mcp).
+  # research-mcp server (e.g. http://<host>:41827/mcp or via Tailscale Serve).
   tools: [search, scrape, research]
 
+# ── media (media-mcp) ────────────────────────────────────────────────────────
+# Source: https://github.com/JayDataEngineer/media-mcp
+# Docker Compose service — no standalone binary; deploy via the repo's compose file.
 media:
   kind: mcp
   transport: sse
   url: ${PUX_MCP_MEDIA_URL}
   # Env: PUX_MCP_MEDIA_URL — the SSE endpoint of the media-analysis MCP server
-  # (vision/audio/video tools), e.g. http://<host>:8101.
+  # (vision/audio/video tools), e.g. http://<host>:41721/mcp or via Tailscale Serve.
 
+# ── equibles-mcp (Equibles) ─────────────────────────────────────────────────
+# Source: https://github.com/daniel3303/Equibles
+# Docker Compose service — SEC filings, institutional holdings, insider trading,
+# congressional trades, short data, economic indicators, stock prices.
+# No standalone binary; deploy via the repo's compose file.
+equibles:
+  kind: mcp
+  transport: http
+  url: ${PUX_MCP_EQUIBLES_URL}
+  # Env: PUX_MCP_EQUIBLES_URL — the HTTP endpoint of the Equibles MCP server
+  # (e.g. http://<host>:8081/mcp). Requires FINRA + FRED API keys for full data.
+
+# ── github (github-mcp-server) ───────────────────────────────────────────────
+# Source: https://github.com/github/github-mcp-server
+# Stdio binary — bootstrap fallback downloads from GitHub releases when not on PATH.
 github:
   kind: mcp
   transport: stdio
@@ -61,4 +82,31 @@ github:
     asset: "github-mcp-server_*{os}*{arch}*.tar.gz"
     binary: github-mcp-server
     version: latest
+
+# ── godot-mcp-runtime (Erodenn) ─────────────────────────────────────────────
+# Source: https://github.com/Erodenn/godot-mcp-runtime
+# TypeScript stdio server — zero-footprint (no Godot addon required). Runs via
+# npx; headless editing + runtime bridge (screenshots, input sim, live GDScript).
+godot-mcp-runtime:
+  kind: mcp
+  transport: stdio
+  command: npx
+  args: ["-y", "godot-mcp-runtime"]
+  env:
+    GODOT_PATH: ${GODOT_PATH}
+  # Env: GODOT_PATH — path to the Godot 4.x executable. If Godot is on PATH,
+  # this can be omitted (the server auto-detects).
+
+# ── godot-ai (hi-godot) ─────────────────────────────────────────────────────
+# Source: https://github.com/hi-godot/godot-ai
+# Python (FastMCP) HTTP server + GDScript editor addon. 120+ ops across ~41 MCP
+# tools. Requires the addon installed in the Godot project + uv for the server.
+# 891 stars — the most popular Godot MCP server.
+godot-ai:
+  kind: mcp
+  transport: http
+  url: ${PUX_MCP_GODOT_AI_URL}
+  # Env: PUX_MCP_GODOT_AI_URL — the HTTP endpoint of the godot-ai MCP server
+  # (e.g. http://<host>:8000/mcp). The server is started by the Godot editor
+  # plugin when the project is opened.
 
