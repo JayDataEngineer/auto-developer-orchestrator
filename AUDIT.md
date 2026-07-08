@@ -48,10 +48,14 @@ Re-verified green after every edit batch: `uv run pytest -q` (578/6) +
 
 1. **"specialists should be 37"** — FALSE at the time (registry pins the count);
    it is now **40** after 7 browser tools were added. README updated to 40.
-2. **"`CONTRACT.md` is a blocker; rewrite it"** — MISFRAMED. Its preamble freezes it
+2. **"`CONTRACT.md` is a blocker; rewrite it"** — MISFRAMED at the time. Its preamble froze it
    as the `master`-branch Go-server reference ("does not describe the pi-pivot branch").
    Intentionally frozen, not drift. The **live** contract on this branch is
-   `pux-harness/pux_harness/agent/contract.py` (+ AGENTS.md spec). Left untouched.
+   `pux-harness/pux_harness/agent/contract.py` (+ AGENTS.md spec). Left untouched **then**.
+   **Reversed 2026-07-08:** `CONTRACT.md` was removed from this branch — the pi-pivot
+   surface conforms to the upstream protocols (MCP / ACP / Agent Protocol / AG-UI), so a
+   bespoke pux contract documenting deleted Go code was redundant. Recoverable via
+   `git show HEAD~:CONTRACT.md` if master's frozen copy is ever needed.
 3. **"`_demo` org has an agent-resolution violation"** — FALSE. `_demo`'s
    `researcher`/`browser` resolve via `orgs/_shared/agents/`, which the contract allows.
 4. **"Committed multi-GB `.venv` under orgs"** — FALSE. `git ls-files` = 0 for both;

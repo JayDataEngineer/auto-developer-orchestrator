@@ -403,7 +403,7 @@ class TestMainDispatch:
         assert seen == ["invest"]
 
     def test_mcp(self, cli, monkeypatch):
-        # `pux mcp` is the documented FastMCP SSE server (README/CONTRACT/AUDIT
+        # `pux mcp` is the documented FastMCP SSE server (README/AUDIT
         # + mcp_server.py docstring). It MUST be a wired subcommand — previously
         # the CLI rejected it ("invalid choice") while every doc referenced it.
         seen = []
