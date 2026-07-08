@@ -67,6 +67,20 @@ for i in $(seq 1 60); do
   if [ "$i" = 60 ]; then echo "[pux-prod] WARN: serve not healthy in 60s — check $LOG_DIR/serve.log"; fi
 done
 
+# Confirm the run-completion event endpoint is spun up on serve — the
+# receiver-of-last-resort for webhook-less clients (Hermes: "can't make webhooks
+# on the sandbox"). Hermes subscribes to GET /events/stream; this proves the
+# path is live at boot so a missed completion surfaces HERE, not as a silently
+# dropped notification later. /events/health must report ok alongside /ok.
+echo "[pux-prod] confirming run-completion event endpoint on $TS_IP:$API_PORT/events/health ..."
+for i in $(seq 1 30); do
+  if curl -fsS "http://$TS_IP:$API_PORT/events/health" 2>/dev/null | grep -q '"ok"'; then
+    echo "[pux-prod] events endpoint up after ${i}s"; break
+  fi
+  sleep 1
+  if [ "$i" = 30 ]; then echo "[pux-prod] WARN: /events/health not up in 30s — Hermes SSE catch-up unavailable until serve reload; check $LOG_DIR/serve.log"; fi
+done
+
 # mcp (FastMCP SSE wrapper).
 start_one mcp \
   "cd '$PUX_DIR' && PUX_PROJECT_ROOT='$PROJECT_ROOT' PUX_MCP_HOST='$TS_IP' PUX_MCP_PORT='$MCP_PORT' PUX_API_URL='http://$TS_IP:$API_PORT' exec uv run python -m pux_harness mcp" \

@@ -156,13 +156,97 @@ def test_build_env_no_policy_defaults():
     assert "FS_READWRITE=/sandbox/workspace,/sandbox/tmp" in env
     assert "DOCKER_HOST=unix:///var/run/docker.sock" in env
     assert "HOST_GATEWAY=host.docker.internal" in env
+    # serve-reach passthroughs so in-sandbox warmup/probes know where serve lives
+    assert any(x.startswith("PUX_API_HOST=") for x in env)
+    assert any(x.startswith("PUX_API_PORT=") for x in env)
 
 
 def test_build_env_no_policy_has_no_creds():
     sb = C.SandboxContainer(org="", project_path="/proj")
     env = sb._build_env(None)
-    # No policy → only the 6 base vars, no injected creds/cookies.
-    assert len(env) == 6
+    # No policy → only the 8 base vars (6 structural + PUX_API_HOST/PORT
+    # serve-reach passthroughs), no injected creds/cookies.
+    assert len(env) == 8
+    # positively: no API key / cookie / token vars leak in without a policy
+    assert not any(
+        any(tok in x for tok in ("API_KEY", "TOKEN", "COOKIE", "SECRET", "PASSWORD"))
+        for x in env
+    )
+
+
+# --- prepare(universal_warmup=) — serve path spins up the event warmup for
+# EVERY sandbox, even NoPolicy orgs, so a webhook-less client (Hermes) can
+# observe completions. direct path (default) skips it. Proven with a fake exec
+# client — no Docker. ---------------------------------------------------------
+
+
+def _raise_no_policy(org, project_path):  # noqa: ANN001
+    raise C.policy.NoPolicy
+
+
+class _RecordingExec:
+    """Fake DockerExecClient: records exec() commands, returns (stdout, rc)."""
+
+    def __init__(self, *, out: str = "warmup_webhook: OK", rc: int = 0) -> None:
+        self.calls: list[str] = []
+        self._out, self._rc = out, rc
+
+    def exec(self, command, *, timeout=None):  # noqa: ANN001
+        self.calls.append(command)
+        return self._out, self._rc
+
+
+class _ExplodingExec:
+    def exec(self, command, *, timeout=None):  # noqa: ANN001
+        raise OSError("exec crashed")
+
+
+def test_prepare_universal_warmup_runs_even_for_no_policy_org(monkeypatch):
+    """serve path (universal_warmup=True): the warmup runs for EVERY org,
+    including ones with no policy at all — that is the 'ALL sandboxes' guarantee.
+    The historical no-specs short-circuit is bypassed only when requested."""
+    monkeypatch.setattr(C.policy, "load", _raise_no_policy)
+    exec_client = _RecordingExec()
+    results = C.prepare("nopolicy-org", project_path="/proj",
+                        exec_client=exec_client, universal_warmup=True)
+    assert len(results) == 1, results
+    assert results[0]["name"] == "warmup_webhook"
+    assert results[0]["status"] == "ok"
+    assert any("warmup_webhook.py" in c for c in exec_client.calls)
+
+
+def test_prepare_universal_warmup_records_failure_nonfatally(monkeypatch):
+    """An unreachable serve (rc!=0) surfaces as status=failed WITHOUT raising —
+    prep must never block the agent run, the runner just logs the warning."""
+    monkeypatch.setattr(C.policy, "load", _raise_no_policy)
+    exec_client = _RecordingExec(out="warmup_webhook: UNREACHABLE", rc=1)
+    results = C.prepare("nopolicy-org", project_path="/proj",
+                        exec_client=exec_client, universal_warmup=True)
+    assert results[0]["status"] == "failed"
+    assert "UNREACHABLE" in results[0]["error"]
+
+
+def test_prepare_universal_warmup_swallows_exec_crash(monkeypatch):
+    """An exec() that RAISES is caught — warmup reports failed, run continues."""
+    monkeypatch.setattr(C.policy, "load", _raise_no_policy)
+    results = C.prepare("nopolicy-org", project_path="/proj",
+                        exec_client=_ExplodingExec(), universal_warmup=True)
+    assert results[0]["name"] == "warmup_webhook"
+    assert results[0]["status"] == "failed"
+    assert "exec crashed" in results[0]["error"]
+
+
+def test_prepare_default_does_not_run_universal_warmup(monkeypatch):
+    """direct path (universal_warmup=False default): a NoPolicy org returns []
+    IMMEDIATELY and never calls exec — historical behavior preserved."""
+
+    class _BoomExec:
+        def exec(self, *a, **kw):  # noqa: ANN002, ANN003
+            raise AssertionError("exec must not run without universal_warmup")
+
+    monkeypatch.setattr(C.policy, "load", _raise_no_policy)
+    assert C.prepare("nopolicy-org", project_path="/proj",
+                     exec_client=_BoomExec()) == []
 
 
 # --- host_setup ordering in create() ----------------------------------------
