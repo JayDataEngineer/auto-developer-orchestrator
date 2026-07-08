@@ -52,3 +52,21 @@ godot-animation-verifier:
     # method: plugin
     # command: "claude plugin marketplace add splitatomlabs/godot-animation-verifier"
   tags: [godot, animation, testing, opencv, ci-cd, verification]
+
+# ── Gemma-4-Tools (a3xrfgb) ─────────────────────────────────────────────────
+# Source: https://github.com/a3xrfgb/Gemma-4-Tools
+# Python tools powered by Gemma 4 for media captioning and transcription.
+# Image captioners (extreme detail, JSON style, LoRA trainer), video captioner
+# (Ltx 2.3), image renamer, Whisper audio transcriber, auto-captioner variants.
+# Apache-2.0. Requires Gemma 4 GGUF model (lmstudio-community/gemma-4-E4B-it-GGUF).
+gemma-4-tools:
+  repo: a3xrfgb/Gemma-4-Tools
+  description: >
+    Gemma 4-powered media tools: extreme-detail image captioning, JSON-style
+    captioning, LoRA style trainer captioning, video captioning for Ltx 2.3,
+    image renaming, Whisper audio transcription, and auto-captioner variants.
+    Standalone Python scripts — clone and run directly.
+  install:
+    method: git
+    command: "git clone https://github.com/a3xrfgb/Gemma-4-Tools.git"
+  tags: [gemma, captioning, image, video, audio, transcription, media]
