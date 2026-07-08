@@ -3,9 +3,11 @@
 **Status:** DESIGN (2026-07-08). **Part 1 (level c) shipped** as P1 (2026-07-08):
 `pux_harness/sandbox/tools/dynamic.py` + the four `pux_dyn_*` tools + `lib/` skeleton +
 `sandbox.dynamic_tools` opt-in, proven (24 unit tests incl. the bounded-result thesis; all
-real-org contract builds green; `pux check-contract` clean for all 10 orgs). Part 2
-(manifest-driven OCI packaging engine) remains design — feeds the `upstream-protocol-pivot`
-**P4 (export rework)**.
+real-org contract builds green; `pux check-contract` clean for all 10 orgs). **P2 shipped**
+(2026-07-08): graduation (`pux promote-function`, c→b, lib→git-tracked `sandbox/functions/`)
++ pruning (`pux archive-function`, reversible `.archive/`) — proven (9 unit tests incl. a
+real-python3 graduation proof; live CLI round-trip on `invest`). Part 2 (manifest-driven OCI
+packaging engine) remains design — feeds the `upstream-protocol-pivot` **P4 (export rework)**.
 
 **Posture (the headline):** reuse upstream packaging primitives; own only the thin pux
 glue. OCI-via-`oras` (mature), gitleaks/`ruff`/`uv` (already in repo), APS manifest
@@ -209,7 +211,12 @@ covers the library layer; gitleaks scrubs `lib/functions/*.py`. Consumer unpacks
 
 ## Phased path (prove per phase; verify-or-die)
 - **P1 — Level (c) minimal slice** (`invest`): `lib/` + `dynamic.py` (make/call/list) + `index.yaml` + opt-in flag. Prove: repeated task's per-turn context drops after the org "learns" it.
-- **P2 — Pruning + graduation:** rubric archive job + `pux promote-function`. Prove: promoted fn runs as a (b) tool, git-tracked.
+- **P2 — Pruning + graduation ✅ SHIPPED (2026-07-08):** `pux promote-function` (lib→git-tracked
+  `sandbox/functions/`, c→b — same `def run` runner; agent can call but not edit) +
+  `pux archive-function` (lib→`lib/.archive/`, reversible). The rubric-gated *auto*-prune job
+  is deferred (the manual archive mechanism + reversibility landed). Proven: promoted fn runs
+  in-container from its tracked location (real-python3 value=60); promoted fn's usage/success
+  history preserved across graduation; 9 unit tests + live CLI round-trip on `invest`.
 - **P3 — Manifest + lockfile + default-deny pack:** `package:`/`capabilities:`/`dependencies:`; `org.lock.yaml` (uv); replace allowlist. Prove: pack contents == manifest (contract test; old allowlist test → permanent failure).
 - **P4 — Hook pipeline:** Schema/`ruff`-AST/gitleaks/Provenance via `PACK_HOOK_REGISTRY`; scrub `lib/functions/*.py`. Prove: fake key in a function → pack refuses; broken AST → pack refuses.
 - **P5 — OCI artifact via `oras` (shell-out) + provenance:** emit layered OCI artifact; `org.pux.*` annotations; `oras` records SHA-256 layer digests into `provenance.json` → artifact is immutable/tamper-evident now (signing slots reserved — Decision 3). Prove: `oras`/`crane` inspect/push; tamper a `lib/` blob → digest mismatch on verify.
