@@ -64,7 +64,7 @@ def client(tmp_path, monkeypatch) -> TestClient:
 
     monkeypatch.setattr(threads_mod, "PUX_API_DB", tmp_path / "webhook.sqlite")
     monkeypatch.setattr(server, "build_graph", lambda org, **kw: _WebhookStubGraph())
-    monkeypatch.setattr(container_mod, "prepare", lambda org: [])
+    monkeypatch.setattr(container_mod, "prepare", lambda *a, **k: [])
 
     calls: list[dict[str, Any]] = []
 
@@ -135,7 +135,7 @@ def test_failed_run_still_fires_webhook(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(threads_mod, "PUX_API_DB", tmp_path / "webhook-err.sqlite")
     monkeypatch.setattr(server, "build_graph", lambda org, **kw: _BoomGraph())
-    monkeypatch.setattr(container_mod, "prepare", lambda org: [])
+    monkeypatch.setattr(container_mod, "prepare", lambda *a, **k: [])
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(server, "_dispatch_run_webhook", lambda meta: calls.append(dict(meta)) or asyncio.sleep(0))  # type: ignore[assignment]
 

@@ -67,7 +67,9 @@ def client(tmp_path, monkeypatch) -> TestClient:
 
     monkeypatch.setattr(threads_mod, "PUX_API_DB", tmp_path / "events.sqlite")
     monkeypatch.setattr(server, "build_graph", lambda org, **kw: _StubGraph())
-    monkeypatch.setattr(container_mod, "prepare", lambda org: [])
+    # prepare() is called via asyncio.to_thread with universal_warmup=True on the
+    # serve path; stub accepts the kwarg and returns no jobs (no Docker).
+    monkeypatch.setattr(container_mod, "prepare", lambda *a, **k: [])
 
     with TestClient(server.app) as c:
         yield c
@@ -119,7 +121,7 @@ def test_failed_run_publishes_error_terminal(client: TestClient, monkeypatch, tm
 
     monkeypatch.setattr(threads_mod, "PUX_API_DB", tmp_path / "events-err.sqlite")
     monkeypatch.setattr(server, "build_graph", lambda org, **kw: _BoomGraph())
-    monkeypatch.setattr(container_mod, "prepare", lambda org: [])
+    monkeypatch.setattr(container_mod, "prepare", lambda *a, **k: [])
 
     with TestClient(server.app) as c:
         tid = c.post("/threads", json={"agent_id": "general"}).json()["thread_id"]
@@ -149,6 +151,52 @@ def test_events_since_filters_by_ts(client: TestClient) -> None:
     assert all(e["ts"] > cutoff for e in newer)
     # far-future cutoff returns nothing
     assert client.get("/events", params={"since": "9999-01-01T00:00:00Z"}).json()["events"] == []
+
+
+def test_prepare_offloaded_so_events_stays_responsive(tmp_path, monkeypatch) -> None:
+    """prepare() runs in a worker thread (asyncio.to_thread) so a webhook-less
+    client's GET /events poll stays responsive WHILE prep is in flight. This is
+    the reason for offloading: a synchronous prepare doing blocking Docker I/O
+    would stall the single event loop, and the client's poll would time out and
+    mistake serve for dead. Proven by blocking prepare on a flag and asserting
+    /events/health still answers promptly during the block."""
+    import time as _time
+
+    import pux_harness.sandbox.container as container_mod
+    import pux_harness.threads as threads_mod
+
+    state: dict[str, bool] = {"started": False, "release": False}
+
+    def blocking_prepare(*a, **k):  # noqa: ANN002, ANN003
+        state["started"] = True
+        while not state["release"]:
+            _time.sleep(0.02)
+        return []
+
+    monkeypatch.setattr(container_mod, "prepare", blocking_prepare)
+    monkeypatch.setattr(threads_mod, "PUX_API_DB", tmp_path / "blocking.sqlite")
+    monkeypatch.setattr(server, "build_graph", lambda org, **kw: _StubGraph())
+
+    with TestClient(server.app) as c:
+        tid = c.post("/threads", json={"agent_id": "general"}).json()["thread_id"]
+        c.post(f"/threads/{tid}/runs", json={"input": "hi"})  # background, non-blocking
+        # let the worker thread actually enter prepare before we measure
+        for _ in range(200):
+            if state["started"]:
+                break
+            _time.sleep(0.01)
+        assert state["started"], "prepare never started — background task didn't schedule"
+        # prepare is now BLOCKED. /events/health must still answer fast — if
+        # prepare ran on the event loop this would hang ~forever (release=False).
+        t0 = _time.monotonic()
+        h = c.get("/events/health").json()
+        elapsed = _time.monotonic() - t0
+        state["release"] = True  # unblock so the run resolves and the ctx exits cleanly
+        assert h["ok"] is True
+        assert elapsed < 1.0, (
+            f"/events/health took {elapsed:.2f}s while prepare blocked — "
+            "event loop stalled; prepare must be offloaded via to_thread"
+        )
 
 
 # ---------------------------------------------------------------------------
