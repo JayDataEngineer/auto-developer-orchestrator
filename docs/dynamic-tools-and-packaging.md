@@ -262,7 +262,29 @@ covers the library layer; gitleaks scrubs `lib/functions/*.py`. Consumer unpacks
   may pass. `data/`/`.pux/` HARD_EXCLUDE is the PRIMARY secret boundary; this is
   defense-in-depth. The gitleaks scan LOGIC is unit-proven via an injected runner; the
   live refusal uses the real CLI.)*
-- **P5 — OCI artifact via `oras` (shell-out) + provenance:** emit layered OCI artifact; `org.pux.*` annotations; `oras` records SHA-256 layer digests into `provenance.json` → artifact is immutable/tamper-evident now (signing slots reserved — Decision 3). Prove: `oras`/`crane` inspect/push; tamper a `lib/` blob → digest mismatch on verify.
+- **P5 — OCI artifact via `oras` ✅ SHIPPED (2026-07-08):** `pux_harness/oci.py` —
+  `emit_oci_artifact` shells out to the real `oras` CLI (Decision 2; reuse-first —
+  oras owns digests/manifest/`oci-layout`/`index.json`, we do NOT hand-roll blobs).
+  `pux pack --oci` is ADDITIVE (the validated `.tar.gz` is unchanged). Three layers:
+  `config` (`vnd.pux.org.config.v1+json`), `source-code` (primitives + the vendored
+  kit), `agent-library` (`orgs/<org>/lib/**` — the LEARNED functions; its SHA-256
+  digest is the **tamper anchor**). `provenance.json` (sibling of the tar) records
+  the manifest digest + per-layer SHA-256 + the P4 hook results + a RESERVED `null`
+  signing slot (P6). Output consumable by `oras`/`crane`/`skopeo`; pushable to GHCR
+  without repackaging. Fail-clear (Decision 2): absent `oras` → `OciError`; the
+  `.tar.gz` still ships (pack writes it first). **Key gotcha:** oras is invoked with
+  RELATIVE layer names from a private temp `cwd` — oras records each file's push-time
+  path as `org.opencontainers.image.title`, and on `oras pull` refuses titles outside
+  the output dir (path-traversal guard); absolute temp titles would break every
+  consumer pull. Prove: live `oras manifest fetch` reads the 2 layers + `org.pux.*`
+  annotations; **tamper a learned function → the agent-library digest changes** (the
+  integrity contract) while the source-code digest holds; `oras pull` round-trips the
+  layer tars (consumer recovers a `lib/` folder); injected-runner fail-clear unit suite
+  (10) proves layer grouping + digest determinism + provenance shape offline. *(Note:
+  the MANIFEST digest is not stable across pushes — oras auto-stamps
+  `org.opencontainers.image.created` — but LAYER digests are content-determined and
+  stable, which is what tamper-detection keys on. No registry push in P5 —
+  `--oci-layout` is local; `oras push <registry>` is the consumer's later step.)*
 - **P6 — (Stretch) signing + registry:** Cosign/Ed25519 signing hook via OCI manifest annotations (Decision 3); `oras push`/pull round-trip through GHCR.
 
 ## Locked decisions (2026-07-08)
