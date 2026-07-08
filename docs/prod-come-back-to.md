@@ -59,18 +59,30 @@ hosted `mda deploy` waits on private-beta access.
 
 ---
 
-## AG-UI defects #5 / #6 / #7  (task #9)
+## AG-UI defects #5 / #6 / #7  (task #9) — ✅ RESOLVED 2026-07-08
 
-**Why deferred:** AG-UI (the web SSE lane, CopilotKit `/agui/{org}`) is NOT on the
-prod path — Hermes speaks MCP, not AG-UI. The phone→Hermes flow never touches AG-UI.
+**Resolved by verify-against-current-version.** Re-derived the defects by
+driving the LIVE AG-UI lane against the current stack (ag-ui-langgraph `0.0.42`
++ the prod model layer's default `glm-5.2`). All 4 `tests/server/test_agui_live.py`
+tests green (29.4s), including the ask_user interrupt→resume round-trip.
 
-**The defects (from the AG-UI migration review, `[[ag-ui-langgraph-migration]]`):**
-- The AG-UI lane mounts ONE upstream `LangGraphAgent`; the orphaned-import silent-disable
-  on clean sync is fixed (idempotent mount), but three behavioral defects remain open.
-- Re-derive exact repros from the migration ticket before fixing — they may already be
-  moot if the upstream `ag-ui-langgraph` version advanced.
+The headline defect — "incremental `TEXT_MESSAGE_*` streaming broken, deltas
+pass through as `RAW`" — is **moot**: it was MiMo-specific (MiMo's langgraph
+deltas didn't map); `glm-5.2` streams a proper `TEXT_MESSAGE_START`→`CONTENT`→
+`END` lifecycle. The `RAW` events that still appear are benign graph-lifecycle
+passthrough (`on_chain_start`, etc.), not untranslated message deltas.
 
-**Sizing:** small-medium each, but verify-against-current-version first.
+**no-legacy-left-behind:** `test_agui_general_streams_text` previously declined
+to assert incremental streaming (its docstring said "out of scope"). Now that
+streaming works it's a **permanent contract** — the test asserts the
+`TEXT_MESSAGE_*` lifecycle and prefers streamed deltas over the
+`MESSAGES_SNAPSHOT` fallback, so a RAW-passthrough regression fails loud. A
+pux-side event-rewriter was correctly rejected (`[[rely-on-upstream]]` — it
+would fight the upstream adapter; the real fix was the model/version advance).
+
+**Why it was deferred (context):** AG-UI (the web SSE lane, CopilotKit
+`/agui/{org}`) is NOT on the prod path — Hermes speaks MCP, not AG-UI. The
+phone→Hermes flow never touches AG-UI.
 
 ---
 

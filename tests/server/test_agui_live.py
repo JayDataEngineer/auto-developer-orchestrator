@@ -124,11 +124,14 @@ def _sse_events(body: str) -> list[tuple[str, dict | None]]:
 def _assistant_text_from_snapshot(events: list[tuple[str, dict | None]]) -> str:
     """Pull the assistant's reply text out of the terminal MESSAGES_SNAPSHOT.
 
-    MiMo via OpenCode Go streams langgraph deltas that ag_ui_langgraph doesn't
-    map to incremental ``TEXT_MESSAGE_*`` events — they pass through as ``RAW``.
-    The model's reply is therefore delivered as a ``MESSAGES_SNAPSHOT`` (the full
-    final message list). This extracts the assistant turn's text from it, which
-    is the real proof the model produced a reply through the surface."""
+    The FALLBACK reply-extraction path (the primary path is incremental
+    ``TEXT_MESSAGE_CONTENT`` deltas — see :func:`_assistant_text`). Some
+    provider/model shapes deliver the reply only in the terminal
+    ``MESSAGES_SNAPSHOT`` (the full final message list) — notably MiMo via
+    OpenCode Go, whose langgraph deltas historically passed through as ``RAW``
+    rather than mapping to incremental ``TEXT_MESSAGE_*`` events. This extracts
+    the assistant turn's text from the snapshot so neither delivery shape
+    returns empty."""
     snapshots = [d for t, d in events if t == "MESSAGES_SNAPSHOT" and isinstance(d, dict)]
     if not snapshots:
         return ""
@@ -214,14 +217,17 @@ def test_agui_general_mounted(live_key, tmp_path, monkeypatch) -> None:
 def test_agui_general_streams_text(live_key, tmp_path, monkeypatch) -> None:
     """POST /agui/general streams a real run to completion and delivers the
     model's reply through the surface. Asserts the full lifecycle (RUN_STARTED →
-    RUN_FINISHED, no RUN_ERROR) AND that the assistant's reply text arrives in
-    the terminal MESSAGES_SNAPSHOT — the live proof the AG-UI surface works
-    end-to-end against the real MiMo model.
+    RUN_FINISHED, no RUN_ERROR), that the reply arrives through the surface, AND
+    — now a permanent contract — that the reply streams INCREMENTALLY as
+    ``TEXT_MESSAGE_*`` events (not just the terminal MESSAGES_SNAPSHOT).
 
-    (Note: incremental ``TEXT_MESSAGE_*`` token events are NOT emitted today —
-    langgraph chat-model deltas stream through as ``RAW`` and the reply lands in
-    MESSAGES_SNAPSHOT. That incremental-streaming translation is a separate gap,
-    out of scope for this 'surface works' proof.)"""
+    Incremental streaming works on the current default model (``glm-5.2``) +
+    ag-ui-langgraph 0.0.42: ``on_chat_model_stream`` chunks translate to
+    ``TEXT_MESSAGE_START``/``CONTENT``/``END``. The older MiMo path passed
+    deltas through as ``RAW`` (reply only in MESSAGES_SNAPSHOT); that gap is
+    gone on this stack, so this test asserts the streaming lifecycle rather than
+    tolerating its absence. A future model that regresses to RAW-passthrough
+    fails here loudly. See ``[[ag-ui-langgraph-migration]]``."""
     import pux_harness.threads as threads_mod
 
     # Isolate the run's checkpoint state from the shared production store.
@@ -248,12 +254,40 @@ def test_agui_general_streams_text(live_key, tmp_path, monkeypatch) -> None:
         f"RUN_ERROR in stream: {[d for t, d in events if t == 'RUN_ERROR']}"
     )
 
+    # Incremental token streaming MUST fire (a permanent contract, not a gap).
+    # ag-ui-langgraph 0.0.42 translates langgraph ``on_chat_model_stream`` chunks
+    # into AG-UI ``TEXT_MESSAGE_START``/``CONTENT``/``END`` for the default
+    # ``glm-5.2`` model — a CopilotKit frontend gets token-by-token rendering,
+    # not a single end-of-turn dump. (This was once MiMo-specifically broken —
+    # MiMo deltas passed through as ``RAW`` and the reply landed only in
+    # MESSAGES_SNAPSHOT — so the older revision of this test declined to assert
+    # it. The current model + adapter version stream correctly; asserting it
+    # here makes a regression to RAW-passthrough a loud failure, not a silent
+    # one. See ``[[ag-ui-langgraph-migration]]``.)
+    assert "TEXT_MESSAGE_START" in types, (
+        f"no TEXT_MESSAGE_START — incremental streaming did not begin: {types}"
+    )
+    content_deltas = [
+        d.get("delta", "")
+        for t, d in events
+        if t == "TEXT_MESSAGE_CONTENT" and isinstance(d, dict)
+    ]
+    assert content_deltas, (
+        "no TEXT_MESSAGE_CONTENT events — the model reply did not stream "
+        f"incrementally (RAW-passthrough regression?): {types}"
+    )
+    assert "TEXT_MESSAGE_END" in types, (
+        f"no TEXT_MESSAGE_END — incremental streaming did not close: {types}"
+    )
+
     # The model's reply must arrive through the surface (not just lifecycle
-    # ticks). MESSAGES_SNAPSHOT carries the final assistant turn.
-    reply = _assistant_text_from_snapshot(events)
+    # ticks). Prefer the streamed deltas (the strongest surface proof — the text
+    # streamed token-by-token); fall back to MESSAGES_SNAPSHOT so a model that
+    # emits only a coarse single-chunk delta still passes the reply assertion.
+    reply = "".join(content_deltas).strip() or _assistant_text_from_snapshot(events)
     assert reply, (
-        "MESSAGES_SNAPSHOT carried no assistant text — the model did not reply "
-        f"through the surface. events: {types}"
+        "no assistant text arrived through the surface (neither incremental "
+        f"deltas nor MESSAGES_SNAPSHOT). events: {types}"
     )
 
 
