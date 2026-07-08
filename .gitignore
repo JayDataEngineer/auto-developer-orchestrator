@@ -71,6 +71,7 @@ orgs/*/*
 !orgs/*/skills/
 !orgs/*/sandbox/
 !orgs/*/agents/
+!orgs/*/upstream_skills/
 # Ignore everything at depth 3 inside specialists/<org>/ (runtime data
 # directories, build outputs, etc.).
 orgs/specialists/*/*
