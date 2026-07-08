@@ -14,8 +14,17 @@ Decision 5); `pux lock` + `org.lock.yaml` (github MCP refs → commit SHAs via h
 (committed by default — Decision 4) and ship in the pack. Proven (50 manifest/lockfile unit
 tests incl. the pack-contents==manifest contract + the legacy-allowlist-removed permanent
 failure; 128 export/cli tests; live `pux lock --org general` resolved a real SHA; `pux pack`
-ships `org.lock.yaml`; `pux export` hard-errors exit 1). Part 2's remaining phases (P4 hooks,
-P5 OCI, P6 signing) stay design — feed the `upstream-protocol-pivot` **P4 (export rework)**.
+ships `org.lock.yaml`; `pux export` hard-errors exit 1). **P4 shipped (2026-07-08):**
+`pux_harness/pack_hooks.py` — the `PACK_HOOK_REGISTRY` (`ast_check_hook` via stdlib `compile`,
+`gitleaks_hook` via the host-side CLI, reuse-first). Hooks run AFTER collection, BEFORE the
+tarball is written — a broken agent function or a leaked secret REFUSES the pack
+(`PackHookError`); results seed `manifest.json` → `provenance.hooks` (the P5 audit surface).
+`data/`/`.pux/` HARD_EXCLUDE remains the PRIMARY secret boundary; gitleaks is the
+defense-in-depth scan over what ships. Proven (23 hook unit tests via an injected runner +
+5 `pack_org` integration tests; **live**: planted `ghp_` PAT → `pux pack` REFUSES exit 1
+[github-pat + generic-api-key rules]; broken AST → refuses; clean `general` → packs +
+records provenance). Part 2's remaining phases (P5 OCI, P6 signing) stay design — feed the
+`upstream-protocol-pivot` **P4 (export rework)**.
 
 **Posture (the headline):** reuse upstream packaging primitives; own only the thin pux
 glue. OCI-via-`oras` (mature), gitleaks/`ruff`/`uv` (already in repo), APS manifest
@@ -239,7 +248,20 @@ covers the library layer; gitleaks scrubs `lib/functions/*.py`. Consumer unpacks
   `github/github-mcp-server@latest` to a real SHA; `pux export` hard-errors (exit 1).
   *(Note: pip resolution is as-declared for now — operators pin the critical ones; full
   `uv lock`-driven resolution is a follow-up.)*
-- **P4 — Hook pipeline:** Schema/`ruff`-AST/gitleaks/Provenance via `PACK_HOOK_REGISTRY`; scrub `lib/functions/*.py`. Prove: fake key in a function → pack refuses; broken AST → pack refuses.
+- **P4 — Hook pipeline ✅ SHIPPED (2026-07-08):** `pux_harness/pack_hooks.py` — the
+  `PACK_HOOK_REGISTRY` (`ast_check_hook` via stdlib `compile` — no ruff binary needed;
+  `gitleaks_hook` via the host-side CLI, reuse-first). Wired into `pack_org` AFTER
+  collection, BEFORE the tarball — `PackHookError` refuses the pack (no archive written);
+  results seed `manifest.json` → `provenance.hooks` (the P5 audit surface). `ast_check`
+  targets agent-authored `lib/functions/*.py` + org `sandbox/*.py` (skips the vendored
+  kit). `gitleaks_hook` is a REQUIRED gate (absent binary → refuse, no silent skip).
+  Prove: planted `ghp_` PAT → `pux pack` REFUSES exit 1 (github-pat + generic-api-key
+  rules); broken AST → refuses (ast fires first, before gitleaks); clean `general` →
+  packs + records provenance. *(Note: gitleaks detection is pattern + entropy driven —
+  provider PATs/high-entropy key assignments are caught; a contrived low-entropy string
+  may pass. `data/`/`.pux/` HARD_EXCLUDE is the PRIMARY secret boundary; this is
+  defense-in-depth. The gitleaks scan LOGIC is unit-proven via an injected runner; the
+  live refusal uses the real CLI.)*
 - **P5 — OCI artifact via `oras` (shell-out) + provenance:** emit layered OCI artifact; `org.pux.*` annotations; `oras` records SHA-256 layer digests into `provenance.json` → artifact is immutable/tamper-evident now (signing slots reserved — Decision 3). Prove: `oras`/`crane` inspect/push; tamper a `lib/` blob → digest mismatch on verify.
 - **P6 — (Stretch) signing + registry:** Cosign/Ed25519 signing hook via OCI manifest annotations (Decision 3); `oras push`/pull round-trip through GHCR.
 
