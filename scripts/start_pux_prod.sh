@@ -42,6 +42,16 @@ stop_pidfile() {
     rm -f "$pf"
   fi
 }
+case "${1:-start}" in
+  stop)
+    stop_pidfile "$PID_DIR/serve.pid" "serve"
+    stop_pidfile "$PID_DIR/mcp.pid" "mcp"
+    echo "[pux-prod] stopped (server.py fallback runtime — re-run $0 to restart)"
+    exit 0
+    ;;
+esac
+
+# start: kill any prior instance first, then launch.
 stop_pidfile "$PID_DIR/serve.pid" "serve"
 stop_pidfile "$PID_DIR/mcp.pid" "mcp"
 
