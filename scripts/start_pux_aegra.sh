@@ -11,8 +11,10 @@
 #   aegra serve — Agent Protocol HTTP backend  :9988  (PUX_API_HOST)
 #   pux mcp     — FastMCP SSE wrapper          :9987  (PUX_MCP_HOST)  [unchanged]
 #
-# Reversible: to roll back, `pux-aegra stop` (or systemctl stop) then re-run
-# scripts/start_pux_prod.sh. server.py stays installed as the fallback runtime.
+# Rollback is via git history: server.py + scripts/start_pux_prod.sh were deleted
+# in phase D (Aegra is the single AP runtime). Recover them by reverting the
+# phase-D commits, then run server.py directly on :9988. Emergency-only — parity
+# was proven before deletion (tests/upstream/ + live prod).
 #
 # KNOWN DELTA vs server.py (documented in AEGRA_PROD.md):
 #  - persistence sqlite→Postgres (ephemeral threads do not migrate; acceptable).
@@ -148,4 +150,4 @@ sleep 3
 echo "[pux-aegra] stack up:"
 echo "  aegra pid $(cat "$PID_DIR/serve.pid") → http://$TS_IP:$API_PORT  (log $LOG_DIR/aegra-serve.log)"
 echo "  mcp   pid $(cat "$PID_DIR/mcp.pid") → http://$TS_IP:$MCP_PORT  (log $LOG_DIR/mcp.log)"
-echo "[pux-aegra] rollback: $0 stop  &&  scripts/start_pux_prod.sh"
+echo "[pux-aegra] rollback is via git history (server.py deleted in phase D); see docs/AEGRA_PROD.md"

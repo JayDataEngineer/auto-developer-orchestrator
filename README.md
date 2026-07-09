@@ -23,8 +23,10 @@ consumed by uv as a path dependency (`[tool.uv.sources] pux-harness = { path = "
   The harness boots its own container directly over the Docker SDK — there is
   no Go server.
 - **`pux` console script** (`pux_harness.cli:main`) — the native CLI
-  dispatches `pux serve` / `pux direct` / `pux sandbox` / `pux <client-cmd>`
-  into the harness.
+  dispatches `pux direct` / `pux sandbox` / `pux <client-cmd>` into the harness.
+  (The Agent Protocol server is **Aegra** in prod — `scripts/start_pux_aegra.sh` —
+  or `langgraph dev` / `aegra dev` for local smoke; it is no longer a `pux`
+  subcommand.)
 
 Single-tenant, localhost-only, no auth. One pux process = one project = one
 sandbox.
@@ -43,7 +45,8 @@ cd sandbox && docker build -t pux-sandbox:latest . && cd ..
 pux sandbox start                  # with $PUX_ORG policy if set
 
 # 4. Start the Agent Protocol server
-pux serve                          # FastAPI on http://127.0.0.1:9988
+#    prod (this repo's deployment): scripts/start_pux_aegra.sh   (Aegra on :9988)
+#    local keyless dev:             cd pux-harness && uv run langgraph dev
 
 # 5. Drive it (client — requires the server running)
 pux agents                         # list the 10 orgs
@@ -54,17 +57,19 @@ pux resume                         # list recent threads
 pux direct --org general --task "describe this project"   # runs the graph directly, no HTTP
 ```
 
-The Agent Protocol server listens at `http://127.0.0.1:9988`; the `pux` client
-defaults to it (override with `PUX_API_URL`). There is no Go server — the
-harness drives the Docker sandbox directly over the SDK.
+The Agent Protocol server is **Aegra** in prod (OSS langgraph-api drop-in —
+`scripts/start_pux_aegra.sh`, binds the Tailscale IP on :9988) or `langgraph dev`
+/ `aegra dev` for local smoke; the `pux` client defaults to
+`http://127.0.0.1:9988` (override with `PUX_API_URL`). There is no Go server —
+the harness drives the Docker sandbox directly over the SDK.
 
 ## Subcommands
 
 | Subcommand | What it does |
 |------------|-------------|
-| `pux serve` | Start the Agent Protocol server (uvicorn on :9988). |
+| _(server)_ | The Agent Protocol server is **Aegra** (prod: `scripts/start_pux_aegra.sh`) or `langgraph dev` / `aegra dev` (local). Not a `pux` subcommand. |
 | `pux acp [--org <name>]` | ACP stdio server — exposes one org to ACP editors (Zed / VS Code / Neovim); the editor IS the TUI. |
-| `pux mcp` | FastMCP server (SSE on :9987) wrapping the Agent Protocol — exposes orgs as MCP tools to any MCP client (Hermes, Claude Desktop, Zed). Requires `pux serve` running. |
+| `pux mcp` | FastMCP server (SSE on :9987) wrapping the Agent Protocol — exposes orgs as MCP tools to any MCP client (Hermes, Claude Desktop, Zed). Requires the Agent Protocol server running (Aegra / `langgraph dev`). |
 | `pux direct --org <name> --task "..."` | In-process runner — no server. The verify/dev path. |
 | `pux sandbox <start\|stop\|status\|ensure>` | Docker sandbox lifecycle (harness-owned, 8g). Replaces the old `task start/stop/status`. |
 | `pux agents` | List orgs as Agent Protocol agents (+ their specialists). |
@@ -177,8 +182,8 @@ is proven end-to-end in the verify log (`pux direct --org general --task "..."`)
 └──────────────┬───────────────────────────┘
                │ Agent Protocol REST (httpx)
 ┌──────────────▼───────────────────────────┐
-│ pux serve  (FastAPI, :9988)              │  Agent Protocol server
-│  deepagents org graphs + AsyncSqliteSaver│  (per-org graph cache, threads)
+│ aegra serve / langgraph dev (:9988)      │  Agent Protocol server
+│  deepagents org graphs; langgraph-api    │  owns checkpointer + store
 └──────────────┬───────────────────────────┘
                │ deepagents graph + PuxSandboxBackend
 ┌──────────────▼───────────────────────────┐
@@ -212,7 +217,7 @@ harness two ways — the chat sidebar hits the AG-UI endpoint at
 at `:9988` directly. Run it from `site/`:
 
 ```bash
-pux serve &                             # the harness must be running on :9988
+scripts/start_pux_aegra.sh &            # Agent Protocol server on :9988 (Aegra)
 cd site && npm install && npm run dev   # vite (5176) + Node BFF (3001)
 ```
 

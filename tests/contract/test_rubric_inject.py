@@ -1,19 +1,25 @@
-"""Rubric injection wiring — the prepare-wiring-e2e-gap proof.
+"""Rubric injection wiring — the prepare-wiring-e2e-gap proof (direct lane).
 
-Drives the REAL ``server._invoke_once`` + ``main._run`` entry points (NOT a
-helper) and asserts the rubric lands on the deepagents invoke state. This is the
-seam [[feedback_prepare_wiring_e2e_gap]] demands: a wiring change proven only by
-an isolated unit test of a helper is unproven — the injection must be driven
-through the actual call path the operator + the CLI hit.
+Drives the REAL ``main._run`` entry point (NOT a helper) and asserts the rubric
+lands on the deepagents invoke state. This is the seam [[feedback_prepare_wiring_e2e_gap]]
+demands: a wiring change proven only by an isolated unit test of a helper is
+unproven — the injection must be driven through the actual call path the CLI hits.
+
+The ``pux serve`` lane (formerly ``server._invoke_once``) was RETIRED with
+``server.py`` in Aegra phase D (see ``[[server-py-retired]]``); prod runs on
+Aegra, whose runs reach the graph via langgraph-api with no pux entry point to
+inject from. So the in-process ``pux direct`` lane — ``main._run`` — is the one
+REAL pux entry point left, and the one this proof drives. (The ``RubricMiddleware``
+itself is gate-mounted in the graph build, exercised by ``tests/agent/test_stack.py``
++ ``test_graph.py``.)
 
 What must hold for an org that opted into the gate (``dev-bot``):
-- a bare task string (the default ``pux dispatch`` / ``pux direct`` path) -> the
-  harness injects the org's shipped ``rubric.default``, arming
-  ``RubricMiddleware``;
-- an operator ``--rubric`` override -> that text wins; the default is NOT
-  injected (the override is authoritative);
-- a no-gate org (``general`` — no ``profile.yaml``) -> NO ``rubric`` key on
-  state at all (byte-identical regression; the middleware stays a no-op).
+- a bare task string (the default ``pux direct`` path) -> the harness injects the
+  org's shipped ``rubric.default``, arming ``RubricMiddleware``;
+- an operator ``--rubric`` override -> that text wins; the default is NOT injected
+  (the override is authoritative);
+- a no-gate org (``general`` — no ``profile.yaml``) -> NO ``rubric`` key on state
+  at all (byte-identical regression; the middleware stays a no-op).
 
 Heavy deps (graph build, Docker exec, the AsyncSqliteSaver lifespan, prep jobs)
 are stubbed; the injection logic under test runs for real.
@@ -24,7 +30,7 @@ import asyncio
 import types
 from typing import Any
 
-from pux_harness import main, server
+from pux_harness import main
 from pux_harness.agent.profile import default_rubric
 
 
@@ -42,55 +48,6 @@ class _CapturingGraph:
         # A minimal final message — _run reads .content off messages[-1].
         msg = types.SimpleNamespace(content="ok", type="ai", name="", tool_calls=None)
         return {"messages": [msg]}
-
-    async def aget_state(self, config: Any = None) -> Any:
-        # ``_invoke_once`` reads snap.next + snap.tasks after ainvoke; return a
-        # finished snapshot (no interrupts) so the run completes normally.
-        return types.SimpleNamespace(next=(), tasks=())
-
-
-# --- server._invoke_once (the `pux serve` / Agent Protocol path) ------------
-
-def test_execute_injects_default_rubric_for_gated_org(monkeypatch):
-    """dev-bot (gate enabled) + a bare task string -> the server injects the
-    org's shipped default rubric onto invoke state. This is what arms
-    RubricMiddleware for an opted-in org without operator coaching."""
-    g = _CapturingGraph()
-    monkeypatch.setattr(server, "_get_graph", lambda org: g)
-
-    body = server.EphemeralRun(agent_id="dev-bot", input="do the task")
-    asyncio.run(server._invoke_once("dev-bot", "t1", body, 60))
-
-    state = g.captured["state"]
-    assert state["rubric"] == default_rubric("dev-bot")
-    # the task still flows through as the user message
-    assert state["messages"][0]["content"] == "do the task"
-
-
-def test_execute_rubric_override_wins(monkeypatch):
-    """A caller-supplied ``rubric`` key (the ``--rubric`` path; ``_normalize_input``
-    passes a messages-dict through as-is) is authoritative — the org default is
-    NOT injected on top of it."""
-    g = _CapturingGraph()
-    monkeypatch.setattr(server, "_get_graph", lambda org: g)
-
-    raw = {"messages": [{"role": "user", "content": "x"}], "rubric": "MINE"}
-    body = server.EphemeralRun(agent_id="dev-bot", input=raw)
-    asyncio.run(server._invoke_once("dev-bot", "t1", body, 60))
-
-    assert g.captured["state"]["rubric"] == "MINE"
-
-
-def test_execute_no_rubric_for_ungated_org(monkeypatch):
-    """general (no profile.yaml, no rubric block) -> NO rubric key on state.
-    Byte-identical to today; RubricMiddleware stays a no-op even if mounted."""
-    g = _CapturingGraph()
-    monkeypatch.setattr(server, "_get_graph", lambda org: g)
-
-    body = server.EphemeralRun(agent_id="general", input="do the task")
-    asyncio.run(server._invoke_once("general", "t1", body, 60))
-
-    assert "rubric" not in g.captured["state"]
 
 
 # --- main._run (the `pux direct` / in-process path) -------------------------

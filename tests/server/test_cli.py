@@ -387,13 +387,6 @@ class TestCmdJobsStatus:
 class TestMainDispatch:
     """``main()`` routes each subcommand to the right handler."""
 
-    def test_serve(self, cli, monkeypatch):
-        seen = []
-        monkeypatch.setattr("pux_harness.server.main", lambda: seen.append("serve"))
-        monkeypatch.setattr(sys, "argv", ["pux", "serve"])
-        cli.main()
-        assert seen == ["serve"]
-
     def test_acp(self, cli, monkeypatch):
         seen = []
         monkeypatch.setattr("pux_harness.acp.run_acp",

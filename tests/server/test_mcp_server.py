@@ -3,7 +3,8 @@
 Drives the real FastMCP tool dispatch via the in-memory `Client(mcp)`, with the
 HTTP backend faked by an `httpx.MockTransport` injected into `mcp_server._client`.
 This proves tool → Agent-Protocol-REST translation (method/path/body) and that
-every tool's return text carries the right fields — without a live `pux serve`.
+every tool's return text carries the right fields — without a live Agent Protocol
+server (prod: `aegra serve`; dev: `langgraph dev` / `aegra dev`).
 """
 from __future__ import annotations
 
@@ -64,7 +65,8 @@ def api(monkeypatch):
 
 @pytest.fixture
 def down_api(monkeypatch):
-    """A backend that refuses every connection — simulates `pux serve` being down."""
+    """A backend that refuses every connection — simulates the Agent Protocol
+    server being down (no `aegra serve` / `langgraph dev` running)."""
     def raise_handler(_request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("[Errno 111] Connection refused")
     client = httpx.AsyncClient(transport=httpx.MockTransport(raise_handler), base_url="http://test")
@@ -85,7 +87,9 @@ def run(coro):
 # --- discovery ---------------------------------------------------------------
 
 def test_health_ok(api):
-    api.route("GET", "/ok", payload={"ok": True, "orgs": ["general", "invest"]})
+    api.route("GET", "/events/health", payload={"ok": True})
+    api.route("POST", "/assistants/search",
+              payload=[{"graph_id": "general"}, {"graph_id": "invest"}])
     r = run(_call("health"))
     assert r.is_error is False
     assert r.data == "ok — backend up; 2 org(s): general, invest"
@@ -96,7 +100,7 @@ def test_health_backend_down(down_api):
     # Returned as in-band text (not a raised error), so is_error stays False.
     assert r.is_error is False
     assert r.data.startswith("ERROR:")
-    assert "pux serve" in r.data
+    assert "Agent Protocol server" in r.data  # was "pux serve" (retired in phase D)
 
 
 def test_list_orgs_enriched(api):
@@ -134,7 +138,7 @@ def test_get_org(api):
 # --- execution: blocking -----------------------------------------------------
 
 def test_run_agent_happy_path(api):
-    # real /runs/wait returns a run-meta dict (server.py:356-361), not {messages:[...]}
+    # real /runs/wait returns a run-meta dict (status/output/error), not {messages:[...]}
     api.route(
         "POST", "/runs/wait",
         payload={"thread_id": "T", "agent_id": "invest",
@@ -160,7 +164,7 @@ def test_run_agent_carries_thread_and_recursion(api):
 
 
 def test_run_agent_error_status_surfaces_ERROR(api):
-    # /runs/wait catches model failures into status=error (server.py:348-355)
+    # /runs/wait catches model failures into status=error
     api.route("POST", "/runs/wait",
               payload={"thread_id": "T", "agent_id": "general",
                        "status": "error", "output": "", "error": "model 401"})
@@ -350,14 +354,17 @@ async def _two_calls():
 
 
 def test_singleton_client_reused(api):
-    api.route("GET", "/ok", payload={"ok": True, "orgs": ["general"]})
+    api.route("GET", "/events/health", payload={"ok": True})
+    api.route("POST", "/assistants/search", payload=[{"graph_id": "general"}])
     client_before = mcp_server._get_client()
     a, b = run(_two_calls())
     # Same AsyncClient instance served both calls — no per-call client churn.
     assert mcp_server._get_client() is client_before
     assert a.data == b.data == "ok — backend up; 1 org(s): general"
-    # exactly 2 HTTP requests (one per tool call), proving the client was reused
-    assert len([c for c in api.calls if c[0] == "GET" and c[1] == "/ok"]) == 2
+    # 2 tool calls, each doing GET /events/health + POST /assistants/search = 2 of
+    # EACH (4 requests total), all over the SAME client — proves reuse, no churn.
+    assert len([c for c in api.calls if c[0] == "GET" and c[1] == "/events/health"]) == 2
+    assert len([c for c in api.calls if c[0] == "POST" and c[1] == "/assistants/search"]) == 2
 
 
 def test_unknown_run_id_404_error_text(api):

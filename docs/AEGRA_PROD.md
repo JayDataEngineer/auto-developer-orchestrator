@@ -3,9 +3,9 @@
 **Status:** 2026-07-09. Phase A (local smoke) SHIPPED+PROVEN (submodule `e017ea6`).
 Phase B (prod cutover artifacts) SHIPPED (commit `43e281c`). Phase C (reversible
 prod cutover + E2E + reboot-safe systemd) SHIPPED+PROVEN (commits `8640a25` +
-the unit). Phase D (retire `server.py`) deferred-by-design — `server.py` retained
-as the disabled fallback runtime (see Phase status). Tracking task #28; this
-resolves the deferred P3 in `docs/prod-come-back-to.md`.
+the unit). Phase D (retire `server.py`) SHIPPED — `server.py` DELETED; Aegra is
+the single Agent Protocol runtime owner (see Phase status). Resolves task #32 +
+the deferred P3 in `docs/prod-come-back-to.md`.
 
 **PROD IS NOW AEGRA.** `pux-aegra.service` (enabled) brings the Aegra stack up at
 boot; `pux-prod.service` (server.py) is disabled. Verified cloud E2E
@@ -18,7 +18,7 @@ systemd-managed stack.
 **LangGraph-Platform / langgraph-api drop-in** — FastAPI + Postgres + optional
 Redis, exposing the identical `threads/runs/stream/store` wire format as
 `langgraph_sdk`. It is pux's **free prod Agent Protocol (HTTP REST) runtime**,
-replacing the hand-rolled `pux_harness/runtime/server.py`.
+replacing the now-deleted hand-rolled `pux_harness/server.py` (retired phase D).
 
 This resolves the **langgraph-api license gate** (see
 `[[langgraph-api-license-gate]]`): the upstream `langchain/langgraph-api` prod
@@ -60,7 +60,7 @@ Docker too) remains the k3s-ready target.
   `AEGRA_CONFIG=aegra.json`, `RUN_MIGRATIONS_ON_STARTUP=true`, `POSTGRES_*`,
   `REDIS_*`. **`PUX_UPSTREAM_GRAPH` is intentionally UNSET** (runtime =
   `build_graph` + Docker specialists + real model).
-- **`scripts/start_pux_aegra.sh`** — prod launcher (mirrors
+- **`scripts/start_pux_aegra.sh`** — prod launcher (mirrored the now-deleted
   `start_pux_prod.sh`). Sources the env template + `.env`, unsets
   `PUX_UPSTREAM_GRAPH`, brings up sidecars, waits on postgres, starts `aegra
   serve` + `pux mcp`, waits on `/events/health`. `stop` subcommand kills serve +
@@ -97,22 +97,22 @@ pux-aegra.service && sudo systemctl enable --now pux-prod.service`.
 
 ### manual (scripts/)
 
-**Start (server.py → Aegra on :9988):**
+Prod is Aegra (phase C cutover; `server.py` was retired in phase D). Bring the
+stack up / down:
 
 ```bash
-# 1. stop the old stack (server.py + mcp on :9988/:9987)
-scripts/start_pux_prod.sh stop   # or: pkill -f '[p]ux_harness serve'
-# 2. bring up Aegra on the SAME :9988 + sidecars + mcp
-scripts/start_pux_aegra.sh
-```
-
-**Rollback (Aegra → server.py):**
-
-```bash
+scripts/start_pux_aegra.sh             # Aegra on :9988 + sidecars + mcp
 scripts/start_pux_aegra.sh stop        # kills aegra serve + mcp; sidecars left running
-scripts/start_pux_prod.sh              # server.py back on :9988
 # (optional) docker compose -f scripts/aegra-prod.compose.yml down   # remove DBs
 ```
+
+**Rollback (Aegra → server.py) is now via git history, not a launcher.**
+`server.py` + `scripts/start_pux_prod.sh` were deleted in phase D, so there is
+no one-command rollback to the old runtime. To recover server.py temporarily,
+revert the phase-D commits (or
+`git show <pre-phase-D>:pux-harness/pux_harness/server.py`), reinstall it, and
+run it directly on :9988. Parity was proven before deletion (`tests/upstream/` +
+live prod), so this path is emergency-only.
 
 **Verify after cutover:** `scripts/aegra_smoke.py` (5-surface live proof —
 assistants.search / threads.create / runs.stream / store put+get /
@@ -120,13 +120,13 @@ events.health) plus the prod E2E (phone→Hermes→MCP→dev-bot).
 
 ## Known deltas vs `server.py` (accept + document, do not paper over)
 
-1. **Persistence sqlite → Postgres.** Existing ephemeral threads do NOT migrate
+1. **Persistence sqlite → Postgres.** Existing ephemeral threads did NOT migrate
    (acceptable — Hermes/dev-bot carry per-conversation state; no durable threads
-   relied on). `[[no-legacy-left-behind]]` does not apply: server.py is being
-   retired, not migrated alongside; its thread store is ephemeral-by-design.
+   relied on). `[[no-legacy-left-behind]]` satisfied: server.py was retired (not
+   migrated alongside); its thread store was ephemeral-by-design.
 2. **Prepare/warmup — RESTORED via `PrepareWarmupMiddleware`.** Aegra owns the
-   run loop (no pux entry point to call `prepare()` from, unlike `pux direct` /
-   `server.py`), so the warmup seam initially did not fire. **Fixed:** the
+   run loop (no pux entry point to call `prepare()` from, unlike `pux direct`),
+   so the warmup seam initially did not fire. **Fixed:** the
    `before_agent` hook (`context/prepare_warmup.py`, armed by
    `runtime/upstream.py` via `RuntimeFacts(prepare_warmup=True)`) runs
    `prepare()` once per run, offloaded to a worker thread (`asyncio.to_thread`)
@@ -161,9 +161,12 @@ events.health) plus the prod E2E (phone→Hermes→MCP→dev-bot).
   child, so the launcher now `setsid`s the process and `stop` kills the whole
   process group (+ port-derived sweep) — otherwise uvicorn is orphaned on :9988
   and server.py cannot rebind on rollback.
-- **D — retire `server.py`** (C3) — **deferred-by-design.** `server.py` stays
-  installed as the **disabled fallback runtime** (rollback target), per the
-  standing `[[langgraph-api-license-gate]]` decision to retain it. Retiring it
-  requires a full REST endpoint-parity contract test first
-  (`[[no-legacy-left-behind]]` — proven equivalent on EVERY endpoint before the
-  old form becomes a permanent contract failure). Teed up as task #32.
+- **D — retire `server.py`** (C3) — **SHIPPED.** `server.py` + `pux serve` +
+  `scripts/start_pux_prod.sh` DELETED; Aegra is the single Agent Protocol runtime
+  owner. Parity proven BEFORE deletion: `tests/upstream/` (3 lane-contract tests
+  driving the full `langgraph_sdk` surface against `langgraph dev`) + live prod
+  (Aegra serves 10/11 assistants incl. the flagged orgs, store round-trips),
+  satisfying `[[no-legacy-left-behind]]` (proven equivalent → old form made a
+  permanent contract failure: `tests/harness/test_server_retired.py` asserts
+  `import pux_harness.server` + `pux serve` both fail). Rollback is via git
+  history (see manual section). Resolves task #32.

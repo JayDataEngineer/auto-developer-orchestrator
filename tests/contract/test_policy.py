@@ -564,18 +564,6 @@ def test_resolve_protocols_declared_passthrough() -> None:
     assert policy.resolve_protocols(policy.Policy(protocols=["acp"])) == ["acp"]
 
 
-def test_protocols_for_org_declared(tmp_path: Path) -> None:
-    body = "protocols:\n  - acp\n"
-    root = _write_policy(tmp_path, "narrow", body)
-    assert policy.protocols_for_org("narrow", root) == ["acp"]
-
-
-def test_protocols_for_org_no_policy_defaults(tmp_path: Path) -> None:
-    # An org with no policy.yaml keeps today's behavior (all surfaces) — the
-    # declaration is purely opt-in narrowing.
-    assert policy.protocols_for_org("ghost", tmp_path) == ["acp", "agui"]
-
-
 def test_known_protocols_is_the_default_set() -> None:
     # KNOWN_PROTOCOLS is the contract validator's allowlist; it must equal the
     # default surface set so the contract never rejects a defaulted policy.

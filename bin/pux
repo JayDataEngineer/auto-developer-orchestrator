@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # pux — routes to the deepagents harness (Python/uv).
-#   pux serve              start the Agent Protocol server (uvicorn)
 #   pux direct ...         in-process runner (python -m pux_harness.main); no server
 #   pux acp [--org X]      ACP stdio server (python -m pux_harness.acp); editor = TUI
 #   pux mcp                MCP server wrapping the Agent Protocol REST API (SSE on :9987)
 #   pux sandbox <cmd>      Docker sandbox lifecycle (start/stop/status/ensure)
 #   pux <subcommand> ...   Agent Protocol client (python -m pux_harness.cli)
 #
-# Replaces the deleted TS launcher (bin/pux.mjs). The Agent Protocol server is
-# the canonical executor; client subcommands require it running.
+# Replaces the deleted TS launcher (bin/pux.mjs). The Agent Protocol server
+# (prod: Aegra via scripts/start_pux_aegra.sh; dev: `langgraph dev` / `aegra dev`)
+# is the canonical executor; client subcommands require it running.
 set -euo pipefail
 # resolve symlinks (e.g. ~/.local/bin/pux -> repo/bin/pux) before computing paths
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -27,13 +27,12 @@ cd "$REPO"
 
 cmd="${1:-}"
 case "$cmd" in
-  serve)   shift; exec uv run python -m pux_harness.server "$@" ;;
   direct)  shift; exec uv run python -m pux_harness.main "$@" ;;
   acp)     shift; exec uv run python -m pux_harness.acp "$@" ;;
   mcp)     shift; exec uv run python -m pux_harness.mcp_server "$@" ;;
   sandbox) shift; exec uv run python -m pux_harness.main --sandbox "$@" ;;
   "")
-    echo "usage: pux <serve|direct|acp|mcp|sandbox|agents|dispatch|resume|show|history|run|wait> ..." >&2
+    echo "usage: pux <direct|acp|mcp|sandbox|agents|dispatch|resume|show|history|run|wait> ..." >&2
     exit 2 ;;
 esac
 

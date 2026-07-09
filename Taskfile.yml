@@ -32,9 +32,9 @@ tasks:
       - uv run pux check-contract
 
   serve:
-    desc: Start the Agent Protocol server (FastAPI on :9988)
+    desc: Start the Agent Protocol server locally (Aegra dev on :9988; prod uses scripts/start_pux_aegra.sh)
     cmds:
-      - pux serve
+      - cd pux-harness && uv run --extra prod aegra dev
 
   sandbox:start:
     desc: Boot the Docker sandbox container (harness-owned; self-boots on first tool use anyway)
