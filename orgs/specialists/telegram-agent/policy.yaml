@@ -22,3 +22,5 @@ credentials:
     - TG_API_ID
     - TG_API_HASH
     - TELEGRAM_SESSION_B64
+
+jobs:

@@ -1,1 +1,9 @@
 agents: [researcher, browser]
+
+# CU-4: foreign MCP tool servers. The ONE canonical declaration site (was
+# policy.yaml ``tool_servers:``, now a permanent contract failure — see
+# orgs/general/policy.yaml header). Bare catalog refs into
+# orgs/_shared/tool_servers.yaml; resolved by resolve_tool_servers.
+capabilities:
+  - {kind: mcp, ref: web_research}
+  - {kind: mcp, ref: github}

@@ -23,3 +23,5 @@ egress:
     # Host-side SurrealDB — resolved inside the container via host-gateway.
     - host: host.docker.internal
       port: 8000
+
+jobs:

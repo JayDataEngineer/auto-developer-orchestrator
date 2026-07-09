@@ -1,9 +1,9 @@
 # Declarative sandbox policy for org invest.
 # Tightens prod egress to just Alpaca + FRED; injects API keys via env only.
-tool_servers:
-  - equibles
-  - web_research
-
+#
+# CU-4: foreign MCP servers (equibles, web_research) moved to org.yaml
+# ``capabilities:`` — policy ``tool_servers:`` is now a permanent contract
+# failure (no-legacy-tool-servers). Egress below unchanged.
 egress:
   allow:
     - host: api.alpaca.markets
@@ -30,3 +30,5 @@ credentials:
 # not source); pack-inclusion is P3.
 sandbox:
   dynamic_tools: true
+
+jobs:

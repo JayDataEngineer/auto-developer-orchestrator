@@ -1,30 +1,21 @@
 # Declarative policy for the general org.
 #
 # general is the general-purpose CTO fallback — no custom sandbox image, no
-# credentials, no egress allowlist of its own. This is intentionally a
-# tool_servers-driven policy: the sandbox layer treats "no policy" (NoPolicy) and
-# "policy with empty sections" as IDENTICAL for execution — egress_rules()
-# returns "" for both (no egress.conf staged → open), and resolve_tier() returns
-# the "isolated" fallback for both. So the SOLE execution effect of this file is
-# opting general into the foreign MCP tool servers declared in
-# orgs/_shared/tool_servers.yaml. (`protocols:` below is a non-execution axis —
-# it only selects which client SURFACE pux serves the org on.) Verified 2026-07-06.
+# credentials, no egress allowlist of its own. The sandbox layer treats "no
+# policy" (NoPolicy) and "policy with empty sections" as IDENTICAL for execution
+# — egress_rules() returns "" for both (no egress.conf staged → open), and
+# resolve_tier() returns the "isolated" fallback for both. So this file's only
+# non-execution axis is `protocols:` (selects which client SURFACE pux serves the
+# org on) plus the pre-run warmup job below.
 #
-# web_research runs HOST-SIDE (the McpSessionManager makes the HTTP calls from
-# the pux process, not from inside the org's container), so this capability is
-# independent of general's sandbox egress. If the server is unreachable from a
-# given deployment, McpSessionManager.open() logs a loud ERROR and contributes
-# zero tools — general still starts and works (per-server isolation).
-#
-# github is a stdio server: McpSessionManager forks the github-mcp-server binary
-# HOST-SIDE (also independent of the container egress). Its binary is fetched
-# on-demand from the GitHub release when not on PATH (the mcp_bootstrap
-# fallback), and its PAT is mapped from .env's GITHUB_TOKEN in the catalog
-# entry. Same per-server isolation: a missing token or failed bootstrap logs
-# ERROR + zero github tools; general still starts.
-tool_servers:
-  - web_research
-  - github
+# CU-4 (2026-07-08): the foreign MCP tool servers (web_research, github) moved
+# to orgs/general/org.yaml ``capabilities:`` (kind: mcp) — the ONE canonical
+# declaration site. policy.yaml ``tool_servers:`` is now a PERMANENT CONTRACT
+# FAILURE (no-legacy-tool-servers). Both servers run HOST-SIDE (independent of
+# general's sandbox egress): web_research is HTTP; github is a stdio binary
+# bootstrapped from the GitHub release, PAT from .env's GITHUB_TOKEN. Per-server
+# isolation: an unreachable server / missing token logs ERROR + zero tools;
+# general still starts.
 # Agent-facing client SURFACES general exposes (a separate axis from sandbox
 # execution — this block never affects egress/tier). [acp, agui] is the DEFAULT
 # (an absent `protocols:` resolves to both), declared here explicitly so the org

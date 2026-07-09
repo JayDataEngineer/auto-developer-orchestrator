@@ -1,1 +1,7 @@
 agents: [dev-bot-explorer, code-worker, web-agent]
+
+# CU-4: foreign MCP tool server (was policy.yaml ``tool_servers:`` — now a
+# permanent contract failure). Bare catalog ref into
+# orgs/_shared/tool_servers.yaml.
+capabilities:
+  - {kind: mcp, ref: github}
