@@ -42,8 +42,8 @@ from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
 
 EXPECTED_ORGS = {
     "_demo", "deep-research-engine", "dev-bot", "game-studio", "general",
-    "invest", "social-media-pipeline", "telegram-agent", "twitter-agent",
-    "video-production",
+    "invest", "orchestrator", "social-media-pipeline", "telegram-agent",
+    "twitter-agent", "video-production",
 }
 
 

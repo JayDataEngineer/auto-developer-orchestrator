@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from pux_harness.oci import OciError
+from pux_harness.oci import OciError, verify_oci_layout
 from pux_harness.pack import pack_org
 
 _ORCHESTRATOR_ROOT = Path(__file__).resolve().parents[2]
@@ -194,3 +194,55 @@ def test_pack_org_oci_failclear_when_oras_absent(tmp_path, monkeypatch):
                  gitleaks_runner=_clean_gitleaks_runner, oras_runner=_NoOras())
     # the tarball shipped despite the OCI refusal (pack writes it first)
     assert out.exists()
+
+
+@pytest.mark.skipif(not _HAS_ORAS, reason="oras CLI required for the live OCI proof")
+def test_pack_then_verify_round_trips(tmp_path, monkeypatch):
+    """``pux pack --oci`` then ``verify_oci_layout`` — the integrity loop CLOSES:
+    verify reads the real oras-written layout (stdlib, no oras at verify time) and
+    PASSes; with ``--org`` the source attestation re-derives the library layer from
+    ``orgs/<org>/lib/`` and it MATCHES the packed layer."""
+    monkeypatch.chdir(_ORCHESTRATOR_ROOT)
+    root = tmp_path / "foreign"
+    root.mkdir()
+    _stage_org(root)
+    layout = tmp_path / "acme.oci"
+    pack_org("acme", output=tmp_path / "acme.tar.gz", project_root=root, oci=layout,
+             gitleaks_runner=_clean_gitleaks_runner)
+
+    result = verify_oci_layout(layout)
+    assert result.ok, result.summary()
+    assert result.library_digest and result.library_digest.startswith("sha256:")
+    # source attestation: the packed library matches orgs/acme/lib/ on disk now
+    attested = verify_oci_layout(layout, org="acme", source_root=root)
+    assert attested.ok, attested.summary()
+    assert any("matches source" in c.name for c in attested.checks)
+
+
+@pytest.mark.skipif(not _HAS_ORAS, reason="oras CLI required for the live OCI proof")
+def test_verify_detects_library_blob_tamper_live(tmp_path, monkeypatch):
+    """THE end-to-end integrity contract: pack a clean artifact, corrupt its
+    agent-library blob in place, and verify CATCHES it (the self-consistency check
+    FAILs). The tamper anchor the design promised ("detectable on verify") is now
+    consumable — emit records it, verify checks it."""
+    monkeypatch.chdir(_ORCHESTRATOR_ROOT)
+    root = tmp_path / "foreign"
+    root.mkdir()
+    _stage_org(root)
+    layout = tmp_path / "acme.oci"
+    pack_org("acme", output=tmp_path / "acme.tar.gz", project_root=root, oci=layout,
+             gitleaks_runner=_clean_gitleaks_runner)
+    assert verify_oci_layout(layout).ok  # clean baseline
+
+    # locate + corrupt the agent-library blob in place (an attacker overwrites it).
+    # oras writes blobs read-only (0444 — OCI immutability), so unlink + rewrite
+    # (ubuntu owns the parent dir); verify only ever READS blobs, so this is a
+    # test-harness workaround, not a verify limitation.
+    baseline = verify_oci_layout(layout)
+    blob = layout / "blobs" / "sha256" / baseline.library_digest.split(":", 1)[1]
+    blob.unlink()
+    blob.write_bytes(b"ATTACKER-OVERWRITE")
+    tampered = verify_oci_layout(layout)
+    assert not tampered.ok
+    failed = [c.name for c in tampered.checks if not c.ok]
+    assert any("agent-library" in n and "self-consistency" in n for n in failed), failed

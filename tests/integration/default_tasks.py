@@ -74,4 +74,11 @@ DEFAULT_TASKS: dict[str, str] = {
         "native `execute` tool: `ls -1 /sandbox/workspace/orgs/specialists/video-production/skills`. "
         "Report the entries verbatim."
     ),
+    "orchestrator": (
+        "What specialist agents does the orchestrator org ship, and what agents "
+        "does it inherit from general? Delegate to the `task-planner` subagent — "
+        "do NOT inspect the code yourself. Have it use the native `execute` tool: "
+        "`cat /sandbox/workspace/orgs/specialists/orchestrator/org.yaml`. "
+        "Report the extends chain and the agent roster verbatim."
+    ),
 }

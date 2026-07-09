@@ -1,0 +1,16 @@
+# Declarative policy for the orchestrator org.
+#
+# orchestrator extends: general — it inherits general's roster (researcher,
+# browser) and capabilities (web_research, github MCP servers) via the org.yaml
+# extends: chain. Policy.yaml is NEVER inherited (Safeguard S6: each org owns
+# its egress), so this file is required even though the org is a thin child.
+#
+# The sandbox layer treats empty sections identically to NoPolicy — egress_rules()
+# returns "" (no egress.conf staged -> open), resolve_tier() returns "isolated".
+# This file's only execution effect is the protocols: axis (client surfaces).
+#
+# CU-4: capabilities are inherited from general's org.yaml (web_research, github
+# MCP servers). They are NOT redeclared here — the extends: chain composes them.
+protocols:
+  - acp
+  - agui
