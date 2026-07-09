@@ -62,10 +62,12 @@ def test_orchestrator_system_prompt_includes_both_overlays() -> None:
     prompt = build_system_prompt("orchestrator")
     # general's overlay mentions "General Org"
     assert "General Org" in prompt
-    # orchestrator's own overlay mentions orchestration
-    assert "orchestrator" in prompt.lower()
-    # general's overlay comes before orchestrator's (root->child order)
-    assert prompt.index("General Org") < prompt.lower().index("orchestrator")
+    # orchestrator's own overlay mentions task-planner (unique to its overlay)
+    assert "task-planner" in prompt.lower()
+    # general's overlay comes before orchestrator's (root->child order).
+    # Use "task-planner" as the orchestrator marker — it's unique to the
+    # orchestrator's own overlay and won't appear in root or general's prompt.
+    assert prompt.index("General Org") < prompt.lower().index("task-planner")
 
 
 # --- agent resolution -------------------------------------------------------

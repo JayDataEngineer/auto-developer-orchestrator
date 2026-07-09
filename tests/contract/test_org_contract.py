@@ -701,6 +701,45 @@ def test_new_browser_slugs_are_registered_specialists():
         assert key in SPECIALIST_TOOL_NAMES, f"{key} not registered"
 
 
+# --- explorer agent (shared, rostered by general) --------------------------
+
+def test_explorer_agent_resolves_from_shared_on_real_repo():
+    """The shipped explorer agent (orgs/_shared/agents/explorer.md) is rostered
+    by `general`, resolves from `_shared`, and its contract is green (the
+    capabilities: sugar desugars to a registered `python` tool + a valid
+    skills root)."""
+    from pux_harness.kit._paths import project_root
+    from pux_harness.kit.loaders import _load_agent_spec
+
+    vs = check_org("general")
+    assert vs == [], f"general: {vs}"
+    roster = orgs.org_agent_slugs("general")
+    assert "explorer" in roster, "general does not roster explorer"
+    # general's own agents (researcher, browser) come before the shared explorer
+    assert roster.index("explorer") > roster.index("researcher")
+    assert roster.index("explorer") > roster.index("browser")
+
+    spec = _load_agent_spec("explorer", "general", project_root())
+    assert spec is not None
+    assert "explorer" in spec.get("name", "")
+    assert "context" in spec.get("description", "").lower()
+
+
+def test_explorer_capabilities_desugar_to_tools_and_skills():
+    """explorer.md declares a unified `capabilities:` block (CU-3 sugar):
+    kind: tool -> python, kind: skill -> orgs/_shared/skills. The loader must
+    desugar it into the legacy `tools:` / `skills:` keys so the contract's
+    rule-4 + skill-resolution passes see them."""
+    from pux_harness.kit._paths import project_root
+    from pux_harness.kit.loaders import _load_agent_spec
+
+    spec = _load_agent_spec("explorer", "general", project_root())
+    # python -> pux_sandbox_python resolves as a registered specialist
+    assert spec.get("tools") == ["python"], spec.get("tools")
+    # the shared skills root resolves as a skills directory
+    assert spec.get("skills") == ["orgs/_shared/skills"], spec.get("skills")
+
+
 def test_profile_yaml_valid_no_violation(fake_tree):
     """A well-formed optional profile.yaml produces no contract violation."""
     add_org, _ = fake_tree

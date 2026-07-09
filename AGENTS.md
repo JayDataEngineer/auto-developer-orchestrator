@@ -188,6 +188,18 @@ Two more blocks ride on the same file:
   (`rubric.default`) is injected at invoke time by `server._execute` /
   `main._run`; an operator `--rubric` override wins. `orgs/specialists/dev-bot/profile.yaml`
   is the shipped sample (dev-bot is the Claude-Code-equivalent coding org).
+- `middleware:` — add/remove named deepagents middleware per scope
+  (`supervisor` / `subagent`). A base set (context + routing + session_guide,
+  + `rubric` / `tool_retry` when gated) mounts for every org; `add` / `remove`
+  override it (same-named add wins). One strength-gated entry: `interpreter` —
+  the orchestrator's dynamic-dispatch surface — auto-mounts iff the resolved
+  base model is **strong**, else off (a flash / unknown base gets neither the
+  tool NOR the dispatch guidance — no token waste on a path it can't drive);
+  `add: [interpreter]` / `remove: [interpreter]` override either way. Strength
+  is a per-id catalog attribute, NOT a profile field:
+  `pux-harness/pux_harness/agent/models.yaml` flags each id `strength: pro`
+  (the strong orchestrators glm-5.2 / glm-5.1) or `strength: flash` (every
+  other id; unknown → flash = fail-safe).
 
 The loader (`pux-harness/pux_harness/agent/profile.py`) uses deepagents'
 `HarnessProfileConfig` SCHEMA but applies the fields at the `build_graph(org)`
@@ -238,3 +250,108 @@ profile.yaml` is the shipped sample.
 Auto-memory lives at `~/.claude/projects/.../memory/`. The memory directory
 tracks the strategic context — pivot rationale, fullstack lessons learned,
 decisions deferred. Read `MEMORY.md` first when picking up context.
+
+## Orchestrator pattern
+
+Every org CTO is an **orchestrator first, a worker second.** The CTO prompt you
+inherit (this file + the org's `AGENTS.md` overlay) is the base orchestrator
+prompt. The CTO is a thin routing layer: it scents the problem, delegates
+exploration, distributes rich context to workers, and collects results. It is
+NOT a thinker — it does not accumulate context it does not need.
+
+### Core rules
+
+1. **Orchestrator is a thin routing layer, not a thinker.** Route work to
+   specialists; do not hoard context in the orchestrator thread.
+2. **Never accumulate context you do not need.** If a sub-agent can gather it,
+   delegate. The orchestrator thread stays lean so it can make good routing
+   decisions late in a long session.
+3. **Always delegate exploration first.** Before any execution, spawn an
+   `explorer` (or org-equivalent read-only recon agent) to map the territory.
+   Pass the explorer's structured report to the workers so they do not
+   re-explore.
+4. **Pass rich context to workers.** Workers receive the explorer's findings
+   (file paths, relevant code snippets, architecture notes, test patterns)
+   verbatim in the `task(description=...)` call. A worker should never need to
+   re-derive what the explorer already found.
+5. **Use the smart model for routing, not execution.** The orchestrator
+   (base_model) decides WHO does WHAT. Workers (worker_model) do the actual
+   work. Do not burn the orchestrator's context window on mechanical execution
+   a worker could do.
+
+### Three execution paths
+
+Pick the lightest path that fits the task. Escalate downward only when the
+lighter path is insufficient.
+
+#### Path 1: Happy path (explorer + workers)
+
+The default. Use when the task is well-defined enough to delegate after a recon
+pass.
+
+```
+task → orchestrator scents the problem
+     → (ask user for clarification if genuinely ambiguous)
+     → spawn explorer sub-agent(s) to gather context
+       (parallelizable — multiple explorers for independent areas)
+     → orchestrator collects the explorer report(s)
+     → pass rich context to worker sub-agent(s)
+     → workers execute WITHOUT re-exploring
+     → orchestrator collects results → ship
+```
+
+Either way the orchestrator never reads the explored files itself unless it
+needs to make a routing decision the explorer's report didn't cover.
+
+#### Path 2: Mid path (partial delegation)
+
+Use when the task is partially understood — some sub-tasks are clear, others
+are ambiguous.
+
+```
+task → orchestrator delegates the well-defined sub-tasks (Path 1 style)
+     → orchestrator handles the ambiguous parts directly
+       (reads code, makes the judgment call, executes)
+     → falls back to Path 1 for any sub-task that becomes well-defined
+       during execution
+```
+
+The orchestrator does targeted work itself only on the ambiguous slice; the
+clear slices go to workers with explorer context.
+
+#### Path 3: Complex path (orchestrator does the work)
+
+Last resort. Use when the task is genuinely difficult — high ambiguity, deep
+cross-cutting concerns, no clean decomposition.
+
+```
+task → orchestrator explores + executes directly
+     → context is QUARANTINED: the work stays in the orchestrator thread
+       (do not spread half-understood context across workers)
+     → orchestrator has the smart model + full context — use it
+     → once a sub-task becomes well-defined, peel it off to a worker (Path 1)
+```
+
+This path is expensive (orchestrator context grows). Use it sparingly and
+exit it the moment a sub-task clarifies enough to delegate.
+
+### Decision heuristic
+
+| Signal | Path |
+|---|---|
+| Task is clear, just needs doing | Path 1 |
+| Task is clear after a recon pass | Path 1 |
+| Some parts clear, some ambiguous | Path 2 |
+| Task is deeply ambiguous / cross-cutting | Path 3 |
+| Worker returns confused / re-explored | You gave thin context — go Path 1 with richer context |
+
+### Anti-patterns
+
+- **Orchestrator reads everything, then delegates.** You just duplicated the
+  explorer's work in your own thread. Delegate exploration; pass the report.
+- **Worker re-explores.** You passed thin context. The worker should receive
+  file paths, relevant snippets, and architecture notes from the explorer.
+- **Orchestrator does mechanical work a worker could do.** You're burning the
+  smart model's context on execution. Delegate.
+- **Path 3 for everything.** You've turned the orchestrator into a solo worker.
+  Peel off sub-tasks to workers as soon as they clarify.
