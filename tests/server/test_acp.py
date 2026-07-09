@@ -378,6 +378,24 @@ def test_acp_advertises_session_load_and_list(tmp_path, project_root) -> None:
     assert mcp.sse is False, (
         f"mcp_capabilities.sse advertised True but client-MCP is unbacked: {mcp!r}"
     )
+    # acp 0.11 drift guard: the bump added ``McpCapabilities.acp`` plus
+    # ``PromptCapabilities.audio`` / ``embedded_context``. We back NONE of them,
+    # so each must stay unadvertised (falsy) over the wire. A future bump that
+    # flips a schema default surfaces here rather than silently leaking a
+    # capability a client (Hermes/acpx) would then act on. Assertions are
+    # field-level (not whole-dict) so further upstream capability fields can't
+    # drift silently either.
+    assert not mcp.acp, (
+        f"mcp_capabilities.acp advertised but ACP-as-MCP-transport is unbacked: {mcp!r}"
+    )
+    pc = init.agent_capabilities.prompt_capabilities
+    assert pc is not None, "prompt_capabilities missing"
+    assert not pc.audio, (
+        f"prompt_capabilities.audio advertised but audio input is unbacked: {pc!r}"
+    )
+    assert not pc.embedded_context, (
+        f"prompt_capabilities.embedded_context advertised but unbacked: {pc!r}"
+    )
 
 
 def test_acp_session_load_and_list_roundtrip(tmp_path, project_root) -> None:

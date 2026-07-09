@@ -51,11 +51,21 @@ class _StreamingStubGraph:
     def __init__(self, *, chunks: list[tuple[str, Any]] | None = None) -> None:
         self._chunks = chunks if chunks is not None else _DEFAULT_CHUNKS
         self.invoked: list[tuple[Any, dict[str, Any]]] = []
+        self.last_kw: dict[str, Any] = {}
         self.nodes: dict[str, Any] = {}
 
     async def astream(self, inp: Any, config: dict[str, Any] | None = None, **kw: Any):
         self.invoked.append((inp, config or {}))
+        self.last_kw = kw
+        # Honor a client-requested ``stream_mode`` the way langgraph does —
+        # filter chunks to the requested modes — so ``stream_mode`` honoring is
+        # behaviorally provable (the SSE output reflects only requested modes).
+        requested = kw.get("stream_mode")
+        if isinstance(requested, str):
+            requested = [requested]
         for mode, chunk in self._chunks:
+            if requested is not None and mode not in requested:
+                continue
             yield mode, chunk
 
 
@@ -160,26 +170,102 @@ def test_runs_stream_consumable_by_upstream_sdk_decoder(client: TestClient) -> N
 
 
 def test_runs_stream_event_name_surface_is_pinned(client: TestClient) -> None:
-    """The EXACT success-path event-name set, pinned. When the P3 cutover to
-    upstream ``langgraph_api`` lands, this set changes in a KNOWN way: the
-    upstream runtime emits a terminal ``event: end`` (data: null) — the SDK's
-    end-of-stream sentinel (``langgraph_sdk._shared.utilities._sse_to_v2_dict``
-    returns None for ``event == "end"``). server.py omits it today (a client
-    terminates on connection-close instead), so the pinned set does NOT yet
-    include ``end``. The cutover ADDS it; this test then fails loud → update
-    the pinned set to the canonical upstream surface. That flip is the
-    no-legacy-left-behind signal that the cutover changed the wire shape."""
+    """The EXACT success-path event-name set, pinned to the upstream-canonical
+    surface: a leading ``metadata``, one event per default stream mode
+    (``messages``/``updates``/``values``), and the terminal ``end`` sentinel
+    (``data: null``) — the frame upstream ``langgraph-api`` emits and
+    ``langgraph_sdk._shared.utilities._sse_to_v2_dict`` recognizes (returns
+    None for ``event == "end"``). ``end`` was added by the streaming-parity
+    fix that aligned the server.py fallback wire with upstream; it stays
+    pinned so any future drift — a dropped/added event — fails loud."""
     resp = client.post("/runs/stream", json={"agent_id": "general", "input": "hi"})
     assert resp.status_code == 200
     parts = _parse_with_sdk_decoder(resp.text)
     event_set = {name for name, _ in parts}
 
-    assert event_set == {"metadata", "messages", "updates", "values"}, (
+    assert event_set == {"metadata", "messages", "updates", "values", "end"}, (
         "The /runs/stream success-path event set drifted from the pinned "
-        f"surface. Current: {sorted(event_set)}. If 'end' appeared, the "
-        "langgraph-api cutover landed — flip this contract to the canonical "
-        "upstream set (add 'end') and update the parity note. If something "
-        "else changed, that is an unintended wire regression."
+        f"upstream surface. Current: {sorted(event_set)}. A dropped/added "
+        "event is an unintended wire regression."
+    )
+
+
+def test_runs_stream_emits_terminal_end_frame(client: TestClient) -> None:
+    """The stream ALWAYS terminates with ``event: end`` carrying ``data: null``
+    — the upstream ``langgraph-api`` end-of-stream sentinel. It is the LAST
+    frame on the success path. Pinned because the SDK's ``_sse_to_v2_dict``
+    keys its end-of-iteration recognition off this event name."""
+    resp = client.post("/runs/stream", json={"agent_id": "general", "input": "hi"})
+    assert resp.status_code == 200
+    parts = _parse_with_sdk_decoder(resp.text)
+    assert parts, f"no frames parsed:\n{resp.text[:400]}"
+    last_name, last_data = parts[-1]
+    assert last_name == "end", (
+        f"success path must END with 'end'; last={last_name!r} "
+        f"events={[n for n, _ in parts]}"
+    )
+    assert last_data is None, f"'end' frame must carry data:null; got {last_data!r}"
+
+
+def test_runs_stream_end_frame_after_error(tmp_path, monkeypatch) -> None:
+    """The terminal ``end`` is emitted even when the run errors — it follows
+    the ``error`` frame, so a consumer always sees the end-of-stream sentinel
+    regardless of outcome (matches upstream, which emits ``end`` after
+    ``error``)."""
+    import pux_harness.threads as threads_mod
+
+    monkeypatch.setattr(threads_mod, "PUX_API_DB", tmp_path / "stream-end-err.sqlite")
+    monkeypatch.setattr(server, "build_graph", lambda org, **kw: _RaisingStubGraph())
+    with TestClient(server.app) as c:
+        resp = c.post("/runs/stream", json={"agent_id": "general", "input": "x"})
+    assert resp.status_code == 200
+    parts = _parse_with_sdk_decoder(resp.text)
+    events = [n for n, _ in parts]
+    assert "error" in events, f"no error frame for a raising graph: {events}"
+    assert events[-1] == "end", (
+        f"error path must END with 'end' after 'error'; events={events}"
+    )
+
+
+def test_runs_stream_honors_requested_stream_mode(client: TestClient) -> None:
+    """A client-selected ``stream_mode`` (query OR body) is threaded into
+    ``astream`` and only the requested mode(s) surface as events. The SDK
+    ships ``stream_mode`` as a query param (the body field is the fallback);
+    comma-separated selects multiple. The no-selection default (full triple)
+    is covered by ``test_runs_stream_event_name_surface_is_pinned``."""
+    # query param selects a single mode
+    resp = client.post(
+        "/runs/stream",
+        params={"stream_mode": "updates"},
+        json={"agent_id": "general", "input": "hi"},
+    )
+    assert resp.status_code == 200, f"non-200: {resp.status_code}\n{resp.text[:400]}"
+    modes_seen = {n for n, _ in _parse_with_sdk_decoder(resp.text)} - {"metadata", "end"}
+    assert modes_seen == {"updates"}, (
+        f"stream_mode=updates should yield ONLY updates; got {modes_seen}"
+    )
+
+    # body field selects a single mode (query absent)
+    resp = client.post(
+        "/runs/stream",
+        json={"agent_id": "general", "input": "hi", "stream_mode": "values"},
+    )
+    assert resp.status_code == 200
+    modes_seen = {n for n, _ in _parse_with_sdk_decoder(resp.text)} - {"metadata", "end"}
+    assert modes_seen == {"values"}, (
+        f"body stream_mode=values should yield ONLY values; got {modes_seen}"
+    )
+
+    # comma-separated query → multiple modes
+    resp = client.post(
+        "/runs/stream",
+        params={"stream_mode": "messages,values"},
+        json={"agent_id": "general", "input": "hi"},
+    )
+    assert resp.status_code == 200
+    modes_seen = {n for n, _ in _parse_with_sdk_decoder(resp.text)} - {"metadata", "end"}
+    assert modes_seen == {"messages", "values"}, (
+        f"comma-separated stream_mode should yield messages+values; got {modes_seen}"
     )
 
 
