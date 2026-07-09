@@ -1,0 +1,24 @@
+[Unit]
+Description=PUX prod stack - Aegra Agent Protocol runtime + MCP (phone->Hermes->dev-bot backend)
+Documentation=file://docs/AEGRA_PROD.md
+After=network-online.target tailscaled.service docker.service
+Wants=network-online.target
+# The Aegra stack runs postgres+redis as Docker sidecars (aegra-prod.compose.yml),
+# so the unit MUST come up after docker and fail loud if docker is absent.
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/home/ubuntu
+Environment=PUX_PROJECT_ROOT=/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator
+ExecStart=/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator/scripts/start_pux_aegra.sh start
+ExecStop=/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator/scripts/start_pux_aegra.sh stop
+# Sidecar bring-up + aegra serve readiness wait can take ~30-60s on a cold boot.
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

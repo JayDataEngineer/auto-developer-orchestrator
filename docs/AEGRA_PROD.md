@@ -1,10 +1,16 @@
 # Aegra — pux's free prod Agent Protocol runtime
 
 **Status:** 2026-07-09. Phase A (local smoke) SHIPPED+PROVEN (submodule `e017ea6`).
-Phase B (prod cutover artifacts — this doc + the three `scripts/aegra-*` files)
-SHIPPED. Phase C (reversible prod cutover + E2E) + Phase D (retire `server.py`)
-pending. Tracking task #28; this resolves the deferred P3 in
-`docs/prod-come-back-to.md`.
+Phase B (prod cutover artifacts) SHIPPED (commit `43e281c`). Phase C (reversible
+prod cutover + E2E + reboot-safe systemd) SHIPPED+PROVEN (commits `8640a25` +
+the unit). Phase D (retire `server.py`) deferred-by-design — `server.py` retained
+as the disabled fallback runtime (see Phase status). Tracking task #28; this
+resolves the deferred P3 in `docs/prod-come-back-to.md`.
+
+**PROD IS NOW AEGRA.** `pux-aegra.service` (enabled) brings the Aegra stack up at
+boot; `pux-prod.service` (server.py) is disabled. Verified cloud E2E
+(`cloud → Tailscale → Aegra → dev-bot → glm-5.2` = `CLOUD-E2E-OK`) on the
+systemd-managed stack.
 
 ## What + why
 
@@ -69,6 +75,28 @@ Docker too) remains the k3s-ready target.
 
 ## Cutover procedure
 
+### systemd (prod, reboot-safe)
+
+`scripts/pux-aegra.service` (oneshot + `RemainAfterExit`, `Requires=docker.service`
+for the sidecars, `After=tailscaled.service`) is the prod unit — installed to
+`/etc/systemd/system/`, enabled, started. The matching `pux-prod.service`
+(server.py) is **disabled** so a reboot brings up Aegra, not server.py.
+
+```bash
+# one-time install (from repo)
+sudo cp scripts/pux-aegra.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl disable --now pux-prod.service     # reboot -> Aegra, not server.py
+sudo systemctl enable --now pux-aegra.service
+```
+
+Standard unit verbs then drive the stack: `systemctl restart pux-aegra`,
+`systemctl stop pux-aegra` (runs `start_pux_aegra.sh stop` → process-group kill
++ port sweep). **Rollback to server.py:** `sudo systemctl disable --now
+pux-aegra.service && sudo systemctl enable --now pux-prod.service`.
+
+### manual (scripts/)
+
 **Start (server.py → Aegra on :9988):**
 
 ```bash
@@ -115,10 +143,20 @@ events.health) plus the prod E2E (phone→Hermes→MCP→dev-bot).
 - **A — local smoke** ✅ (sub `e017ea6`): `aegra dev` serves org-mode graph +
   custom_app; 11 assistants, run→final ai msg, store round-trip, /events/health.
   6 static contract tests pin the manifest.
-- **B — prod artifacts** ✅ (this doc + 3 scripts): compose (pg18 mount fixed),
-  env template, launcher. Sidecar stack proven (pg18.4 + pgvector 0.8.4).
-- **C — reversible prod cutover + E2E**: stop server.py, run launcher, verify
-  swapped stack, rollback proven.
-- **D — retire `server.py`** (C3): delete after prod E2E green; only then does
-  `[[no-legacy-left-behind]]` flip server.py's REST surface to a permanent
-  contract failure (it stays as the proven fallback runtime until then).
+- **B — prod artifacts** ✅ (commit `43e281c`): compose (pg18 mount fixed), env
+  template, launcher. Sidecar stack proven (pg18.4 + pgvector 0.8.4).
+- **C — reversible prod cutover + E2E + systemd** ✅ (commit `8640a25` + unit):
+  cutover proven (Aegra serves the real prod graph on :9988, 11 assistants,
+  glm-5.2 run); reversibility proven (server.py rebinds :9988 + serves healthy
+  after Aegra stop); cloud E2E proven (`cloud→Tailscale→Aegra→dev-bot→glm-5.2` =
+  `CLOUD-E2E-OK`); reboot-safe via `pux-aegra.service` (enabled) with
+  `pux-prod.service` disabled. **Gotcha fixed:** `aegra serve` spawns uvicorn as a
+  child, so the launcher now `setsid`s the process and `stop` kills the whole
+  process group (+ port-derived sweep) — otherwise uvicorn is orphaned on :9988
+  and server.py cannot rebind on rollback.
+- **D — retire `server.py`** (C3) — **deferred-by-design.** `server.py` stays
+  installed as the **disabled fallback runtime** (rollback target), per the
+  standing `[[langgraph-api-license-gate]]` decision to retain it. Retiring it
+  requires a full REST endpoint-parity contract test first
+  (`[[no-legacy-left-behind]]` — proven equivalent on EVERY endpoint before the
+  old form becomes a permanent contract failure). Teed up as task #32.
