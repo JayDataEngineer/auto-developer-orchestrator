@@ -16,8 +16,9 @@
 #
 # KNOWN DELTA vs server.py (documented in AEGRA_PROD.md):
 #  - persistence sqlite→Postgres (ephemeral threads do not migrate; acceptable).
-#  - NO prepare/warmup hook in Aegra → warmup_browser/warmup_webhook do not fire
-#    (browser orgs absorb Chrome cold-start on first run instead of pre-warm).
+#  - prepare/warmup: RESTORED. PrepareWarmupMiddleware (before_agent hook, armed
+#    by runtime/upstream.py) now runs prepare() under Aegra — warmup_browser /
+#    warmup_webhook fire once per run (warn-and-continue). See AEGRA_PROD.md #2.
 #  - run-completion push still works: the EventBus (custom_app, mounted via
 #    http.app) serves /events + /events/stream — Hermes's actual SSE consumption
 #    model. Aegra has no EXTERNAL webhook, but the EventBus IS the receiver.
@@ -120,8 +121,11 @@ start_one() {
 
 # aegra serve (AP HTTP) — prod mode, Tailscale-bound, no reload. Must be up
 # before mcp wraps it. Reads pux-harness/aegra.json (custom_app mounted).
+# `--extra prod`: aegra lives in the ``prod`` optional-dependency (kept out of the
+# base install). ``uv run --extra prod`` installs it on first start AND re-installs
+# it if a bare ``uv sync`` pruned it — so prod self-heals without manual reinstall.
 start_one serve \
-  "cd '$PUX_DIR' && PUX_PROJECT_ROOT='$PROJECT_ROOT' AEGRA_CONFIG=aegra.json exec uv run aegra serve --host '$TS_IP' --port '$API_PORT'" \
+  "cd '$PUX_DIR' && PUX_PROJECT_ROOT='$PROJECT_ROOT' AEGRA_CONFIG=aegra.json exec uv run --extra prod aegra serve --host '$TS_IP' --port '$API_PORT'" \
   "$PID_DIR/serve.pid" "$LOG_DIR/aegra-serve.log"
 
 # Wait for Aegra readiness via the custom_app EventBus endpoint (mounted via

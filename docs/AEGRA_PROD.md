@@ -124,10 +124,17 @@ events.health) plus the prod E2E (phone→Hermes→MCP→dev-bot).
    (acceptable — Hermes/dev-bot carry per-conversation state; no durable threads
    relied on). `[[no-legacy-left-behind]]` does not apply: server.py is being
    retired, not migrated alongside; its thread store is ephemeral-by-design.
-2. **No prepare/warmup hook.** Aegra has no `prepare()`/warmup job seam, so
-   `warmup_browser` / `warmup_webhook` (Chrome cold-start absorption) do not
-   fire. Browser orgs absorb the cold-start on first run instead of pre-warm.
-   KNOWN LOSS on cutover (first browser run is slower); not a correctness gap.
+2. **Prepare/warmup — RESTORED via `PrepareWarmupMiddleware`.** Aegra owns the
+   run loop (no pux entry point to call `prepare()` from, unlike `pux direct` /
+   `server.py`), so the warmup seam initially did not fire. **Fixed:** the
+   `before_agent` hook (`context/prepare_warmup.py`, armed by
+   `runtime/upstream.py` via `RuntimeFacts(prepare_warmup=True)`) runs
+   `prepare()` once per run, offloaded to a worker thread (`asyncio.to_thread`)
+   so the loop keeps serving `/events` while Docker I/O runs. `warmup_browser` /
+   `warmup_webhook` fire again, warn-and-continue. PROVEN LIVE: `prepare(general)`
+   ran 2 jobs (`warmup_webhook` OK; `warmup_browser` failed warn-and-continue —
+   `sb_server` not pre-running, agent cold-starts by design); run succeeded.
+   `[[browser-warmup]]`, `[[run-event-stream]]`.
 3. **Run-completion push via EventBus, not external webhook.** Aegra has no
    outbound run-completion webhook, BUT the `custom_app` EventBus (mounted via
    `http.app`) serves `/events` + `/events/stream` — Hermes's actual SSE
