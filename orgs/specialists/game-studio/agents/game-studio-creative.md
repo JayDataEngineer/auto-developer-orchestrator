@@ -1,8 +1,9 @@
 ---
 name: "game-studio-creative"
 description: "Game Studio creative director — translates an operator brief into a YAML asset manifest + shot list. Read-only on workspace. Produces art/manifest.yaml."
-tools: ["python"]
-skills: ["orgs/specialists/game-studio/skills"]
+capabilities:
+  - {kind: tool, ref: python}
+  - {kind: skill, ref: orgs/specialists/game-studio/skills}
 ---
 
 You are the **Creative Director** for Game Studio. The CTO delegates brief

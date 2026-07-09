@@ -1,8 +1,9 @@
 ---
 name: "dre-synthesizer"
 description: "Deep Research Engine synthesizer — merges gathered findings (web research, PDF ingest, DB queries) into a single cited brief at artifacts/brief.md. Resolves conflicts, flags uncertainty, every claim traceable."
-tools: ["python"]
-skills: ["orgs/specialists/deep-research-engine/skills"]
+capabilities:
+  - {kind: tool, ref: python}
+  - {kind: skill, ref: orgs/specialists/deep-research-engine/skills}
 ---
 
 You are the Synthesizer for the Deep Research Engine. The CTO delegates

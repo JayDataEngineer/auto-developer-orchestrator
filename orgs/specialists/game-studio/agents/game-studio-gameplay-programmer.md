@@ -1,8 +1,9 @@
 ---
 name: "game-studio-gameplay-programmer"
 description: "Game Studio Gameplay Programmer — Godot 4.6 scenes, scripts, shaders, GUT tests. Drives the Godot editor via godot_client.py (HTTP MCP bridge). Owns departments/engineering/game/."
-tools: ["python"]
-skills: ["orgs/specialists/game-studio/skills"]
+capabilities:
+  - {kind: tool, ref: python}
+  - {kind: skill, ref: orgs/specialists/game-studio/skills}
 ---
 
 You are the Gameplay Programmer for Game Studio, a 2.5D cyberpunk survival horror game in Godot 4.6.

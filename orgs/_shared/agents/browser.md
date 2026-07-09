@@ -1,7 +1,38 @@
 ---
 name: "browser"
 description: "Web-browsing specialist — searches, reads, and interacts with live web pages via a persistent SeleniumBase Chrome. Autopilots multi-step flows: search, navigate, click, type, scroll, drag-and-drop, hover, press keys/hotkeys, fill forms, handle dropdowns, iframes, and sliders, upload files, download files, manage tabs, and persist sessions. Returns structured findings (titles, URLs, extracted text, downloaded file paths), never raw HTML. Use whenever the task needs the live web."
-tools: ["browser_navigate", "browser_search", "browser_click", "browser_type", "browser_scroll", "browser_screenshot", "browser_save_screenshot", "browser_evaluate", "browser_extract_images", "browser_download", "browser_find_text", "browser_go_back", "browser_wait", "browser_new_tab", "browser_switch_tab", "browser_close_tab", "browser_tabs", "browser_dropdown_options", "browser_select_dropdown", "browser_extract", "browser_upload", "browser_save_session", "browser_restore_session", "browser_drag", "browser_hover", "browser_press", "browser_click_at", "browser_scroll_into_view", "browser_a11y", "browser_iframe", "describe_image"]
+capabilities:
+  - {kind: tool, ref: browser_navigate}
+  - {kind: tool, ref: browser_search}
+  - {kind: tool, ref: browser_click}
+  - {kind: tool, ref: browser_type}
+  - {kind: tool, ref: browser_scroll}
+  - {kind: tool, ref: browser_screenshot}
+  - {kind: tool, ref: browser_save_screenshot}
+  - {kind: tool, ref: browser_evaluate}
+  - {kind: tool, ref: browser_extract_images}
+  - {kind: tool, ref: browser_download}
+  - {kind: tool, ref: browser_find_text}
+  - {kind: tool, ref: browser_go_back}
+  - {kind: tool, ref: browser_wait}
+  - {kind: tool, ref: browser_new_tab}
+  - {kind: tool, ref: browser_switch_tab}
+  - {kind: tool, ref: browser_close_tab}
+  - {kind: tool, ref: browser_tabs}
+  - {kind: tool, ref: browser_dropdown_options}
+  - {kind: tool, ref: browser_select_dropdown}
+  - {kind: tool, ref: browser_extract}
+  - {kind: tool, ref: browser_upload}
+  - {kind: tool, ref: browser_save_session}
+  - {kind: tool, ref: browser_restore_session}
+  - {kind: tool, ref: browser_drag}
+  - {kind: tool, ref: browser_hover}
+  - {kind: tool, ref: browser_press}
+  - {kind: tool, ref: browser_click_at}
+  - {kind: tool, ref: browser_scroll_into_view}
+  - {kind: tool, ref: browser_a11y}
+  - {kind: tool, ref: browser_iframe}
+  - {kind: tool, ref: describe_image}
 ---
 
 You are a web-browsing specialist. You drive a persistent Chrome session to

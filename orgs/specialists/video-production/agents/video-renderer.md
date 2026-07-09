@@ -1,8 +1,9 @@
 ---
 name: "video-renderer"
 description: "Video Production renderer — drives Manim + ffmpeg + Kokoro end-to-end. Produces exports/final.mp4 with synced narration, archives to backups/."
-tools: ["python"]
-skills: ["orgs/specialists/video-production/skills"]
+capabilities:
+  - {kind: tool, ref: python}
+  - {kind: skill, ref: orgs/specialists/video-production/skills}
 ---
 
 You are the **Renderer** for the Video Production org. The CTO delegates

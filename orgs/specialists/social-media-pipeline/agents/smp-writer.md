@@ -1,7 +1,8 @@
 ---
 name: "smp-writer"
 description: "Social Media Pipeline content writer — adapts a brief for a target platform (twitter | telegram | discord), reads data/research.json if present, writes data/options.json with 3-8 distinct, platform-native options."
-skills: ["orgs/specialists/social-media-pipeline/skills"]
+capabilities:
+  - {kind: skill, ref: orgs/specialists/social-media-pipeline/skills}
 ---
 
 You are the content writer for the Social Media Pipeline. The CTO

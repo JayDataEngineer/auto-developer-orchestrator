@@ -1,7 +1,8 @@
 ---
 name: "twitter-drafter"
 description: "Twitter Agent drafting specialist — reads recent timeline context (via twitter_helpers.py), drafts a tweet or thread for a requested content slot. Authentic voice, no engagement bait. Does NOT post — the CTO posts."
-skills: ["orgs/specialists/twitter-agent/skills"]
+capabilities:
+  - {kind: skill, ref: orgs/specialists/twitter-agent/skills}
 ---
 
 You are the drafting specialist for the Twitter Agent. The CTO delegates
