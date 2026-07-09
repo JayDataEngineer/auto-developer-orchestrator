@@ -49,15 +49,28 @@ unset PUX_UPSTREAM_GRAPH
 
 case "${1:-start}" in
   stop)
+    # Kill the whole PROCESS GROUP (setsid launch made the stored PID == PGID),
+    # so uvicorn children die with the wrapper. Falls back to a direct kill,
+    # then a port-derived sweep for any child that escaped its group (e.g. a
+    # process launched before the setsid fix).
     for pf in serve mcp; do
       f="$PID_DIR/$pf.pid"
       [ -f "$f" ] || continue
       pid="$(cat "$f" 2>/dev/null || true)"
       if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-        echo "[pux-aegra] stopping $pf (pid $pid)"; kill "$pid" 2>/dev/null || true
-        sleep 2; kill -9 "$pid" 2>/dev/null || true
+        echo "[pux-aegra] stopping $pf (pgrp $pid)"
+        kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+        sleep 2
+        kill -KILL -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
       fi
       rm -f "$f"
+    done
+    for port in "$API_PORT" "$MCP_PORT"; do
+      hld="$(ss -ltnp 2>/dev/null | grep ":$port " | grep -oP 'pid=\K[0-9]+' | head -1)"
+      if [ -n "$hld" ]; then
+        echo "[pux-aegra] killing lingering :$port holder pid $hld"
+        kill "$hld" 2>/dev/null || true; sleep 1; kill -9 "$hld" 2>/dev/null || true
+      fi
     done
     echo "[pux-aegra] (sidecars left running — 'docker compose -f $COMPOSE down' to remove DBs)"
     exit 0
@@ -82,8 +95,10 @@ stop_pidfile() {
   if [ -f "$pf" ]; then
     local pid; pid="$(cat "$pf" 2>/dev/null || true)"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      echo "[pux-aegra] stopping prior $name (pid $pid)"; kill "$pid" 2>/dev/null || true
-      sleep 2; kill -9 "$pid" 2>/dev/null || true
+      echo "[pux-aegra] stopping prior $name (pgrp $pid)"
+      kill -TERM -"$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+      sleep 2
+      kill -KILL -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
     fi
     rm -f "$pf"
   fi
@@ -94,7 +109,12 @@ stop_pidfile "$PID_DIR/mcp.pid" "mcp"
 start_one() {
   local name="$1" cmd="$2" pf="$3" lf="$4"
   echo "[pux-aegra] starting $name → $lf"
-  nohup bash -c "$cmd" >"$lf" 2>&1 &
+  # setsid: the launched process becomes a NEW session/group leader whose PID
+  # (stored) == its PGID, so `kill -- -PID` reaches the WHOLE tree. This matters
+  # because `aegra serve` spawns uvicorn as a CHILD; killing only the nohup
+  # wrapper PID orphans uvicorn holding the port (caused a stuck :9988 on the
+  # first reversibility attempt). See AEGRA_PROD.md.
+  setsid nohup bash -c "$cmd" >"$lf" 2>&1 &
   echo $! > "$pf"
 }
 
