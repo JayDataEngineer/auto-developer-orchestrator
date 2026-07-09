@@ -26,6 +26,7 @@ import json
 from pathlib import Path
 
 import pytest
+from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 
 from pux_harness.agent import orgs
@@ -139,8 +140,12 @@ def test_model_resolved_via_get_model(fake_tree):
     _org_yaml("o", ["m"], root)
 
     sub = orgs.load_subagents("o", _specialists(), **_ctx())[0]
-    assert isinstance(sub["model"], ChatOpenAI)
-    assert sub["model"].model_name == "glm-5.2"
+    # glm-5.2 is bound to the zai-anthropic profile (kind: anthropic) in
+    # models.yaml -> our router returns ChatAnthropic for it, NOT ChatOpenAI.
+    # The point proven here is the bare shorthand still resolves through
+    # get_model to a real chat model (not a provider:string), and the right id.
+    assert isinstance(sub["model"], ChatAnthropic)
+    assert sub["model"].model == "glm-5.2"
 
 
 def test_model_omitted_uses_worker_role(fake_tree):
@@ -168,7 +173,7 @@ def test_model_omitted_worker_role_org_override(fake_tree):
     )
 
     sub = orgs.load_subagents("o", _specialists(), **_ctx())[0]
-    assert sub["model"].model_name == "glm-5.2"
+    assert sub["model"].model == "glm-5.2"
 
 
 def test_skills_resolved_to_container_paths(fake_tree):
