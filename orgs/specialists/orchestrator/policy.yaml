@@ -1,16 +1,18 @@
 # Declarative policy for the orchestrator org.
 #
-# orchestrator extends: general — it inherits general's roster (researcher,
-# browser) and capabilities (web_research, github MCP servers) via the org.yaml
-# extends: chain. Policy.yaml is NEVER inherited (Safeguard S6: each org owns
-# its egress), so this file is required even though the org is a thin child.
+# orchestrator extends: general — it inherits general's ROSTER (researcher,
+# browser, explorer, web-search, + this org's own task-planner) via the org.yaml
+# extends: chain. But capabilities/MCP are NOT inherited: ``mcp`` is
+# security-scoped and ``_org_yaml_mcp_items`` reads this org's OWN org.yaml only
+# (the SAME reason policy.yaml is NEVER inherited — Safeguard S6: each org owns
+# its egress). So the MCP servers orchestrator wants (web_research, github) are
+# REDECLARED in this org's org.yaml ``capabilities:`` block, not composed from
+# general. Policy.yaml itself is still required here (never inherited) even
+# though the org is a thin child.
 #
 # The sandbox layer treats empty sections identically to NoPolicy — egress_rules()
 # returns "" (no egress.conf staged -> open), resolve_tier() returns "isolated".
 # This file's only execution effect is the protocols: axis (client surfaces).
-#
-# CU-4: capabilities are inherited from general's org.yaml (web_research, github
-# MCP servers). They are NOT redeclared here — the extends: chain composes them.
 protocols:
   - acp
   - agui

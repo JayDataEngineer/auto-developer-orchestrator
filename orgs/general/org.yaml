@@ -1,4 +1,4 @@
-agents: [researcher, browser, explorer]
+agents: [researcher, browser, explorer, web-search]
 
 # CU-4: foreign MCP tool servers. The ONE canonical declaration site (was
 # policy.yaml ``tool_servers:``, now a permanent contract failure — see

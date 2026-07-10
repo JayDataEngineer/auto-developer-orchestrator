@@ -1,1 +1,8 @@
+extends: general
 agents: [telegram-drafter]
+
+# MCP is security-scoped + NEVER inherited via ``extends:`` (each org owns its
+# egress). web_research is redeclared here to arm the ``web-search`` agent
+# inherited from general. Host-side server (HTTP) — no policy.yaml egress needed.
+capabilities:
+  - {kind: mcp, ref: web_research}

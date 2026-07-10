@@ -57,17 +57,18 @@ def test_orchestrator_roster_inherits_general_agents() -> None:
 # --- AGENTS.md overlay chain ------------------------------------------------
 
 def test_orchestrator_system_prompt_includes_both_overlays() -> None:
-    """build_system_prompt concatenates root AGENTS.md + general's overlay +
-    orchestrator's overlay. Both org overlays must be present."""
+    """build_system_prompt concatenates the chain overlay (general's base +
+    orchestrator's overlay) — general first (root->child), orchestrator after.
+    The root AGENTS.md is NOT read (it is a developer guide); the base flows
+    from general via ``extends:``."""
     prompt = build_system_prompt("orchestrator")
-    # general's overlay mentions "General Org"
-    assert "General Org" in prompt
+    # general's overlay is the base-org prompt ("base org prompt" is unique to
+    # general's AGENTS.md — absent from root dev-guide + orchestrator's overlay).
+    assert "base org prompt" in prompt
     # orchestrator's own overlay mentions task-planner (unique to its overlay)
     assert "task-planner" in prompt.lower()
     # general's overlay comes before orchestrator's (root->child order).
-    # Use "task-planner" as the orchestrator marker — it's unique to the
-    # orchestrator's own overlay and won't appear in root or general's prompt.
-    assert prompt.index("General Org") < prompt.lower().index("task-planner")
+    assert prompt.index("base org prompt") < prompt.lower().index("task-planner")
 
 
 # --- agent resolution -------------------------------------------------------

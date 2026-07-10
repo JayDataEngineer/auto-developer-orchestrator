@@ -120,11 +120,14 @@ class TestResolveSharedAgents:
         assert any("researcher.md" in k for k in files)
         assert any("browser.md" in k for k in files)
 
-    def test_dev_bot_uses_local_only(self):
-        """dev-bot defines all its agents locally — no shared agents needed."""
+    def test_dev_bot_uses_local_only_roster(self):
+        """dev-bot ``extends: general`` (base PROMPT flows) but sets
+        ``inherit_roster: false`` — its own three specialists are authoritative,
+        deliberately refusing the inherited base roster (a generic
+        researcher/browser would let the CTO delegate the thinking itself). All
+        three are org-local, so NONE resolve to ``_shared``."""
         files = _resolve_shared_agents("dev-bot")
-        # dev-bot has dev-bot-explorer, code-worker, web-agent — all local
-        assert not files
+        assert files == {}, files
 
 
 class TestResolveSharedSkills:
@@ -211,12 +214,14 @@ def test_pack_org_produces_valid_archive(org, tmp_path):
     assert isinstance(manifest["files"], list)
     assert len(manifest["files"]) > 0
 
-    # Root AGENTS.md is always included
+    # Root AGENTS.md is NEVER packaged — it is a developer guide now, not a
+    # runtime base prompt. The base prompt flows from the base org ``general``
+    # via the flattened chain overlay baked into the org's OWN AGENTS.md below.
     names = _tar_names(output)
     root_agents = f"{org}/AGENTS.md"
-    assert root_agents in names, f"root AGENTS.md missing from {org} pack"
+    assert root_agents not in names, f"root AGENTS.md leaked into {org} pack"
 
-    # Org's own AGENTS.md is included
+    # Org's own AGENTS.md is included (carries the flattened base + overlay)
     org_agents = f"{org}/orgs/{org}/AGENTS.md"
     assert org_agents in names, f"org AGENTS.md missing from {org} pack"
 

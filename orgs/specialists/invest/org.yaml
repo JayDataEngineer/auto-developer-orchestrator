@@ -1,3 +1,4 @@
+extends: general
 agents: [invest-researcher, invest-trader]
 
 # CU-4: foreign MCP tool servers (was policy.yaml ``tool_servers:`` — now a

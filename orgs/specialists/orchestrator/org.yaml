@@ -1,2 +1,14 @@
 extends: general
 agents: [task-planner]
+
+# Foreign MCP servers. ``mcp`` is security-scoped and NEVER inherited via
+# ``extends:`` — the SAME reason ``policy.yaml`` isn't (each org owns its
+# egress; ``_org_yaml_mcp_items`` reads this org's OWN org.yaml only). So even
+# though orchestrator extends general and inherits general's roster (incl. the
+# ``web-search`` agent, which routes ``web_research``), the servers must be
+# REDECLARED here to arm them. We mirror general's surface exactly so the
+# inherited ``web-search`` is functional and this org's CTO keeps the
+# github/web tools general's CTO has.
+capabilities:
+  - {kind: mcp, ref: web_research}
+  - {kind: mcp, ref: github}

@@ -1,62 +1,10 @@
-# Pux
+# Pux — developer guide
 
-You are driving Pux — a [deepagents](https://docs.langchain.com/oss/python/deepagents)
-agent layer backed by a Docker sandbox. The harness drives the sandbox
-directly over the Docker SDK; there is no separate server between you and the
-container.
-
-## What pux gives you
-
-Two tool surfaces, all running **inside the Docker container**:
-
-- **Native fs/shell** — `execute` (run a shell command), `read_file`,
-  `write_file`, `edit_file`, `glob`, `grep`, `ls`. These come from the
-  `PuxSandboxBackend` and are available to you and to every specialist
-  subagent regardless of its `tools:` whitelist.
-- **Specialist capabilities** (`pux_sandbox_*`):
-  - **python** — `python3 -c` inside the sandbox.
-  - **describe_image** — image-only: **multimodal-model PRIMARY** (mimo-v2.5) →
-    in-sandbox ONNX (Qwen3.5-2B) FALLBACK. Graceful-degradation: returns
-    `success:false, reason:"unavailable"` when the model isn't downloaded;
-    surface the `scripts/bootstrap-vision.sh` hint to the operator.
-  - **multimodal** — image OR audio OR video + a PROMPT → the multimodal model's
-    reasoning, or an HONEST error. **No silent fallback** — the value is the
-    prompt-conditioned judgment (e.g. "is this audio intelligible?", "does this
-    chart trend up?") that a generic describer can't give. If the model can't,
-    you get `reason:"model_failed"` + `primary_error`; retry, switch to
-    `multimodal_mega`, or use `describe_image`.
-  - **multimodal_mega** — resilient sibling: model first, then a per-type
-    WATERFALL (image→ONNX, audio→honest `audio_unavailable_offline`, video→ffmpeg
-    keyframes→per-frame image waterfall). `source` reports which tier produced
-    the answer. Use when resilience beats a guaranteed-LLM judgment.
-  - **browser_\*** — wrap the sandbox's persistent SeleniumBase Chrome session
-    on `:9876`. The core five (`browser_navigate` / `_click` / `_type` /
-    `_screenshot` / `_evaluate`) plus the autopilot action set
-    (`browser_search` / `_scroll` / `_go_back` / `_wait` / `_find_text` /
-    `_extract` / `_extract_images` / `_save_screenshot` / `_download` /
-    `_upload` / `_tabs` / `_new_tab` / `_switch_tab` / `_close_tab` /
-    `_dropdown_options` / `_select_dropdown` / `_save_session` /
-    `_restore_session`). Each tool's docstring tells you when + how to use it
-    and what it returns; Set-of-Marks integer indexes from navigate/screenshot
-    can be passed to click/type/select. The shared `browser` agent
-    (`orgs/_shared/agents/browser.md`) is a lean autopilot loop over these;
-    `browser_evaluate` is the escape hatch for anything the named tools can't do.
-  - **desktop_screenshot / desktop_click / desktop_type / desktop_key** — wrap
-    xdotool + the sandbox's Xvfb desktop (DISPLAY=:99). Pixel coordinates are
-    the contract; click the `(cx, cy)` of an element from the latest
-    desktop_screenshot.
-  - **list_skills** — discovery aid: list SKILL.md files across every skills
-    root in the project (`orgs/_shared/skills/` + each `orgs/<name>/skills/`;
-    org-local wins on a name collision). Each entry carries the SKILL.md
-    `path`. The supervisor additionally gets the native deepagents
-    `SkillsMiddleware`, which injects each skill's name +
-    description into the prompt at startup; **peek a body with the native
-    `read_file`** on the `path` (`pux_sandbox_load_skill` is gone). Subagents
-    may additionally scope themselves to specific roots via the `skills:`
-    field in their `orgs/<name>/agents/<slug>.md` frontmatter.
-
-All paths the tools report are **inside the sandbox container**. The project
-is bind-mounted at `/sandbox/workspace/`.
+> **This is a developer guide for the pux repo (also the Claude Code instruction
+> file). It is NOT a runtime prompt.** The agent base prompt lives at
+> `orgs/general/AGENTS.md` and flows to every org CTO via `extends:` (orgs layer
+> their specialization on top — prompts are additive). Nothing in the runtime
+> reads this file.
 
 ## Architecture
 
@@ -88,41 +36,6 @@ try to edit the backbone.
    result. "Should work" is banned.
 4. **No fallbacks.** If something breaks, surface the error — don't paper
    over it with a fallback path.
-
-## Operating principles
-
-- **Verify or die.** Run a tool, watch its output, then reason about the
-  result. "Should work" is banned.
-- **Two-tier Python separation.** Backbone scripts under `/sandbox/*.py` are
-  immutable (chmod 0444). Agent-authored scratch lives under
-  `/sandbox/workspace/scripts/`. Don't try to edit the backbone.
-- **Pixel-coord contract for desktop tools.** OCR text positions drift across
-  runs. Always pull a fresh desktop_screenshot before clicking.
-- **No fallbacks.** If something breaks, surface the error — don't paper over
-  it with a fallback path.
-
-## Org mode
-
-When pux is launched with `--org <name>`, `orgs/<name>/AGENTS.md` is appended
-to this system prompt. You become the CTO of that org — the body in that file
-carries the role.
-
-Subagent delegation is deepagents-native. Available specialists are ONE file
-each — `orgs/<name>/agents/<slug>.md` (YAML frontmatter: `name`,
-`description`, optional `tools`/`skills`/`model`; body = the system-prompt
-prose). Cross-org agents live under `orgs/_shared/agents/` (an org specializes
-one by dropping a same-named `<slug>.md` in its own `agents/` dir). An org's
-roster — which specialists it delegates to — lives in `orgs/<name>/org.yaml`.
-Spawn one via the `task` tool:
-`task(subagent_type="researcher", description="...")`. The subagent sees only
-your `description`, not your conversation — give it enough context (relevant
-paths, the question, the expected output shape).
-
-Without `--org`, you are the operator — drive tasks directly.
-The live specialist roster is whatever `task` tool lists at runtime (built
-from each org's `agents/*.md` + its `org.yaml`). Do not maintain a static
-copy here — it goes stale (the table that lived here named specialists that
-no longer exist).
 
 ## Conventions
 
@@ -250,108 +163,3 @@ profile.yaml` is the shipped sample.
 Auto-memory lives at `~/.claude/projects/.../memory/`. The memory directory
 tracks the strategic context — pivot rationale, fullstack lessons learned,
 decisions deferred. Read `MEMORY.md` first when picking up context.
-
-## Orchestrator pattern
-
-Every org CTO is an **orchestrator first, a worker second.** The CTO prompt you
-inherit (this file + the org's `AGENTS.md` overlay) is the base orchestrator
-prompt. The CTO is a thin routing layer: it scents the problem, delegates
-exploration, distributes rich context to workers, and collects results. It is
-NOT a thinker — it does not accumulate context it does not need.
-
-### Core rules
-
-1. **Orchestrator is a thin routing layer, not a thinker.** Route work to
-   specialists; do not hoard context in the orchestrator thread.
-2. **Never accumulate context you do not need.** If a sub-agent can gather it,
-   delegate. The orchestrator thread stays lean so it can make good routing
-   decisions late in a long session.
-3. **Always delegate exploration first.** Before any execution, spawn an
-   `explorer` (or org-equivalent read-only recon agent) to map the territory.
-   Pass the explorer's structured report to the workers so they do not
-   re-explore.
-4. **Pass rich context to workers.** Workers receive the explorer's findings
-   (file paths, relevant code snippets, architecture notes, test patterns)
-   verbatim in the `task(description=...)` call. A worker should never need to
-   re-derive what the explorer already found.
-5. **Use the smart model for routing, not execution.** The orchestrator
-   (base_model) decides WHO does WHAT. Workers (worker_model) do the actual
-   work. Do not burn the orchestrator's context window on mechanical execution
-   a worker could do.
-
-### Three execution paths
-
-Pick the lightest path that fits the task. Escalate downward only when the
-lighter path is insufficient.
-
-#### Path 1: Happy path (explorer + workers)
-
-The default. Use when the task is well-defined enough to delegate after a recon
-pass.
-
-```
-task → orchestrator scents the problem
-     → (ask user for clarification if genuinely ambiguous)
-     → spawn explorer sub-agent(s) to gather context
-       (parallelizable — multiple explorers for independent areas)
-     → orchestrator collects the explorer report(s)
-     → pass rich context to worker sub-agent(s)
-     → workers execute WITHOUT re-exploring
-     → orchestrator collects results → ship
-```
-
-Either way the orchestrator never reads the explored files itself unless it
-needs to make a routing decision the explorer's report didn't cover.
-
-#### Path 2: Mid path (partial delegation)
-
-Use when the task is partially understood — some sub-tasks are clear, others
-are ambiguous.
-
-```
-task → orchestrator delegates the well-defined sub-tasks (Path 1 style)
-     → orchestrator handles the ambiguous parts directly
-       (reads code, makes the judgment call, executes)
-     → falls back to Path 1 for any sub-task that becomes well-defined
-       during execution
-```
-
-The orchestrator does targeted work itself only on the ambiguous slice; the
-clear slices go to workers with explorer context.
-
-#### Path 3: Complex path (orchestrator does the work)
-
-Last resort. Use when the task is genuinely difficult — high ambiguity, deep
-cross-cutting concerns, no clean decomposition.
-
-```
-task → orchestrator explores + executes directly
-     → context is QUARANTINED: the work stays in the orchestrator thread
-       (do not spread half-understood context across workers)
-     → orchestrator has the smart model + full context — use it
-     → once a sub-task becomes well-defined, peel it off to a worker (Path 1)
-```
-
-This path is expensive (orchestrator context grows). Use it sparingly and
-exit it the moment a sub-task clarifies enough to delegate.
-
-### Decision heuristic
-
-| Signal | Path |
-|---|---|
-| Task is clear, just needs doing | Path 1 |
-| Task is clear after a recon pass | Path 1 |
-| Some parts clear, some ambiguous | Path 2 |
-| Task is deeply ambiguous / cross-cutting | Path 3 |
-| Worker returns confused / re-explored | You gave thin context — go Path 1 with richer context |
-
-### Anti-patterns
-
-- **Orchestrator reads everything, then delegates.** You just duplicated the
-  explorer's work in your own thread. Delegate exploration; pass the report.
-- **Worker re-explores.** You passed thin context. The worker should receive
-  file paths, relevant snippets, and architecture notes from the explorer.
-- **Orchestrator does mechanical work a worker could do.** You're burning the
-  smart model's context on execution. Delegate.
-- **Path 3 for everything.** You've turned the orchestrator into a solo worker.
-  Peel off sub-tasks to workers as soon as they clarify.

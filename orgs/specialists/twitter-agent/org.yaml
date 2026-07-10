@@ -1,1 +1,9 @@
+extends: general
 agents: [twitter-drafter]
+
+# MCP is security-scoped + NEVER inherited via ``extends:`` (each org owns its
+# egress; ``_org_yaml_mcp_items`` reads this org's OWN org.yaml only). web_research
+# is redeclared here to arm the ``web-search`` agent inherited from general. The
+# server runs host-side (HTTP) — no sandbox-egress entry needed in policy.yaml.
+capabilities:
+  - {kind: mcp, ref: web_research}

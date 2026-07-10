@@ -112,9 +112,11 @@ def test_export_from_foreign_root_without_monkeypatch(tmp_path, monkeypatch):
     names = _tar_files(output)
 
     # Every primitive reconstructed from the FOREIGN tree (archive-relative,
-    # orgs/specialists/<n>/ normalized to orgs/<n>/).
+    # orgs/specialists/<n>/ normalized to orgs/<n>/). NOTE: no top-level
+    # ``foreign/AGENTS.md`` — the root AGENTS.md is a dev guide now, not a
+    # packaged runtime base prompt (the base flows via the flattened chain
+    # overlay baked into the org's own AGENTS.md).
     expected = [
-        "foreign/AGENTS.md",                       # consumer root base prompt
         "foreign/orgs/foreign/AGENTS.md",
         "foreign/orgs/foreign/org.yaml",
         "foreign/orgs/foreign/policy.yaml",

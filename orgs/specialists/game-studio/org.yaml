@@ -1,3 +1,4 @@
+extends: general
 agents: [game-studio-creative, game-studio-design-researcher, game-studio-docs-writer, game-studio-gameplay-programmer, game-studio-narrative-designer, game-studio-qa-tester, game-studio-renderer, game-studio-technical-artist]
 
 # Foreign MCP tool servers armed for this org. ``godot-mcp-runtime`` (stdio/npx,
@@ -11,3 +12,6 @@ agents: [game-studio-creative, game-studio-design-researcher, game-studio-docs-w
 # agent's ref then fails loud at build time (tools absent).
 capabilities:
   - {kind: mcp, ref: godot-mcp-runtime}
+  # web_research arms the ``web-search`` agent inherited from general (MCP is
+  # security-scoped + never inherited via extends:; redeclared here for it).
+  - {kind: mcp, ref: web_research}
