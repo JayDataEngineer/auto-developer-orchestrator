@@ -60,6 +60,15 @@ def stubbed_factory(monkeypatch):
     # is opt-in/gated, but stubbed for symmetry.
     monkeypatch.setattr(stack, "ModelRetryMiddleware", lambda **kw: "RETRY")
     monkeypatch.setattr(stack, "ToolRetryMiddleware", lambda **kw: "TOOLRETRY")
+    # ``interpreter`` (CodeInterpreterMiddleware) auto-mounts for every shipped
+    # org — all resolve a strength:pro base model (driver_strong_orchestrator
+    # keys on the REAL resolve_model_id, not this stubbed get_model, so the
+    # arming is genuine production behavior, not a stub artifact). Its class is
+    # a LAZY module-level name (langchain-quickjs pulls wasmtime/quickjs native
+    # libs), so patch it to a stable marker like every other middleware class —
+    # otherwise the real instance leaks with a per-build repr() (distinct memory
+    # address) and breaks idempotency, and it'd force the native load here too.
+    monkeypatch.setattr(stack, "CodeInterpreterMiddleware", lambda **kw: "INTERP")
     monkeypatch.setattr(stack, "get_model", lambda *a, **k: "MODEL")
     monkeypatch.setattr(stack, "build_grader_tools", lambda *a, **k: ["g1"])
     monkeypatch.setattr(orgs, "get_model", lambda *a, **k: "WORKER_MODEL")
@@ -228,11 +237,13 @@ def test_every_real_org_emits_only_registry_middleware(stubbed_factory):
     """No real org's stack carries a middleware instance that bypassed the
     registry. Every emitted marker is one of the stubbed registry builders
     (routing/session_guide/audit/rubric; ``model_retry`` is default-on for every
-    supervisor per #84; ``context`` flattens to nothing under the stub;
-    ``browser_vision`` is env-off). If a future change hand-appends a
-    middleware in ``build_stack`` outside ``_resolve_toggles`` (the drift the
-    audit removed), this fires — there is exactly ONE stack path."""
-    allowed = {"ROUTE", "GUIDE", "AUDIT", "RUBRIC", "RETRY"}
+    supervisor per #84; ``interpreter`` auto-mounts for every shipped org since
+    all resolve a strength:pro base — the dynamic-subagent happy path;
+    ``context`` flattens to nothing under the stub; ``browser_vision`` is
+    env-off). If a future change hand-appends a middleware in ``build_stack``
+    outside ``_resolve_toggles`` (the drift the audit removed), this fires —
+    there is exactly ONE stack path."""
+    allowed = {"ROUTE", "GUIDE", "AUDIT", "RUBRIC", "RETRY", "INTERP"}
     for org in REAL_ORGS:
         plan = _build_real_org(org, stubbed_factory)
         emitted = {str(m) for m in plan.supervisor_middleware}

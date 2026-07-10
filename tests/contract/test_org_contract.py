@@ -26,7 +26,6 @@ import pytest
 from pux_harness.agent import contract, orgs
 from pux_harness.agent.contract import (
     KNOWN_POLICY_SECTIONS,
-    NATIVE_FS_TOOLS,
     _REQUIRED_AGENT_KEYS,
     _scan_for_profile_registration,
     _scan_runtime_for_memory_saver,
@@ -36,6 +35,10 @@ from pux_harness.agent.contract import (
     orphan_agents,
 )
 from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
+# ``NATIVE_FS_TOOLS`` lives canonically in the tools registry — ``contract.py``
+# re-exported it once as a dead convenience surface and that was removed (the
+# daemon-recovery sweep). Import it from its home, not the contract module.
+from pux_harness.sandbox.tools.registry import NATIVE_FS_TOOLS
 
 
 # --- the green gate ------------------------------------------------------
