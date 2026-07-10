@@ -3,7 +3,7 @@
 
 Routes through the Ray cluster ingress at $COMFYUI_URL. If ComfyUI
 is not currently loaded (cold GPU, worktree swap), returns "COMFYUI_DOWN" and
-the studio-director falls back to Forge for image gen.
+the CTO falls back to Forge for image gen.
 
 Usage:
   python3 comfyui_client.py health

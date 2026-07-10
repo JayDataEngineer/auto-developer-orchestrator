@@ -12,7 +12,7 @@ Responses:
 - JSON with `status: ok` + editor state → bridge is up, Godot editor is connected
 - `GODOT_MCP_DOWN` → server not reachable OR Godot editor not running with plugin
 
-**On `GODOT_MCP_DOWN`:** Do NOT retry in a tight loop. The studio-director needs to know. Return cleanly with a "GODOT_MCP_DOWN — falling back to CLI" message so it can route to gameplay_programmer for headless test runs instead.
+**On `GODOT_MCP_DOWN`:** Do NOT retry in a tight loop. The CTO needs to know. Return cleanly with a "GODOT_MCP_DOWN — falling back to CLI" message so it can route to gameplay_programmer for headless test runs instead.
 
 ## Common Workflows
 
@@ -74,7 +74,7 @@ python3 /sandbox/godot_client.py call editor-selection-get --args '{}'
 
 The full tool list (39 tools, 11 families): scene-*, node-*, script-*, screenshot-*, resource-*, editor-*, console-*, reflection-*, runtime-errors-*. See [IvanMurzak/Godot-MCP](https://github.com/IvanMurzak/Godot-MCP) for argument schemas.
 
-## Coordination with studio-director
+## Coordination with the CTO
 
 - **Always health-check first.** Don't burn a delegation round on a dead server.
 - **One scene change per call.** Don't batch 5 script-update calls in parallel — the editor serializes them anyway and you risk write conflicts.
@@ -85,7 +85,7 @@ The full tool list (39 tools, 11 families): scene-*, node-*, script-*, screensho
 
 | Failure | Recovery |
 |---------|----------|
-| `GODOT_MCP_DOWN` | Tell studio-director immediately; it routes to gameplay_programmer CLI fallback |
+| `GODOT_MCP_DOWN` | Tell the CTO immediately; it routes to gameplay_programmer CLI fallback |
 | Editor hung (timeout on call) | Don't retry — likely the editor is mid-modal. Surface the error and stop the cycle |
 | Script update rejected (parse error) | Read the error, fix the GDScript, retry once. Don't blind-retry. |
 | Screenshot file not written | Check disk space; fall back to CLI `godot --headless --screenshot` if available |

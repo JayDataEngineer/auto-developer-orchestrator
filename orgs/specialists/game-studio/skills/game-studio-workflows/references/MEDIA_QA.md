@@ -28,9 +28,9 @@ Every QA cycle writes `/sandbox/workspace/qa/cycle-N/vibe.json`:
 ```
 
 `recommendation`:
-- `iterate` → studio-director kicks off cycle N+1
-- `yield` → studio-director stops, marks task_run success
-- `abort` → studio-director stops, marks task_run failed
+- `iterate` → the CTO kicks off cycle N+1
+- `yield` → the CTO stops, marks task_run success
+- `abort` → the CTO stops, marks task_run failed
 
 ## How to Score
 
@@ -80,15 +80,15 @@ If the player sprite is missing or off-screen, that's a `high` severity issue re
 
 ## Batch Playtest Review
 
-When the studio-director hands you 5+ screenshots from a playtest:
+When the CTO hands you 5+ screenshots from a playtest:
 
 1. Run `analyze_image` on each (in sequence — don't parallelize, MCP server may rate-limit)
 2. Aggregate scores into a single vibe.json
 3. For outliers (one shot scored 2 while others scored 4), call out the specific issue rather than averaging down
 
-## What the Studio-Director Reads
+## What the CTO Reads
 
-It reads `vibe.json` and decides:
+The CTO reads `vibe.json` and decides:
 - `iterate` + `next_focus: "player sprite contrast"` → next cycle the technical_artist gets "boost player sprite contrast against backgrounds"
 - `yield` + scores ≥4 → task_run marked success, files listed
 - `abort` + issues list → task_run marked failed, issues surfaced to user

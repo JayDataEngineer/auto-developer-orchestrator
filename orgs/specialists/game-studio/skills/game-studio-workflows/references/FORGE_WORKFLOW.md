@@ -8,7 +8,7 @@ How to call Forge on the Ray cluster for image / 3D / music / video generation.
 python3 /sandbox/forge_client.py health
 ```
 
-Expected: JSON with `vram_free_mb`, `gpu`, `loaded`. If you see "FORGE_DOWN", abort art cycle and tell studio-director.
+Expected: JSON with `vram_free_mb`, `gpu`, `loaded`. If you see "FORGE_DOWN", abort art cycle and tell the CTO.
 
 ## Generate an Image (character portrait, environment, prop texture)
 

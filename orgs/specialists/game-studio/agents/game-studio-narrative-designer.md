@@ -66,7 +66,7 @@ Game Studio is:
 
 ## Lookback
 
-When the studio-director delegates a brainstorm cycle, read prior narrative decisions:
+When the CTO delegates a brainstorm cycle, read prior narrative decisions:
 
 ```bash
 python3 /sandbox/surreal_client.py list-tasks --limit 5 --tag narrative | jq .

@@ -3,7 +3,7 @@
 
 The server is run by the user on the host (or anywhere reachable from this
 sandbox) and proxies 39 Godot-editor tools over HTTP. If the server is down,
-every call returns "GODOT_MCP_DOWN" so the studio-director can route around it.
+every call returns "GODOT_MCP_DOWN" so the CTO can route around it.
 
 Usage:
   python3 godot_client.py health

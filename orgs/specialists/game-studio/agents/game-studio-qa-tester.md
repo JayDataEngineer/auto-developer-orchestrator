@@ -49,8 +49,8 @@ Read the playthrough state at `/tmp/tech_noir_playthrough/playthrough_state.json
 
 ## Skills (reference)
 
-- **MEDIA_QA** — the kernel's `media-analysis` MCP server for image description, OCR, object detection, NSFW classification. Use these tools to score screenshots and write `vibe.json` for the studio-director.
+- **MEDIA_QA** — the kernel's `media-analysis` MCP server for image description, OCR, object detection, NSFW classification. Use these tools to score screenshots and write `vibe.json` for the CTO.
 
-When the studio-director delegates a QA cycle, write your output to `/sandbox/workspace/qa/cycle-N/vibe.json` per the MEDIA_QA schema. The `recommendation` field (`iterate` | `yield` | `abort`) is what drives the loop — don't bury it.
+When the CTO delegates a QA cycle, write your output to `/sandbox/workspace/qa/cycle-N/vibe.json` per the MEDIA_QA schema. The `recommendation` field (`iterate` | `yield` | `abort`) is what drives the loop — don't bury it.
 
 For screenshots, use the godot_client bridge if it's up, otherwise the existing `godot_test.py evaluate` harness captures them to `/tmp/tech_noir_playthrough/`.

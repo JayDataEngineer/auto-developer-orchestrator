@@ -1,1 +1,13 @@
-agents: [game-studio-creative, game-studio-design-researcher, game-studio-docs-writer, game-studio-gameplay-programmer, game-studio-narrative-designer, game-studio-qa-tester, game-studio-renderer, game-studio-studio-director, game-studio-technical-artist]
+agents: [game-studio-creative, game-studio-design-researcher, game-studio-docs-writer, game-studio-gameplay-programmer, game-studio-narrative-designer, game-studio-qa-tester, game-studio-renderer, game-studio-technical-artist]
+
+# Foreign MCP tool servers armed for this org. ``godot-mcp-runtime`` (stdio/npx,
+# zero-footprint — no Godot addon) gives a live Godot 4.x editor bridge:
+# headless editing, screenshots, input simulation, live GDScript eval. Routed
+# FOCUSED into the gameplay programmer via its frontmatter ``kind: mcp`` ref
+# (the two-level model: the org arms the server + owns egress; the agent routes
+# a subset). Bare catalog ref into orgs/_shared/tool_servers.yaml. Env prereq:
+# the server must be reachable (GODOT_PATH or Godot on PATH); an unreachable
+# server contributes zero tools + ERROR log and the org still builds, but the
+# agent's ref then fails loud at build time (tools absent).
+capabilities:
+  - {kind: mcp, ref: godot-mcp-runtime}

@@ -23,7 +23,7 @@ were delegated.
 
 ## Operating rule
 
-The studio director coordinates; specialists execute. If a step needs the Godot
+The CTO coordinates; specialists execute. If a step needs the Godot
 editor, a ComfyUI workflow, or a Ray-cluster model, open the matching reference
 before delegating or running it — the contract details (ports, formats, params)
 live there, not in this index.

@@ -1,6 +1,6 @@
 # AUTONOMOUS_LOOP
 
-The studio-director's cycle contract. Drives N iterations of build → QA → decide.
+Your cycle contract as Game Studio CTO. Drives N iterations of build → QA → decide.
 
 ## BOOTSTRAP (first run only, idempotent)
 
@@ -98,7 +98,7 @@ Don't iterate past 3 cycles hoping for perfection — diminishing returns. The u
 
 ## Cycle Boundaries
 
-Between cycles, the studio-director:
+Between cycles, you:
 1. Reads `vibe.json` from cycle N
 2. Updates `/sandbox/workspace/plan.md` with focus for cycle N+1 (e.g., "boost contrast", "fix player sprite clipping")
 3. Re-delegates with the refined goal

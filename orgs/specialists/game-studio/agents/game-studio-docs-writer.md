@@ -69,4 +69,4 @@ When you DELETE or RENAME a page, remove the old entry from `docsIndex`.
 
 ## When You're Unsure
 
-Read 2-3 existing docs pages first. The site is consistent — match the pattern. If you can't find a matching pattern, propose one in the outline and let the user (or studio-director) approve before writing.
+Read 2-3 existing docs pages first. The site is consistent — match the pattern. If you can't find a matching pattern, propose one in the outline and let the user (or the CTO) approve before writing.
