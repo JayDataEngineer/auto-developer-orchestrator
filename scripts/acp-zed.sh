@@ -12,4 +12,10 @@ if [[ -f "$REPO/.env" ]]; then
   set +a
 fi
 
-exec uv run --directory "$REPO/harness" python -m pux_harness acp "$@"
+# Project root = where ``orgs/`` lives (the repo root), NOT the uv ``--directory``
+# (pux-harness/). ``kit._paths.project_root`` defaults to the CWD, so a launch from
+# pux-harness/ would discover zero orgs — export the override, mirroring ``bin/pux``
+# and ``start_pux_aegra.sh``.
+export PUX_PROJECT_ROOT="$REPO"
+
+exec uv run --directory "$REPO/pux-harness" python -m pux_harness acp "$@"
