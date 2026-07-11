@@ -28,7 +28,10 @@ set -euo pipefail
 
 PROJECT_ROOT="${PUX_PROJECT_ROOT:-/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator}"
 PUX_DIR="$PROJECT_ROOT/pux-harness"
-TS_IP="${PUX_TS_IP:-100.99.57.110}"
+# Services bind to 0.0.0.0 — accessible from localhost (tailscale serve)
+# AND from Docker containers (Hermes reaches MCP via Tailscale IP).
+# NEVER bind to a Tailscale IP: it breaks if the IP changes.
+BIND_HOST="0.0.0.0"
 API_PORT="${PUX_API_PORT:-9988}"
 MCP_PORT="${PUX_MCP_PORT:-9987}"
 LOG_DIR="$PROJECT_ROOT/.pux/logs"
@@ -39,9 +42,9 @@ SECRETS_ENV="$PROJECT_ROOT/.env"
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
 export PUX_PROJECT_ROOT="$PROJECT_ROOT"
-export PUX_API_HOST="$TS_IP" PUX_API_PORT="$API_PORT"
-export PUX_MCP_HOST="$TS_IP" PUX_MCP_PORT="$MCP_PORT"
-export PUX_API_URL="http://$TS_IP:$API_PORT"
+export PUX_API_HOST="$BIND_HOST" PUX_API_PORT="$API_PORT"
+export PUX_MCP_HOST="$BIND_HOST" PUX_MCP_PORT="$MCP_PORT"
+export PUX_API_URL="http://127.0.0.1:$API_PORT"
 
 # --- load secrets (project .env) + the aegra env template into THIS process so
 #     the nohup'd children inherit them (aegra serve does not auto-load .env). ---
@@ -127,14 +130,14 @@ start_one() {
 # base install). ``uv run --extra prod`` installs it on first start AND re-installs
 # it if a bare ``uv sync`` pruned it — so prod self-heals without manual reinstall.
 start_one serve \
-  "cd '$PUX_DIR' && PUX_PROJECT_ROOT='$PROJECT_ROOT' AEGRA_CONFIG=aegra.json exec uv run --extra prod aegra serve --host '$TS_IP' --port '$API_PORT'" \
+  "cd '$PUX_DIR' && PUX_PROJECT_ROOT='$PROJECT_ROOT' AEGRA_CONFIG=aegra.json exec uv run --extra prod aegra serve --host '$BIND_HOST' --port '$API_PORT'" \
   "$PID_DIR/serve.pid" "$LOG_DIR/aegra-serve.log"
 
 # Wait for Aegra readiness via the custom_app EventBus endpoint (mounted via
 # http.app) — proves the AP runtime + pux surfaces are both live.
-echo "[pux-aegra] waiting for aegra /events/health on $TS_IP:$API_PORT ..."
+echo "[pux-aegra] waiting for aegra /events/health on $BIND_HOST:$API_PORT ..."
 for i in $(seq 1 90); do
-  if curl -fsS "http://$TS_IP:$API_PORT/events/health" 2>/dev/null | grep -q '"ok"'; then
+  if curl -fsS "http://$BIND_HOST:$API_PORT/events/health" 2>/dev/null | grep -q '"ok"'; then
     echo "[pux-aegra] aegra healthy after ${i}s"; break
   fi
   sleep 1
@@ -143,11 +146,11 @@ done
 
 # mcp (FastMCP SSE wrapper) — unchanged; proxies the Aegra AP backend.
 start_one mcp \
-  "cd '$PUX_DIR' && PUX_PROJECT_ROOT='$PROJECT_ROOT' PUX_MCP_HOST='$TS_IP' PUX_MCP_PORT='$MCP_PORT' PUX_API_URL='http://$TS_IP:$API_PORT' exec uv run python -m pux_harness mcp" \
+  "cd '$PUX_DIR' && PUX_PROJECT_ROOT='$PROJECT_ROOT' PUX_MCP_HOST='$BIND_HOST' PUX_MCP_PORT='$MCP_PORT' PUX_API_URL='http://127.0.0.1:$API_PORT' exec uv run python -m pux_harness mcp" \
   "$PID_DIR/mcp.pid" "$LOG_DIR/mcp.log"
 
 sleep 3
 echo "[pux-aegra] stack up:"
-echo "  aegra pid $(cat "$PID_DIR/serve.pid") → http://$TS_IP:$API_PORT  (log $LOG_DIR/aegra-serve.log)"
-echo "  mcp   pid $(cat "$PID_DIR/mcp.pid") → http://$TS_IP:$MCP_PORT  (log $LOG_DIR/mcp.log)"
+echo "  aegra pid $(cat "$PID_DIR/serve.pid") → http://$BIND_HOST:$API_PORT  (log $LOG_DIR/aegra-serve.log)"
+echo "  mcp   pid $(cat "$PID_DIR/mcp.pid") → http://$BIND_HOST:$MCP_PORT  (log $LOG_DIR/mcp.log)"
 echo "[pux-aegra] rollback is via git history (server.py deleted in phase D); see docs/AEGRA_PROD.md"
