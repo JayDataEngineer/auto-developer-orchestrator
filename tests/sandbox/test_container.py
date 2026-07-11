@@ -151,9 +151,6 @@ def test_build_env_no_policy_defaults():
     sb = C.SandboxContainer(org="", project_path="/proj")
     env = sb._build_env(None)
     assert env[0] == "SANDBOX_POLICY=developer"
-    assert any(x.startswith("NETWORK_ALLOW=") for x in env)
-    assert "FS_READONLY=/etc,/usr,/bin,/lib,/lib64" in env
-    assert "FS_READWRITE=/sandbox/workspace,/sandbox/tmp" in env
     assert "DOCKER_HOST=unix:///var/run/docker.sock" in env
     assert "HOST_GATEWAY=host.docker.internal" in env
     # serve-reach passthroughs so in-sandbox warmup/probes know where serve lives
@@ -164,14 +161,27 @@ def test_build_env_no_policy_defaults():
 def test_build_env_no_policy_has_no_creds():
     sb = C.SandboxContainer(org="", project_path="/proj")
     env = sb._build_env(None)
-    # No policy → only the 8 base vars (6 structural + PUX_API_HOST/PORT
-    # serve-reach passthroughs), no injected creds/cookies.
-    assert len(env) == 8
+    # No policy → only the 5 base vars (SANDBOX_POLICY, DOCKER_HOST,
+    # HOST_GATEWAY, PUX_API_HOST, PUX_API_PORT), no injected creds/cookies.
+    assert len(env) == 5
     # positively: no API key / cookie / token vars leak in without a policy
     assert not any(
         any(tok in x for tok in ("API_KEY", "TOKEN", "COOKIE", "SECRET", "PASSWORD"))
         for x in env
     )
+
+
+def test_build_env_dead_vars_absent():
+    """The legacy NETWORK_ALLOW / FS_READONLY / FS_READWRITE env vars were
+    removed — nothing in the image or harness reads them (grep-verified
+    against the live container 2026-07-11). Their presence misled operators
+    into thinking egress/filesystem protection was active when it wasn't."""
+    sb = C.SandboxContainer(org="", project_path="/proj")
+    env = sb._build_env(None)
+    for var in ("NETWORK_ALLOW", "FS_READONLY", "FS_READWRITE"):
+        assert not any(x.startswith(f"{var}=") for x in env), (
+            f"dead env var {var} leaked into container env"
+        )
 
 
 # --- prepare(universal_warmup=) — serve path spins up the event warmup for
@@ -510,3 +520,225 @@ def test_watch_url_returns_create_cache_without_docker():
     sb = C.SandboxContainer(org="", project_path="/proj")
     sb._watch_url = "http://127.0.0.1:9999/vnc.html"
     assert sb.watch_url == "http://127.0.0.1:9999/vnc.html"
+
+
+# --- security hardening (sandbox audit 2026-07-11) ---------------------------
+# Two gaps surfaced by the live-container audit are closed here:
+#   1. no-new-privileges is injected into every container's security_opt
+#   2. ensure() fail-closes when a reused container lacks NET_ADMIN but the
+#      policy declares an egress.allow block (deny-by-default can't install)
+# The dead NETWORK_ALLOW / FS_READONLY / FS_READWRITE env vars are also gone
+# (test_build_env_dead_vars_absent above) — they were vestigial from the Go
+# entrypoint and misled operators into thinking egress/filesystem protection
+# was active when nothing consumed them.
+
+
+def test_create_injects_no_new_privileges(monkeypatch):
+    """Every container gets security_opt=['no-new-privileges:true'] — blocks
+    setuid/setcap escalation from inside the container."""
+    monkeypatch.setattr(C.host_setup, "run_host_setup", lambda pol, root: {})
+    monkeypatch.setattr(C.policy, "validate_env", lambda pol, env=None: None)
+    monkeypatch.setattr(C.policy, "resolve_mounts", lambda pol: [])
+
+    captured: dict = {}
+
+    class _FakeContainers:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            raise _AbortBeforeDocker
+
+        def get(self, name):
+            raise C.NotFound("no")
+
+        def list(self, **kwargs):
+            return []
+
+    class _Client(_FakeClient):
+        def __init__(self):
+            super().__init__(_FakeImages(present=True))
+            self.containers = _FakeContainers()
+
+        def info(self):
+            return {}
+
+    sb = C.SandboxContainer(org="", project_path="/proj", client=_Client())
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (None, "isolated"))
+    monkeypatch.setattr(sb, "_remove_stale", lambda: None)
+    monkeypatch.setattr(sb, "_build_binds", lambda pol: [])
+    monkeypatch.setattr(C, "_is_runsc_available", lambda client: False)
+
+    with pytest.raises(_AbortBeforeDocker):
+        sb.create()
+
+    assert captured.get("security_opt") == ["no-new-privileges:true"]
+
+
+def test_create_no_new_privileges_with_egress_caps(monkeypatch, tmp_path):
+    """When egress.allow is declared, the container gets BOTH no-new-privileges
+    AND NET_ADMIN — they don't conflict."""
+    monkeypatch.setattr(C.host_setup, "run_host_setup", lambda pol, root: {})
+    monkeypatch.setattr(C.policy, "validate_env", lambda pol, env=None: None)
+    monkeypatch.setattr(C.policy, "resolve_mounts", lambda pol: [])
+    monkeypatch.setattr(
+        C.policy, "egress_rules",
+        lambda pol: "1.2.3.4 443\n",
+    )
+
+    captured: dict = {}
+
+    class _FakeContainers:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            raise _AbortBeforeDocker
+
+        def get(self, name):
+            raise C.NotFound("no")
+
+        def list(self, **kwargs):
+            return []
+
+    class _Client(_FakeClient):
+        def __init__(self):
+            super().__init__(_FakeImages(present=True))
+            self.containers = _FakeContainers()
+
+        def info(self):
+            return {}
+
+    pol = C.policy.Policy(
+        egress=C.policy.Egress(allow=[C.policy.Rule(host="example.com", port=443)]),
+    )
+    sb = C.SandboxContainer(org="x", project_path=str(tmp_path), client=_Client())
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (pol, "isolated"))
+    monkeypatch.setattr(sb, "_remove_stale", lambda: None)
+    monkeypatch.setattr(sb, "_build_binds", lambda pol: [])
+    monkeypatch.setattr(C, "_is_runsc_available", lambda client: False)
+
+    with pytest.raises(_AbortBeforeDocker):
+        sb.create()
+
+    assert captured.get("security_opt") == ["no-new-privileges:true"]
+    assert "NET_ADMIN" in captured.get("cap_add", [])
+    # egress.conf was actually staged to disk (real write, not just env var)
+    assert (tmp_path / ".pux" / "egress.conf").read_text().strip() == "1.2.3.4 443"
+
+
+# --- ensure() fail-closed egress validation ---------------------------------
+
+
+class _ReuseClient:
+    """Fake DockerClient for ensure() reuse tests. Returns a running container
+    with configurable HostConfig.CapAdd."""
+
+    def __init__(self, cap_add: list[str] | None):
+        self._cap_add = cap_add
+
+    @property
+    def containers(self):
+        return self
+
+    def list(self, *, filters=None, status=None, **kw):
+        return [_FakeReuseContainer(self._cap_add)]
+
+    def get(self, name):
+        return _FakeReuseContainer(self._cap_add)
+
+
+class _FakeReuseContainer:
+    """Minimal container stub for ensure() validation."""
+
+    def __init__(self, cap_add: list[str] | None):
+        self.name = "orchestrator-sandbox-test"
+        self.status = "running"
+        self.attrs = {"HostConfig": {"CapAdd": cap_add}}
+
+    def reload(self, *a, **kw):
+        pass
+
+
+def test_ensure_rejects_reuse_without_net_admin_when_egress_declared(monkeypatch):
+    """Fail-closed: a reused container lacking NET_ADMIN but whose org policy
+    declares egress.allow is REJECTED — the deny-by-default firewall can't be
+    installed without the cap, so reusing it means unrestricted egress."""
+    pol = C.policy.Policy(
+        egress=C.policy.Egress(allow=[C.policy.Rule(host="example.com", port=443)]),
+    )
+    sb = C.SandboxContainer(org="x", project_path="/proj",
+                            client=_ReuseClient(cap_add=None))
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (pol, "isolated"))
+    with pytest.raises(C.ContainerError, match="lacks NET_ADMIN"):
+        sb.ensure()
+
+
+def test_ensure_rejects_reuse_with_empty_capadd_when_egress_declared(monkeypatch):
+    """CapAdd=[] (not just None) also fails — the container was created without
+    the cap either way."""
+    pol = C.policy.Policy(
+        egress=C.policy.Egress(allow=[C.policy.Rule(host="example.com", port=443)]),
+    )
+    sb = C.SandboxContainer(org="x", project_path="/proj",
+                            client=_ReuseClient(cap_add=[]))
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (pol, "isolated"))
+    with pytest.raises(C.ContainerError, match="lacks NET_ADMIN"):
+        sb.ensure()
+
+
+def test_ensure_accepts_reuse_with_net_admin_when_egress_declared(monkeypatch):
+    """Container with NET_ADMIN + egress.allow → reuse is fine."""
+    pol = C.policy.Policy(
+        egress=C.policy.Egress(allow=[C.policy.Rule(host="example.com", port=443)]),
+    )
+    sb = C.SandboxContainer(org="x", project_path="/proj",
+                            client=_ReuseClient(cap_add=["NET_ADMIN"]))
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (pol, "isolated"))
+    name = sb.ensure()
+    assert name == "orchestrator-sandbox-test"
+
+
+def test_ensure_accepts_reuse_without_net_admin_when_no_egress(monkeypatch):
+    """No egress.allow block → no NET_ADMIN needed → reuse any container.
+    This is the default (egress is opt-in via policy.yaml)."""
+    sb = C.SandboxContainer(org="x", project_path="/proj",
+                            client=_ReuseClient(cap_add=None))
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (C.policy.Policy(), "isolated"))
+    name = sb.ensure()
+    assert name == "orchestrator-sandbox-test"
+
+
+def test_ensure_accepts_reuse_without_net_admin_when_bridged(monkeypatch):
+    """Bridged tier (host networking) skips iptables — NET_ADMIN is never
+    granted and never required, even with an egress.allow block."""
+    pol = C.policy.Policy(
+        egress=C.policy.Egress(allow=[C.policy.Rule(host="example.com", port=443)]),
+    )
+    sb = C.SandboxContainer(org="x", project_path="/proj",
+                            client=_ReuseClient(cap_add=None))
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (pol, "bridged"))
+    name = sb.ensure()
+    assert name == "orchestrator-sandbox-test"
+
+
+def test_ensure_accepts_reuse_without_net_admin_when_no_policy(monkeypatch):
+    """No policy at all → no egress → any container is fine."""
+    sb = C.SandboxContainer(org="", project_path="/proj",
+                            client=_ReuseClient(cap_add=None))
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (None, "isolated"))
+    name = sb.ensure()
+    assert name == "orchestrator-sandbox-test"
+
+
+def test_ensure_creates_when_no_running_container(monkeypatch):
+    """No running container → create() is called (not reuse). Proven by
+    create() aborting via _AbortBeforeDocker before returning a name."""
+
+    def _boom_create():
+        raise _AbortBeforeDocker
+
+    sb = C.SandboxContainer(org="", project_path="/proj",
+                            client=_ReuseClient(cap_add=None))
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (None, "isolated"))
+    monkeypatch.setattr(sb, "_running_for_project", lambda: None)
+    monkeypatch.setattr(sb, "create", _boom_create)
+
+    with pytest.raises(_AbortBeforeDocker):
+        sb.ensure()
