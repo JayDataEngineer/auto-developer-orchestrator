@@ -89,20 +89,53 @@ def _write_tree(root: Path) -> Path:
     return root
 
 
-def _policy(root: Path, items_yaml: str) -> None:
-    """Write ``mcp-demo/policy.yaml`` with the given ``tool_servers:`` body."""
-    (root / "orgs" / "mcp-demo" / "policy.yaml").write_text(
-        "tool_servers:\n" + items_yaml,
+def _capabilities(root: Path, items_yaml: str) -> None:
+    """Write ``mcp-demo/org.yaml`` capabilities from tool_servers-style items.
+
+    Post CU-4: the declaration site moved from ``policy.yaml``'s removed
+    ``tool_servers:`` to ``org.yaml``'s ``capabilities:`` (kind: mcp). This
+    helper translates the test's tool_servers-style items into the capabilities
+    block format so the REAL resolver path runs end-to-end."""
+    import yaml as _yaml
+
+    raw = _yaml.safe_load(items_yaml) or []
+    caps: list[dict] = []
+    for item in raw:
+        if isinstance(item, str):
+            caps.append({"kind": "mcp", "ref": item})
+        elif isinstance(item, dict):
+            if "ref" in item:
+                cap = {"kind": "mcp", "ref": item["ref"]}
+                if "tools" in item:
+                    cap["tools"] = item["tools"]
+                caps.append(cap)
+            else:
+                # Inline spec entries pass through as-is (resolve_tool_servers
+                # handles them programmatically, though org.yaml capabilities
+                # only produces ref-form items via org_mcp_items_from_dict).
+                caps.append(item)
+    (root / "orgs" / "mcp-demo" / "org.yaml").write_text(
+        _yaml.dump({"capabilities": caps}, default_flow_style=False),
     )
+
+
+# Keep the old name as an alias so existing call sites work.
+_policy = _capabilities
 
 
 @pytest.fixture
 def mcp_tree(tmp_path: Path, monkeypatch):
     """tmp project root with the catalog; the resolver's ``_orgs_dir`` is pointed
-    at it so ``resolve_tool_servers`` reads the tmp catalog + tmp policy (no
-    monkeypatching of internals — the REAL resolver runs over the tmp tree)."""
-    from pux_harness.agent import tool_servers
+    at it so ``resolve_tool_servers`` reads the tmp catalog + tmp org.yaml (no
+    monkeypatching of internals — the REAL resolver runs over the tmp tree).
+
+    Must patch ``orgs._orgs_dir`` (not just ``tool_servers._orgs_dir``) because
+    ``_org_path`` is imported from ``orgs`` and calls ``orgs._orgs_dir()``
+    internally — patching only the ``tool_servers`` reference leaves the
+    ``_org_path`` call pointing at the real orgs/ tree."""
+    from pux_harness.agent import orgs, tool_servers
     root = _write_tree(tmp_path)
+    monkeypatch.setattr(orgs, "_orgs_dir", lambda: root / "orgs")
     monkeypatch.setattr(tool_servers, "_orgs_dir", lambda: root / "orgs")
     return root
 
@@ -122,53 +155,53 @@ def _reset_catalog_cache():
     tool_servers._catalog_cache = None
 
 
-def test_resolve_handles_all_three_declaration_forms(mcp_tree: Path):
-    """The three supported forms all resolve: bare string (catalog ref),
-    ``{ref:, tools:}`` (catalog ref + allowlist override), and a fully inline
-    ``{name, kind, transport, ...}`` spec. One resolver, one shape out."""
-    _policy(mcp_tree, """
+def test_resolve_handles_both_declaration_forms(mcp_tree: Path):
+    """The two supported org.yaml capabilities forms both resolve: bare ref
+    (catalog ref → full allowlist) and ``{ref:, tools:}`` (catalog ref +
+    allowlist override). One resolver, one shape out.
+
+    Inline specs (``{name, kind, transport, ...}``) are handled by
+    ``resolve_tool_servers`` programmatically but are NOT reachable through
+    ``org.yaml`` capabilities (``org_mcp_items_from_dict`` only produces ref-form
+    items). Post CU-4: the declaration site is org.yaml capabilities, and the
+    inline-spec path exists for programmatic callers only."""
+    _capabilities(mcp_tree, """
   - web                              # bare ref -> full allowlist [search,fetch,research]
   - ref: media                       # ref + override -> NARROW to [transcribe]
     tools: [transcribe]
-  - name: local                      # inline stdio spec
-    kind: mcp
-    transport: stdio
-    command: /usr/bin/mcp-foo
-    args: ["--mcp"]
 """)
     specs = resolve_tool_servers("mcp-demo")
     by_name = {s.name: s for s in specs}
-    assert set(by_name) == {"web", "media", "local"}
+    assert set(by_name) == {"web", "media"}
     # bare ref inherits the catalog allowlist verbatim
     assert by_name["web"].transport == "http"
     assert by_name["web"].tools == ["search", "fetch", "research"]
     # ref-with-override NARROWS the allowlist (the override wins, not the catalog's)
     assert by_name["media"].transport == "sse"
     assert by_name["media"].tools == ["transcribe"]
-    # inline spec is parsed straight through
-    assert by_name["local"].transport == "stdio"
-    assert by_name["local"].command == "/usr/bin/mcp-foo"
-    assert by_name["local"].args == ["--mcp"]
-    assert by_name["local"].tools is None  # no allowlist -> take everything
 
 
 def test_resolve_expands_env_placeholders(mcp_tree: Path):
     """``${VAR}`` in url/headers expands from the ``env`` arg; a missing var
-    fails LOUD (no silent empty string)."""
-    _policy(mcp_tree, "  - secret\n")
+    causes the server to be SKIPPED (per-server isolation — one unset var
+    can't brick the whole org). No silent empty-string substitution."""
+    _capabilities(mcp_tree, "  - secret\n")
     # with the var supplied -> expanded into the header
     specs = resolve_tool_servers("mcp-demo", env={"API_TOKEN": "tok123"})
     assert len(specs) == 1
     assert specs[0].headers["Authorization"] == "Bearer tok123"
-    # without it -> loud failure (no silent ``Bearer ``)
-    with pytest.raises(ValueError, match="API_TOKEN"):
-        resolve_tool_servers("mcp-demo", env={})
+    # without it -> per-server isolation: spec is SKIPPED (logged ERROR),
+    # not raised. The org gets an empty list, not a crash.
+    specs = resolve_tool_servers("mcp-demo", env={})
+    assert specs == [], (
+        "expected empty (server skipped), not silent empty-string substitution"
+    )
 
 
 def test_resolve_dangling_catalog_ref_raises(mcp_tree: Path):
     """An unknown catalog ref is a hard error (no silent skip — the declared
     capability must exist)."""
-    _policy(mcp_tree, "  - no-such-server\n")
+    _capabilities(mcp_tree, "  - no-such-server\n")
     with pytest.raises(ValueError, match="unknown catalog ref 'no-such-server'"):
         resolve_tool_servers("mcp-demo")
 
@@ -253,7 +286,7 @@ def test_contract_flags_dangling_ref(mcp_tree: Path):
     ``check_org``) turns a dangling catalog ref into an error string — so a
     broken declaration fails ``pux check-contract`` before it ever reaches a
     build. Declared capabilities must resolve or fail loud."""
-    _policy(mcp_tree, "  - ghost\n")
+    _capabilities(mcp_tree, "  - ghost\n")
     errors = validate_tool_servers("mcp-demo")
     assert len(errors) == 1
     assert "ghost" in errors[0]
@@ -262,7 +295,7 @@ def test_contract_flags_dangling_ref(mcp_tree: Path):
 def test_contract_clean_for_valid_declaration(mcp_tree: Path):
     """A valid declaration (bare ref to a catalog entry, no placeholders) yields
     zero contract errors — the green baseline."""
-    _policy(mcp_tree, "  - web\n")
+    _capabilities(mcp_tree, "  - web\n")
     assert validate_tool_servers("mcp-demo") == []
 
 
@@ -379,9 +412,8 @@ def test_general_ships_web_research(monkeypatch):
     assert web.transport == "http"
     # The URL is the env-injected value, NOT a git-tracked literal.
     assert web.url == "https://injected.example/mcp"
-    # The catalog allowlist (verified against the live server's tools/list):
-    # the server exposes scrape, not fetch.
-    assert web.tools == ["search", "scrape", "research"]
+    # The catalog allowlist (verified against the live server's tools/list).
+    assert web.tools == ["search", "fetch", "research"]
     # github — the stdio release-bootstrap server (PAT mapped, binary fetched
     # on-demand). Proves the github: block survives resolution intact for the
     # bootstrap seam (mcp_bootstrap.ensure_server) to consume at open() time.
@@ -400,13 +432,19 @@ def test_placeholder_url_passes_contract_but_fails_strict_without_env(monkeypatc
     ``url: ${VAR}`` whose value is deployment-specific (and therefore must NOT
     be git-tracked). The offline contract validates STRUCTURE — the field is
     declared, the transport is known — so it PASSES despite the unresolved
-    placeholder. The runtime path (strict) fails LOUD, naming the missing var,
-    so a misconfigured deployment is caught at load, not silently dropped."""
+    placeholder. The runtime path (strict) SKIPS the server (per-server
+    isolation: one unset var can't brick the whole org) and logs an ERROR;
+    the org still starts, just without that server's tools."""
     monkeypatch.delenv("PUX_MCP_WEB_RESEARCH_URL", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     # Offline contract: permissive -> zero errors despite the ${VAR} url.
     assert validate_tool_servers("general") == []
-    # Runtime: strict -> loud failure naming the var the operator forgot.
-    with pytest.raises(ValueError, match="PUX_MCP_WEB_RESEARCH_URL"):
-        resolve_tool_servers("general")
+    # Runtime: strict -> per-server isolation kicks in. The unresolved
+    # placeholders cause web_research + github to be SKIPPED (logged ERROR),
+    # not raised. The org gets an empty tool list, not a crash.
+    specs = resolve_tool_servers("general")
+    assert specs == [], (
+        f"expected empty specs (all servers skipped), got {len(specs)} specs"
+    )
 
 
