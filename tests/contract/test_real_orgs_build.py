@@ -60,6 +60,10 @@ def stubbed_factory(monkeypatch):
     # is opt-in/gated, but stubbed for symmetry.
     monkeypatch.setattr(stack, "ModelRetryMiddleware", lambda **kw: "RETRY")
     monkeypatch.setattr(stack, "ToolRetryMiddleware", lambda **kw: "TOOLRETRY")
+    # prompt_capture is default-on for every supervisor — stub it so the
+    # build emits a stable marker instead of a real PromptCaptureMiddleware
+    # (distinct object per build would break the idempotency check).
+    monkeypatch.setattr(stack, "PromptCaptureMiddleware", lambda **kw: "PROMPT")
     # ``interpreter`` (CodeInterpreterMiddleware) auto-mounts for every shipped
     # org — all resolve a strength:pro base model (driver_strong_orchestrator
     # keys on the REAL resolve_model_id, not this stubbed get_model, so the
@@ -179,18 +183,18 @@ def test_every_real_org_roster_agents_resolve_with_real_tools(org, stubbed_facto
                 f"{org}/{sub['name']}: phantom tool {t.name!r}")
 
 
-# --- GP ownership against the real dev-bot ----------------------------------
+# --- GP ownership against the real coder ----------------------------------
 
 
-def test_dev_bot_neutered_general_purpose_real(stubbed_factory):
-    """dev-bot's REAL profile.yaml declares ``general_purpose_subagent.enabled:
+def test_coder_neutered_general_purpose_real(stubbed_factory):
+    """coder's REAL profile.yaml declares ``general_purpose_subagent.enabled:
     false``. The factory emits a NEUTERED ``general-purpose`` slot (present so
     deepagents skips the heavy auto-add, but DEAD — empty tools). This is the
     fix proven against the real org, not a synthetic tree."""
-    plan = _build_real_org("dev-bot", stubbed_factory)
+    plan = _build_real_org("coder", stubbed_factory)
     gp = next((s for s in plan.subagents if s["name"] == "general-purpose"), None)
-    assert gp is not None, "dev-bot: no general-purpose slot (deepagents would auto-add)"
-    assert gp["tools"] == [], "dev-bot: GP slot not neutered (has tools)"
+    assert gp is not None, "coder: no general-purpose slot (deepagents would auto-add)"
+    assert gp["tools"] == [], "coder: GP slot not neutered (has tools)"
     assert "disabled" in gp["description"].lower()
 
 
@@ -226,8 +230,8 @@ def test_all_real_orgs_build_in_one_session(stubbed_factory):
     # org is genuinely CTO-only (general has no specialists).
     for org, roster in rosters.items():
         assert isinstance(roster, list)
-    # dev-bot + _demo + the specialist orgs carry rosters; general may be empty.
-    assert rosters["dev-bot"]  # dev-bot always has its roster
+    # coder + _demo + the specialist orgs carry rosters; general may be empty.
+    assert rosters["coder"]  # coder always has its roster
 
 
 # --- the universal system shapes every org from the same factory ------------
@@ -243,7 +247,7 @@ def test_every_real_org_emits_only_registry_middleware(stubbed_factory):
     env-off). If a future change hand-appends a middleware in ``build_stack``
     outside ``_resolve_toggles`` (the drift the audit removed), this fires —
     there is exactly ONE stack path."""
-    allowed = {"ROUTE", "GUIDE", "AUDIT", "RUBRIC", "RETRY", "INTERP"}
+    allowed = {"ROUTE", "GUIDE", "AUDIT", "RUBRIC", "RETRY", "INTERP", "PROMPT"}
     for org in REAL_ORGS:
         plan = _build_real_org(org, stubbed_factory)
         emitted = {str(m) for m in plan.supervisor_middleware}
