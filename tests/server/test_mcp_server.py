@@ -1,82 +1,117 @@
-"""Tests for the Pux MCP server (`pux_harness.mcp_server`).
+"""Tests for the Pux MCP server (``pux_harness.mcp_server``).
 
-Drives the real FastMCP tool dispatch via the in-memory `Client(mcp)`, with the
-HTTP backend faked by an `httpx.MockTransport` injected into `mcp_server._client`.
-This proves tool → Agent-Protocol-REST translation (method/path/body) and that
-every tool's return text carries the right fields — without a live Agent Protocol
-server (prod: `aegra serve`; dev: `langgraph dev` / `aegra dev`).
+The MCP server delegates to per-org ACP subprocesses (one ``pux`` process per
+org, managed by ``OrgConnection``). These tests mock the pool layer
+(``_get_org`` / ``_find_org_for_session``) so no real subprocess is spawned,
+and drive the REAL FastMCP tool dispatch via the in-memory ``Client(MCP)``.
+
+This proves each tool's input → OrgConnection method mapping + return text
+shaping — the translation layer between the MCP tool call and the ACP
+subagent lifecycle.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
-import httpx
 import pytest
 from fastmcp import Client
 
 from pux_harness import mcp_server
 
 
-# --- mock Agent Protocol backend ---------------------------------------------
+# ---------------------------------------------------------------------------
+# Mock OrgConnection — records calls, returns canned responses
+# ---------------------------------------------------------------------------
 
-class MockAPI:
-    """Records every request; returns canned responses keyed by (method, path)."""
+class MockOrgConnection:
+    """Stand-in for OrgConnection that records every call and returns
+    deterministic responses. No subprocess, no network."""
 
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str, Any]] = []
-        self.routes: dict[tuple[str, str], tuple[int, Any]] = {}
+    def __init__(self, org: str = "general") -> None:
+        self.org = org
+        self.alive = True
+        self.calls: list[tuple] = []
+        self._next_session_id = "sess-abc123"
+        self._prompt_result: tuple[str, str, str] = (
+            "hello from agent", "thinking...", "end_turn",
+        )
+        self._sessions: list[dict] = []
+        self._load_result = True
 
-    def route(self, method: str, path: str, *, status: int = 200, payload: Any = None) -> None:
-        self.routes[(method, path)] = (status, payload)
+    async def new_session(self, model: str | None = None,
+                           cwd: str | None = None) -> str:
+        self.calls.append(("new_session", model, cwd))
+        return self._next_session_id
 
-    def find(self, method: str, path: str) -> Any:
-        """Return the parsed JSON body of the first matching request, or None."""
-        for m, p, body in self.calls:
-            if m == method and p == path:
-                return body
-        return None
+    async def prompt(self, session_id: str,
+                     message: str) -> tuple[str, str, str]:
+        self.calls.append(("prompt", session_id, message))
+        return self._prompt_result
 
-    def handler(self, request: httpx.Request) -> httpx.Response:
-        body: Any = None
-        if request.content:
-            try:
-                body = json.loads(request.content)
-            except Exception:  # noqa: BLE001
-                body = None
-        self.calls.append((request.method, request.url.path, body))
-        key = (request.method, request.url.path)
-        if key in self.routes:
-            status, payload = self.routes[key]
-            if status >= 400:
-                return httpx.Response(status, json={"detail": payload})
-            return httpx.Response(status, json=payload)
-        return httpx.Response(404, json={"detail": f"unmocked {request.method} {request.url.path}"})
+    async def list_sessions_raw(self) -> list[dict]:
+        self.calls.append(("list_sessions_raw",))
+        return self._sessions
+
+    async def cancel(self, session_id: str) -> None:
+        self.calls.append(("cancel", session_id))
+
+    async def load(self, session_id: str) -> bool:
+        self.calls.append(("load", session_id))
+        return self._load_result
+
+    async def set_model_raw(self, session_id: str, model: str) -> None:
+        self.calls.append(("set_model_raw", session_id, model))
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mock_conn():
+    """A fresh MockOrgConnection per test (no cross-test state)."""
+    return MockOrgConnection()
 
 
 @pytest.fixture
-def api(monkeypatch):
-    api = MockAPI()
-    client = httpx.AsyncClient(transport=httpx.MockTransport(api.handler), base_url="http://test")
-    monkeypatch.setattr(mcp_server, "_client", client)
-    yield api
+def mock_pool(monkeypatch, mock_conn):
+    """Patch the pool layer so no real subprocess is spawned.
+
+    ``_get_org`` is async; ``_find_org_for_session`` is sync. Both are
+    patched to return the same MockOrgConnection. Also clears the
+    module-level ``_session_org`` / ``_pool`` dicts so tests are hermetic."""
+    async def _mock_get_org(org: str) -> MockOrgConnection:
+        mock_conn.org = org
+        return mock_conn
+
+    monkeypatch.setattr(mcp_server, "_get_org", _mock_get_org)
+    monkeypatch.setattr(
+        mcp_server, "_find_org_for_session",
+        lambda sid: mock_conn,
+    )
+    mcp_server._session_org.clear()
+    mcp_server._pool.clear()
+    yield mock_conn
+    mcp_server._session_org.clear()
+    mcp_server._pool.clear()
 
 
 @pytest.fixture
-def down_api(monkeypatch):
-    """A backend that refuses every connection — simulates the Agent Protocol
-    server being down (no `aegra serve` / `langgraph dev` running)."""
-    def raise_handler(_request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("[Errno 111] Connection refused")
-    client = httpx.AsyncClient(transport=httpx.MockTransport(raise_handler), base_url="http://test")
-    monkeypatch.setattr(mcp_server, "_client", client)
+def no_connection(monkeypatch):
+    """Patch _find_org_for_session to return None — simulates no active
+    connection for a session_id (e.g. server restarted, session expired)."""
+    monkeypatch.setattr(
+        mcp_server, "_find_org_for_session", lambda sid: None,
+    )
 
 
-# --- helpers -----------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 async def _call(name: str, **args: Any):
-    async with Client(mcp_server.mcp) as c:
+    async with Client(mcp_server.MCP) as c:
         return await c.call_tool(name, args)
 
 
@@ -84,291 +119,165 @@ def run(coro):
     return asyncio.run(coro)
 
 
-# --- discovery ---------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# new_session
+# ---------------------------------------------------------------------------
 
-def test_health_ok(api):
-    api.route("GET", "/events/health", payload={"ok": True})
-    api.route("POST", "/assistants/search",
-              payload=[{"graph_id": "general"}, {"graph_id": "invest"}])
-    r = run(_call("health"))
+def test_new_session_happy_path(mock_pool):
+    r = run(_call("new_session", org="general"))
     assert r.is_error is False
-    assert r.data == "ok — backend up; 2 org(s): general, invest"
+    assert "sess-abc123" in r.content[0].text
+    assert "general" in r.content[0].text
+    # The OrgConnection.new_session was called
+    assert mock_pool.calls[0][0] == "new_session"
 
 
-def test_health_backend_down(down_api):
-    r = run(_call("health"))
-    # Returned as in-band text (not a raised error), so is_error stays False.
+def test_new_session_with_model_and_cwd(mock_pool):
+    r = run(_call("new_session", org="general", model="glm-5.2",
+                  cwd="/some/path"))
     assert r.is_error is False
-    assert r.data.startswith("ERROR:")
-    assert "Agent Protocol server" in r.data  # was "pux serve" (retired in phase D)
+    assert "model: glm-5.2" in r.content[0].text
+    assert "cwd: /some/path" in r.content[0].text
+    method, model, cwd = mock_pool.calls[0]
+    assert model == "glm-5.2"
+    assert cwd == "/some/path"
 
 
-def test_list_orgs_enriched(api):
-    api.route(
-        "POST", "/agents/search",
-        payload=[  # real /agents/search returns a BARE list, not {"agents":[...]}
-            {"agent_id": "invest", "name": "invest",
-             "description": "Pux org 'invest'; specialists: analyst, trader",
-             "metadata": {"specialists": ["analyst", "trainer"]}},
-            {"agent_id": "general", "name": "general",
-             "description": "Pux org 'general'; specialists: (none)",
-             "metadata": {"specialists": []}},
-        ],
-    )
-    r = run(_call("list_orgs"))
-    assert "**invest**" in r.data
-    assert "analyst" in r.data
-    assert "(no subagents)" in r.data  # general's empty specialist list
-    # correct REST body
-    assert api.find("POST", "/agents/search") == {"metadata": {}, "page": 1}
+def test_new_session_unknown_org(mock_pool):
+    r = run(_call("new_session", org="no-such-org"))
+    assert "Error" in r.content[0].text
+    assert "unknown org" in r.content[0].text
 
 
-def test_get_org(api):
-    api.route(
-        "GET", "/agents/invest",
-        payload={"agent_id": "invest", "name": "invest",
-                 "description": "Pux org 'invest'; specialists: analyst, trader",
-                 "metadata": {"specialists": ["analyst", "trader"]}},
-    )
-    r = run(_call("get_org", org="invest"))
-    assert "invest" in r.data
-    assert "analyst, trader" in r.data
+def test_new_session_registers_session_org(mock_pool):
+    run(_call("new_session", org="general"))
+    assert "sess-abc123" in mcp_server._session_org
+    assert mcp_server._session_org["sess-abc123"] == "general"
 
 
-# --- execution: blocking -----------------------------------------------------
+# ---------------------------------------------------------------------------
+# prompt
+# ---------------------------------------------------------------------------
 
-def test_run_agent_happy_path(api):
-    # real /runs/wait returns a run-meta dict (status/output/error), not {messages:[...]}
-    api.route(
-        "POST", "/runs/wait",
-        payload={"thread_id": "T", "agent_id": "invest",
-                 "status": "success", "output": "the answer is 42"},
-    )
-    r = run(_call("run_agent", task="what is the answer", org="invest"))
-    assert r.data == "the answer is 42"  # bare answer text, not a JSON status blob
-    body = api.find("POST", "/runs/wait")
-    assert body["agent_id"] == "invest"
-    assert body["input"] == "what is the answer"
-    assert body["recursion_limit"] == 60
-    assert "thread_id" not in body  # not added when omitted
+def test_prompt_happy_path(mock_pool):
+    # Register the session first so _find_org_for_session can find it.
+    mcp_server._session_org["sess-1"] = "general"
+    r = run(_call("prompt", session_id="sess-1", message="hello"))
+    assert r.is_error is False
+    assert "hello from agent" in r.content[0].text
+    assert "end_turn" in r.content[0].text
+    method, sid, msg = mock_pool.calls[0]
+    assert sid == "sess-1"
+    assert msg == "hello"
 
 
-def test_run_agent_carries_thread_and_recursion(api):
-    api.route("POST", "/runs/wait",
-              payload={"thread_id": "T1", "agent_id": "general",
-                       "status": "success", "output": "ok"})
-    run(_call("run_agent", task="more", org="general", thread_id="T1", recursion_limit=25))
-    body = api.find("POST", "/runs/wait")
-    assert body["thread_id"] == "T1"
-    assert body["recursion_limit"] == 25
+def test_prompt_no_connection(no_connection):
+    r = run(_call("prompt", session_id="orphan", message="hi"))
+    assert "Error" in r.content[0].text
+    assert "no active connection" in r.content[0].text
 
 
-def test_run_agent_error_status_surfaces_ERROR(api):
-    # /runs/wait catches model failures into status=error
-    api.route("POST", "/runs/wait",
-              payload={"thread_id": "T", "agent_id": "general",
-                       "status": "error", "output": "", "error": "model 401"})
-    r = run(_call("run_agent", task="x", org="general"))
-    assert r.data.startswith("ERROR:")
-    assert "model 401" in r.data
+def test_prompt_cancelled_stop_reason(mock_pool):
+    mock_pool._prompt_result = ("partial", "", "cancelled")
+    mcp_server._session_org["sess-1"] = "general"
+    r = run(_call("prompt", session_id="sess-1", message="go"))
+    assert "cancelled" in r.content[0].text
+    assert "Task cancelled" in r.content[0].text
 
 
-def test_run_agent_unknown_org_error_text(api):
-    api.route("POST", "/runs/wait", status=404, payload="unknown agent 'foo'")
-    r = run(_call("run_agent", task="x", org="foo"))
-    assert r.data.startswith("ERROR:")
-    assert "unknown agent" in r.data
+def test_prompt_no_response_text(mock_pool):
+    mock_pool._prompt_result = ("", "", "end_turn")
+    mcp_server._session_org["sess-1"] = "general"
+    r = run(_call("prompt", session_id="sess-1", message="go"))
+    assert "(no response)" in r.content[0].text
 
 
-# --- execution: async lifecycle ----------------------------------------------
+# ---------------------------------------------------------------------------
+# list_sessions
+# ---------------------------------------------------------------------------
 
-def test_start_run_body_and_pending(api):
-    api.route(
-        "POST", "/threads/T1/runs",
-        payload={"run_id": "R1", "thread_id": "T1", "agent_id": "general",
-                 "status": "pending", "started_at": "2026-07-05T00:00:00Z",
-                 "output": "", "error": None},
-    )
-    r = run(_call("start_run", thread_id="T1", task="do a long thing"))
-    assert "R1" in r.data and "pending" in r.data
-    body = api.find("POST", "/threads/T1/runs")
-    assert body == {"input": "do a long thing", "recursion_limit": 60}
+def test_list_sessions_empty_pool(mock_pool):
+    r = run(_call("list_sessions"))
+    assert "No subagent sessions" in r.content[0].text
 
 
-def test_wait_for_run_surfaces_output_error_warnings(api):
-    api.route(
-        "GET", "/runs/R1/wait",
-        payload={"run_id": "R1", "status": "success", "output": "done",
-                 "error": None, "warnings": ["job fetch: failed"]},
-    )
-    r = run(_call("wait_for_run", run_id="R1"))
-    assert "R1" in r.data
-    assert "success" in r.data
-    assert "output: done" in r.data
-    assert "warnings:" in r.data and "job fetch: failed" in r.data  # not swallowed
+def test_list_sessions_with_data(mock_pool):
+    mock_pool._sessions = [
+        {"session_id": "s1", "org": "general", "title": "test",
+         "updated_at": "2026-07-11T12:00:00Z"},
+    ]
+    # list_sessions iterates _pool; inject a fake entry.
+    mcp_server._pool["general"] = mock_pool
+    r = run(_call("list_sessions"))
+    assert "1 session" in r.content[0].text
+    assert "s1" in r.content[0].text
+    assert "general" in r.content[0].text
 
 
-def test_wait_for_run_error_status(api):
-    api.route(
-        "GET", "/runs/R2/wait",
-        payload={"run_id": "R2", "status": "error", "output": "", "error": "boom"},
-    )
-    r = run(_call("wait_for_run", run_id="R2"))
-    assert "error" in r.data and "boom" in r.data
+def test_list_sessions_org_filter(mock_pool):
+    mock_pool._sessions = [
+        {"session_id": "s1", "org": "general", "title": None,
+         "updated_at": None},
+    ]
+    mcp_server._pool["general"] = mock_pool
+    r = run(_call("list_sessions", org="general"))
+    assert "s1" in r.content[0].text
+    # Filtering by a different org returns empty.
+    r2 = run(_call("list_sessions", org="invest"))
+    assert "No active" in r2.content[0].text
 
 
-def test_list_runs_non_blocking(api):
-    api.route(
-        "GET", "/threads/T1/runs",
-        payload=[
-            {"run_id": "R1", "status": "success", "output": "a", "error": None},
-            {"run_id": "R2", "status": "running", "output": "", "error": None},
-        ],
-    )
-    r = run(_call("list_runs", thread_id="T1"))
-    assert "R1" in r.data and "R2" in r.data
-    assert "success" in r.data and "running" in r.data
+# ---------------------------------------------------------------------------
+# load_session
+# ---------------------------------------------------------------------------
+
+def test_load_session_found(mock_pool):
+    r = run(_call("load_session", session_id="old-sess", org="general"))
+    assert "resumed" in r.content[0].text
+    assert "old-sess" in r.content[0].text
+    method, sid = mock_pool.calls[0]
+    assert sid == "old-sess"
 
 
-def test_cancel_run(api):
-    api.route(
-        "POST", "/runs/R1/cancel",
-        payload={"run_id": "R1", "status": "cancelled", "output": "", "error": None},
-    )
-    r = run(_call("cancel_run", run_id="R1"))
-    assert "R1" in r.data and "cancelled" in r.data
+def test_load_session_not_found(mock_pool):
+    mock_pool._load_result = False
+    r = run(_call("load_session", session_id="ghost", org="general"))
+    assert "not found" in r.content[0].text
 
 
-async def _compose(api):
-    async with Client(mcp_server.mcp) as c:
-        api.route("POST", "/threads", payload={"thread_id": "T9", "agent_id": "general", "metadata": {}})
-        t = await c.call_tool("create_thread", {"org": "general"})
-        api.route("POST", "/threads/T9/runs",
-                  payload={"run_id": "R9", "thread_id": "T9", "status": "pending",
-                           "output": "", "error": None})
-        s = await c.call_tool("start_run", {"thread_id": "T9", "task": "go"})
-        api.route("GET", "/threads/T9/runs",
-                  payload=[{"run_id": "R9", "status": "success", "output": "done", "error": None}])
-        lst = await c.call_tool("list_runs", {"thread_id": "T9"})
-        return t, s, lst
+# ---------------------------------------------------------------------------
+# cancel_session
+# ---------------------------------------------------------------------------
+
+def test_cancel_session_happy_path(mock_pool):
+    mcp_server._session_org["sess-1"] = "general"
+    r = run(_call("cancel_session", session_id="sess-1"))
+    assert "Cancelled" in r.content[0].text
+    assert "sess-1" in r.content[0].text
+    method, sid = mock_pool.calls[0]
+    assert sid == "sess-1"
 
 
-def test_create_thread_start_run_list_runs_composition(api):
-    t, s, lst = run(_compose(api))
-    assert t.data == "T9"
-    assert "R9" in s.data and "pending" in s.data
-    assert "success" in lst.data and "done" in lst.data
-    # bodies prove the wiring
-    assert api.find("POST", "/threads") == {"agent_id": "general", "metadata": {}}
-    assert api.find("POST", "/threads/T9/runs") == {"input": "go", "recursion_limit": 60}
+def test_cancel_session_no_connection(no_connection):
+    r = run(_call("cancel_session", session_id="orphan"))
+    assert "Error" in r.content[0].text
+    assert "no active connection" in r.content[0].text
 
 
-# --- threads (read) ----------------------------------------------------------
+# ---------------------------------------------------------------------------
+# set_model
+# ---------------------------------------------------------------------------
 
-def test_get_thread_renders_messages(api):
-    api.route(
-        "GET", "/threads/T1",
-        payload={"values": {"messages": [
-            {"role": "user", "content": "hi"},
-            {"role": "assistant", "content": [{"type": "text", "text": "hello there"}]},
-        ]}},
-    )
-    r = run(_call("get_thread", thread_id="T1"))
-    assert "**user**: hi" in r.data
-    assert "**assistant**: hello there" in r.data  # multimodal block flattened
+def test_set_model_happy_path(mock_pool):
+    mcp_server._session_org["sess-1"] = "general"
+    r = run(_call("set_model", session_id="sess-1", model="glm-5.2"))
+    assert "Model set to" in r.content[0].text
+    assert "glm-5.2" in r.content[0].text
+    method, sid, model = mock_pool.calls[0]
+    assert model == "glm-5.2"
 
 
-def test_get_thread_empty(api):
-    api.route("GET", "/threads/T1", payload={"values": {}})
-    r = run(_call("get_thread", thread_id="T1"))
-    assert r.data == "Thread is empty."
-
-
-def test_list_threads(api):
-    api.route(
-        "POST", "/threads/search",
-        payload=[  # real /threads/search returns a BARE list, not {"threads":[...]}
-            {"thread_id": "T1", "agent_id": "invest", "metadata": {}, "created_at": "2026-07-05T01:02:03Z"},
-        ],
-    )
-    r = run(_call("list_threads"))
-    assert "T1" in r.data and "invest" in r.data
-    # agent_id is read from the top level, not metadata
-    assert "2026-07-05T01:02:03" in r.data
-
-
-def test_delete_thread(api):
-    api.route("DELETE", "/threads/T1", payload={})
-    r = run(_call("delete_thread", thread_id="T1"))
-    assert "T1" in r.data and "deleted" in r.data
-    assert any(m == "DELETE" and p == "/threads/T1" for m, p, _ in api.calls)
-
-
-# --- jobs --------------------------------------------------------------------
-
-def test_run_jobs(api):
-    api.route(
-        "POST", "/jobs/invest/run",
-        payload={"org": "invest", "jobs": [
-            {"name": "fetch", "status": "ok", "error": None, "duration": 1.2},
-            {"name": "embed", "status": "error", "error": "oom", "duration": 0.5},
-        ]},
-    )
-    r = run(_call("run_jobs", org="invest"))
-    assert "fetch: ok" in r.data and "[1.2s]" in r.data
-    assert "embed: error (oom)" in r.data
-    assert api.find("POST", "/jobs/invest/run") == {}
-
-
-def test_run_jobs_single_job_filter(api):
-    api.route("POST", "/jobs/invest/run",
-              payload={"org": "invest", "jobs": [{"name": "fetch", "status": "ok", "error": None, "duration": 1.0}]})
-    run(_call("run_jobs", org="invest", job="fetch"))
-    assert api.find("POST", "/jobs/invest/run") == {"job": "fetch"}
-
-
-def test_get_jobs_declared(api):
-    api.route(
-        "GET", "/jobs/invest/status",
-        payload={"org": "invest", "jobs": [
-            {"name": "fetch", "script": "fetch.py", "args": [], "timeout": 120, "description": "pull corpus"},
-        ]},
-    )
-    r = run(_call("get_jobs", org="invest"))
-    assert "fetch" in r.data and "pull corpus" in r.data
-
-
-def test_get_jobs_no_policy(api):
-    api.route("GET", "/jobs/general/status", payload={"org": "general", "jobs": [], "message": "no policy.yaml"})
-    r = run(_call("get_jobs", org="general"))
-    assert "no policy.yaml" in r.data
-
-
-# --- transport: singleton reuse + connect error ------------------------------
-
-async def _two_calls():
-    async with Client(mcp_server.mcp) as c:
-        a = await c.call_tool("health", {})
-        b = await c.call_tool("health", {})
-        return a, b
-
-
-def test_singleton_client_reused(api):
-    api.route("GET", "/events/health", payload={"ok": True})
-    api.route("POST", "/assistants/search", payload=[{"graph_id": "general"}])
-    client_before = mcp_server._get_client()
-    a, b = run(_two_calls())
-    # Same AsyncClient instance served both calls — no per-call client churn.
-    assert mcp_server._get_client() is client_before
-    assert a.data == b.data == "ok — backend up; 1 org(s): general"
-    # 2 tool calls, each doing GET /events/health + POST /assistants/search = 2 of
-    # EACH (4 requests total), all over the SAME client — proves reuse, no churn.
-    assert len([c for c in api.calls if c[0] == "GET" and c[1] == "/events/health"]) == 2
-    assert len([c for c in api.calls if c[0] == "POST" and c[1] == "/assistants/search"]) == 2
-
-
-def test_unknown_run_id_404_error_text(api):
-    api.route("GET", "/runs/missing/wait", status=404, payload="unknown run 'missing'")
-    r = run(_call("wait_for_run", run_id="missing"))
-    assert r.data.startswith("ERROR:")
-    assert "unknown run" in r.data
+def test_set_model_no_connection(no_connection):
+    r = run(_call("set_model", session_id="orphan", model="x"))
+    assert "Error" in r.content[0].text
+    assert "no active connection" in r.content[0].text
