@@ -130,6 +130,12 @@ def stub_factory(monkeypatch):
     monkeypatch.setattr(stack, "get_model", lambda *a, **k: "MODEL")
     monkeypatch.setattr(stack, "build_grader_tools",
                         lambda *a, **k: ["g1", "g2", "g3"])
+    # driver_strong_orchestrator gates the CodeInterpreterMiddleware mount.
+    # Without stubbing, it resolves the real default model (pro strength) and
+    # a real CodeInterpreterMiddleware object mounts — the baseline tests
+    # expect marker strings only, so force it False here. Tests that NEED the
+    # interpreter can override this stub locally.
+    monkeypatch.setattr(stack, "driver_strong_orchestrator", lambda **kw: False)
     # load_subagents → _build_sub → get_model(role="worker") resolves via the
     # ``orgs`` module's own import; stub it so no real model init happens.
     monkeypatch.setattr(orgs, "get_model", lambda *a, **k: "WORKER_MODEL")
@@ -159,11 +165,14 @@ def test_registry_lists_documented_names():
     """The registry is the single vocabulary; ``middleware_names`` is the
     contract/test surface that reads it. ``context`` +
     ``browser_vision`` were folded in as first-class (default-on, removable) specs;
-    added the opt-in ``audit`` spec (default OFF)."""
+    added the opt-in ``audit`` spec (default OFF). ``prepare`` / ``interpreter``
+    / ``web-router`` were appended later (non-wrap or opt-in, last position to
+    avoid shifting existing mounts)."""
     names = stack.middleware_names()
     assert set(names) == {"audit", "context", "routing", "session_guide",
                           "prompt_capture", "rubric", "model_retry",
-                          "tool_retry", "browser_vision"}
+                          "tool_retry", "browser_vision", "prepare",
+                          "interpreter", "web-router"}
     # No duplicate registrations.
     assert len(names) == len(set(names))
 
@@ -171,11 +180,12 @@ def test_registry_lists_documented_names():
 def test_defaults_match_pre_factory_baseline():
     """The defaults ARE the mount order, now expressed through the
     registry: context + routing + session_guide + prompt_capture +
-    browser_vision on the supervisor, context + browser_vision on subagents.
-    (``rubric`` is gate-driven, not a default.)"""
+    model_retry + browser_vision + prepare on the supervisor, context +
+    browser_vision on subagents. (``rubric`` / ``tool_retry`` / ``interpreter``
+    / ``web-router`` / ``audit`` are gate/opt-in driven, not defaults.)"""
     assert stack.DEFAULT_SUPERVISOR == ["context", "routing", "session_guide",
                                         "prompt_capture", "model_retry",
-                                        "browser_vision"]
+                                        "browser_vision", "prepare"]
     assert stack.DEFAULT_SUBAGENT == ["context", "browser_vision"]
 
 
@@ -659,7 +669,7 @@ def test_context_mounts_outermost_and_emits_tools(fake_tree, stub_factory, monke
     halves of the coupled pair are observable."""
     ctx_tool = _mk_tool("ctx_recall")
     monkeypatch.setattr(stack, "build_context_layer",
-                        lambda: (["CONTEXT"], [ctx_tool]))
+                        lambda **kw: (["CONTEXT"], [ctx_tool]))
     plan = stack.build_stack(
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
@@ -711,16 +721,16 @@ def test_full_supervisor_order_is_canonical_registry_order(fake_tree, stub_facto
     append-last behavior, now registry-driven rather than special-cased)."""
     from pux_harness.context.browser_vision import BrowserVisionMiddleware
     monkeypatch.setattr(stack, "build_context_layer",
-                        lambda: (["CONTEXT"], []))
+                        lambda **kw: (["CONTEXT"], []))
     monkeypatch.setenv("PUX_BROWSER_VISION", "1")
     plan = stack.build_stack(
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=_gate(), exec_client="EXEC",
     )
     mw = plan.supervisor_middleware
-    assert mw[:4] == ["CONTEXT", "ROUTE", "GUIDE", "PROMPT", "RUBRIC"]
+    assert mw[:5] == ["CONTEXT", "ROUTE", "GUIDE", "PROMPT", "RUBRIC"]
     assert isinstance(mw[-1], BrowserVisionMiddleware)
-    assert len(mw) == 6  # context, routing, session_guide, rubric, model_retry, browser_vision
+    assert len(mw) == 7  # context, routing, session_guide, prompt_capture, rubric, model_retry, browser_vision
 
 
 # --- ask_user HITL construction gate (opt-in AND not mcp/autonomous) --------
