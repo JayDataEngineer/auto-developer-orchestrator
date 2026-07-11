@@ -26,7 +26,6 @@ import json
 from pathlib import Path
 
 import pytest
-from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 
 from pux_harness.agent import orgs
@@ -142,12 +141,13 @@ def test_model_resolved_via_get_model(fake_tree):
     _org_yaml("o", ["m"], root)
 
     sub = orgs.load_subagents("o", _specialists(), **_ctx())[0]
-    # glm-5.2 is bound to the zai-anthropic profile (kind: anthropic) in
-    # models.yaml -> our router returns ChatAnthropic for it, NOT ChatOpenAI.
+    # glm-5.2 is bound to the zai-coding provider (kind: openai) in
+    # models.yaml -> our router returns a ChatOpenAI subclass for it. Pro
+    # reasoning models wrap as ReasoningChatOpenAI (a ChatOpenAI subclass).
     # The point proven here is the bare shorthand still resolves through
     # get_model to a real chat model (not a provider:string), and the right id.
-    assert isinstance(sub["model"], ChatAnthropic)
-    assert sub["model"].model == "glm-5.2"
+    assert isinstance(sub["model"], ChatOpenAI)
+    assert sub["model"].model_name == "glm-5.2"
 
 
 def test_model_omitted_uses_worker_role(fake_tree):
@@ -368,7 +368,8 @@ def test_extends_inherits_base_tools_and_body(fake_tree):
     # whitelist), plus the ctx retrieval pair appended by the context layer.
     assert {t.name for t in sub["tools"]} == {
         "pux_sandbox_python", "pux_sandbox_browser_navigate",
-        "ctx_recall", "ctx_search",
+        "ctx_recall", "ctx_search", "ctx_index",
+        "ctx_stats", "ctx_doctor", "ctx_purge",
     }
 
 

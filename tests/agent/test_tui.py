@@ -68,9 +68,9 @@ def test_resolve_org_general_under_root() -> None:
 
 
 def test_resolve_org_specialist_under_specialists_dir() -> None:
-    # dev-bot lives under orgs/specialists/ (post-f570305); the resolver checks
+    # coder lives under orgs/specialists/ (post-f570305); the resolver checks
     # BOTH roots (orgs/ then orgs/specialists/).
-    org_dir = _resolve_org("dev-bot")
+    org_dir = _resolve_org("coder")
     assert (org_dir / "AGENTS.md").is_file()
     assert org_dir.parent.name == "specialists"
 
@@ -85,8 +85,8 @@ def test_resolve_org_unknown_exits_with_code_1() -> None:
 
 
 def test_resolve_agent_md_org_local_first() -> None:
-    # dev-bot-explorer is a dev-bot-local subagent.
-    md = _resolve_agent_md(_resolve_org("dev-bot"), "dev-bot-explorer")
+    # coder-explorer is a coder-local subagent.
+    md = _resolve_agent_md(_resolve_org("coder"), "coder-explorer")
     assert md is not None and md.is_file()
 
 
@@ -128,7 +128,7 @@ def test_adapt_cto_prompt_reworks_both_web_agent_clauses() -> None:
     # dcode — leaving either would make the CTO delegate to a non-existent
     # subagent.
     src = (
-        "To keep context clean you delegate: deep recon to `dev-bot-explorer`, "
+        "To keep context clean you delegate: deep recon to `coder-explorer`, "
         "mechanical writes to `code-worker`, and live-browser e2e verification "
         "to `web-agent`. You never delegate the thinking.\n\n"
         "If the deliverable is a web site, delegate the live-browser checks to "
@@ -177,7 +177,7 @@ def temp_home(monkeypatch, tmp_path):
 
 
 def test_install_agent_writes_cto_and_ported_subagents(temp_home) -> None:
-    org = "dev-bot"
+    org = "coder"
     target = _install_agent(org, _resolve_org(org))
     assert target == temp_home / ".deepagents" / org
     assert (target / "AGENTS.md").is_file()
@@ -188,16 +188,16 @@ def test_install_agent_writes_cto_and_ported_subagents(temp_home) -> None:
 def test_ported_subagents_exclude_browser_only_web_agent() -> None:
     # web-agent drives pux-only browser tools absent in dcode —
     # porting it would advertise tools the agent can't call. This is the roster
-    # boundary: code-worker + dev-bot-explorer in, web-agent out.
+    # boundary: code-worker + coder-explorer in, web-agent out.
     assert "code-worker" in _PORTED_SUBAGENTS
-    assert "dev-bot-explorer" in _PORTED_SUBAGENTS
+    assert "coder-explorer" in _PORTED_SUBAGENTS
     assert "web-agent" not in _PORTED_SUBAGENTS
 
 
 def test_installed_cto_prompt_is_clean_of_pux_isms(temp_home) -> None:
     # The SHIPPED persona must reference only dcode-native tools — the strongest
     # guard, run against the real org source through the real installer.
-    target = _install_agent("dev-bot", _resolve_org("dev-bot"))
+    target = _install_agent("coder", _resolve_org("coder"))
     text = (target / "AGENTS.md").read_text()
     assert "pux_sandbox_python" not in text
     assert "web-agent" not in text
@@ -205,7 +205,7 @@ def test_installed_cto_prompt_is_clean_of_pux_isms(temp_home) -> None:
 
 
 def test_installed_subagent_prompts_are_clean(temp_home) -> None:
-    target = _install_agent("dev-bot", _resolve_org("dev-bot"))
+    target = _install_agent("coder", _resolve_org("coder"))
     for slug in _PORTED_SUBAGENTS:
         text = (target / "agents" / slug / "AGENTS.md").read_text()
         assert "pux_sandbox_python" not in text, slug
@@ -215,7 +215,7 @@ def test_installed_subagent_prompts_are_clean(temp_home) -> None:
 def test_install_agent_overwrites_stale_manual_edits(temp_home) -> None:
     # The org source under orgs/ is the source of truth — a manual edit to the
     # installed copy is overwritten on the next launch (idempotent refresh).
-    org = "dev-bot"
+    org = "coder"
     org_dir = _resolve_org(org)
     target = _install_agent(org, org_dir)
     cto = target / "AGENTS.md"
@@ -237,7 +237,7 @@ def test_project_root_points_at_repo_root() -> None:
 
 
 def test_get_branding_known_org() -> None:
-    assert "Engineering mode" in get_branding("dev-bot")["subheader"]
+    assert "Engineering mode" in get_branding("coder")["subheader"]
 
 
 def test_get_branding_unknown_org_falls_back_to_default() -> None:

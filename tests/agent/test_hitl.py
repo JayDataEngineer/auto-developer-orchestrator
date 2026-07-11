@@ -73,7 +73,10 @@ def test_editor_branch_poses_question_without_interrupt(monkeypatch):
         raise AssertionError("editor branch must not interrupt()")
 
     monkeypatch.setattr(hitl, "interrupt", boom)
-    tool = hitl.make_ask_user_tool("acp")
+    # ``direct`` is the canonical editor transport (turn-based, no interrupt
+    # resume). ACP moved to the resumable/interrupt branch, so it can't drive
+    # this test anymore.
+    tool = hitl.make_ask_user_tool("direct")
     result = tool.invoke({
         "question": "Ship now or wait?",
         "options": ["ship", "wait"],
