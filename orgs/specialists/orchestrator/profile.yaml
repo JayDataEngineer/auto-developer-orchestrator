@@ -1,0 +1,21 @@
+# Per-org harness profile for the orchestrator org (the flagship "big CTO model").
+#
+# The ONE opt-in here is the auto-firing web router (``WebRouterMiddleware``):
+# when the latest user turn clearly needs FRESH external info (a recency word,
+# an explicit "look up", a version number, a future-event ref), a cheap WORKER
+# model fires one web round using this org's already-armed ``web_research`` MCP
+# tools + injects a compact URL-cited brief into the message list — so the CTO
+# model never spends its OWN turn on a web tool call. It mounts only because this
+# org arms ``web_research`` (see org.yaml capabilities); an org that arms none
+# gets the byte-identical default stack (``_build_web_router`` returns None).
+#
+# Heuristic-only for now (the FREE deterministic classifier — conservative,
+# under-fire > spam). Flip to the one-call worker classifier with higher recall
+# by adding ``web_router: {model_router: true}``. See ``context/web_router.py``.
+middleware:
+  supervisor:
+    add:
+      - web-router
+
+# Enable ask_user HITL — agent can ask Hermes questions mid-task.
+ask_user: true

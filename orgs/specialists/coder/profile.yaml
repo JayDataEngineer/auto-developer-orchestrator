@@ -71,3 +71,6 @@ rubric:
       surrounding code.
     - The deliverable is a concise summary (what changed, how verified), not a
       play-by-play.
+
+# Enable ask_user HITL — agent can ask Hermes questions mid-task.
+ask_user: true
