@@ -71,6 +71,13 @@ def _stub_run_deps(monkeypatch, tmp_path, graph: _CapturingGraph) -> None:
     import pux_harness.sandbox.container as container  # noqa: PLC0415
 
     monkeypatch.setattr(container, "prepare", lambda org, exec_client=None: [])
+    # `_run` imports open_org_mcp at call time; patch it so no real MCP
+    # server connection is attempted (hermetic).
+    async def _no_mcp(org):
+        return []
+
+    import pux_harness.agent.mcp_client as mcp_client  # noqa: PLC0415
+    monkeypatch.setattr(mcp_client, "open_org_mcp", _no_mcp)
 
 
 def test_run_injects_default_rubric(monkeypatch, tmp_path):
@@ -79,9 +86,9 @@ def test_run_injects_default_rubric(monkeypatch, tmp_path):
     g = _CapturingGraph()
     _stub_run_deps(monkeypatch, tmp_path, g)
 
-    asyncio.run(main._run("dev-bot", "do the task", 60))
+    asyncio.run(main._run("coder", "do the task", 60))
 
-    assert g.captured["state"]["rubric"] == default_rubric("dev-bot")
+    assert g.captured["state"]["rubric"] == default_rubric("coder")
 
 
 def test_run_rubric_override_wins(monkeypatch, tmp_path):
@@ -90,7 +97,7 @@ def test_run_rubric_override_wins(monkeypatch, tmp_path):
     g = _CapturingGraph()
     _stub_run_deps(monkeypatch, tmp_path, g)
 
-    asyncio.run(main._run("dev-bot", "do the task", 60, rubric="MINE"))
+    asyncio.run(main._run("coder", "do the task", 60, rubric="MINE"))
 
     assert g.captured["state"]["rubric"] == "MINE"
 

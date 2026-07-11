@@ -47,7 +47,12 @@ def test_run_registers_thread_in_shared_store(monkeypatch, tmp_path):
         lambda org, saver=None, mcp_tools=None: (_fake_agent(), fake_backend),
     )
     monkeypatch.setattr(main, "shared_exec", lambda: object())
-    monkeypatch.setattr(main, "resolve_tool_servers", lambda org: [])
+    # _run imports open_org_mcp at call time from pux_harness.agent.mcp_client;
+    # patch it there so the MCP branch is hermetic (returns no tools).
+    async def _no_mcp(org):
+        return []
+
+    monkeypatch.setattr("pux_harness.agent.mcp_client.open_org_mcp", _no_mcp)
     monkeypatch.setattr("pux_harness.sandbox.container.prepare",
                         lambda org, *, exec_client=None, **kw: [])
 
@@ -85,7 +90,12 @@ def test_run_uses_existing_thread_when_passed(monkeypatch, tmp_path):
         lambda org, saver=None, mcp_tools=None: (_fake_agent(), fake_backend),
     )
     monkeypatch.setattr(main, "shared_exec", lambda: object())
-    monkeypatch.setattr(main, "resolve_tool_servers", lambda org: [])
+    # _run imports open_org_mcp at call time from pux_harness.agent.mcp_client;
+    # patch it there so the MCP branch is hermetic (returns no tools).
+    async def _no_mcp(org):
+        return []
+
+    monkeypatch.setattr("pux_harness.agent.mcp_client.open_org_mcp", _no_mcp)
     monkeypatch.setattr("pux_harness.sandbox.container.prepare",
                         lambda org, *, exec_client=None, **kw: [])
 

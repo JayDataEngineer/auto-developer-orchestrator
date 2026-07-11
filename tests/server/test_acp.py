@@ -385,7 +385,9 @@ def test_acp_advertises_session_load_and_list(tmp_path, project_root) -> None:
     # capability a client (Hermes/acpx) would then act on. Assertions are
     # field-level (not whole-dict) so further upstream capability fields can't
     # drift silently either.
-    assert not mcp.acp, (
+    # ``getattr`` with a falsy default covers the case where the installed acp
+    # version doesn't have the field at all (absent == unadvertised == safe).
+    assert not getattr(mcp, "acp", False), (
         f"mcp_capabilities.acp advertised but ACP-as-MCP-transport is unbacked: {mcp!r}"
     )
     pc = init.agent_capabilities.prompt_capabilities
