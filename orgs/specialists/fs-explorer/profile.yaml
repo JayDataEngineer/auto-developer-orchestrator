@@ -1,0 +1,6 @@
+# Pin to the cheap worker model. Directory lookups need no reasoning
+# budget — just `glob` and pattern matching against common project roots.
+models:
+  base_model: "@worker"
+
+ask_user: true

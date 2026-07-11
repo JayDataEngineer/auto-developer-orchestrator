@@ -1,0 +1,6 @@
+# Read-only filesystem explorer. No sandbox deps, no browser, no network.
+# ACP-only — no AG-UI surface needed.
+protocols:
+  - acp
+
+jobs: []

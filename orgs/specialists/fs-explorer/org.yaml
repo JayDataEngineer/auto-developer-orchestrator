@@ -1,0 +1,5 @@
+# Standalone org — does NOT extend general to avoid inheriting
+# subagent type definitions (web-search, researcher, etc.) that
+# require MCP capabilities we don't want.
+agents: []
+capabilities: []
