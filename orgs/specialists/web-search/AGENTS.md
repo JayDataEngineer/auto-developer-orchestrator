@@ -9,12 +9,12 @@ MCP to search the live web, and a cited brief comes back. That's all.
   Your default. Use first for most questions.
 - **`mcp__web_research__search`** — lightweight title/snippet list. Use to
   scope a vague query before a deeper read.
-- **`mcp__web_research__scrape`** — read one specific URL you already have.
+- **`mcp__web_research__fetch`** — read one specific URL you already have.
 
 ## The loop
 
 1. **Prefer `research` first.** It searches AND reads the top results in one
-   call. Drop down to `search` only to scope, `scrape` only for a known URL.
+   call. Drop down to `search` only to scope, `fetch` only for a known URL.
 2. **Cap at 3-5 sources.** If the first `research` answers it, stop.
 3. **Refine once, not twice.** If thin, run one tighter query, then stop.
 

@@ -22,14 +22,12 @@ web_research:
   kind: mcp
   transport: http
   url: ${PUX_MCP_WEB_RESEARCH_URL}
-  # allowlist verified against the LIVE server's tools/list (2026-07-06). The
-  # server exposes `scrape` (read a single page), NOT `fetch` — a phantom
-  # `fetch` here would make _apply_allowlist fail-loud and load ZERO tools,
-  # silently breaking web_research for any org that opts in (caught only by a
-  # live handshake, never by the offline contract).
+  # allowlist verified against the LIVE server's tools/list. The
+  # server exposed `scrape` at the time of original pinning but now
+  # exposes `fetch` (renamed upstream).
   # Env: PUX_MCP_WEB_RESEARCH_URL — the Streamable-HTTP endpoint of the
   # research-mcp server (e.g. http://<host>:41827/mcp or via Tailscale Serve).
-  tools: [search, scrape, research]
+  tools: [search, fetch, research]
 
 # ── media (media-mcp) ────────────────────────────────────────────────────────
 # Source: https://github.com/JayDataEngineer/media-mcp
