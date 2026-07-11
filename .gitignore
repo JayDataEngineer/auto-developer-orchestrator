@@ -131,3 +131,8 @@ INSIGHTS-*.md
 # Internal planning docs
 GAPS-*.md
 
+# Archives / backups (never track tarballs)
+*.tar.gz
+*.tar.bz2
+*.zip
+
