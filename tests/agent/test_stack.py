@@ -102,7 +102,7 @@ def stub_factory(monkeypatch):
     so the rubric tests can assert on them."""
     cap: dict = {"rubric": []}
 
-    monkeypatch.setattr(stack, "build_context_layer", lambda: ([], []))
+    monkeypatch.setattr(stack, "build_context_layer", lambda **kw: ([], []))
     monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
     monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
     # PromptCaptureMiddleware (gaps 4+5) — supervisor-only, default-on, mounts
@@ -367,16 +367,15 @@ def test_browser_vision_absent_when_disabled(fake_tree, stub_factory):
 # --- prompt assembly (profile.base_system_prompt / system_prompt_suffix) ----
 
 def test_profile_base_system_prompt_replaces_assembled(fake_tree, stub_factory):
-    """``profile.base_system_prompt`` REPLACES the assembled (root + org +
-    addendum) prompt rather than appending — the override that lets an org
-    swap the whole CTO persona. (This behavior moved out of graph.py in
-    it lives in the factory now.)"""
+    """``profile.base_system_prompt`` was REMOVED — it was a global-REPLACE
+    that wiped the assembled prompt. A profile shipping it must FAIL loud
+    (a stray one is a gap, not a silent drop). The factory rejects it."""
     cfg = HarnessProfileConfig(base_system_prompt="FULL_REPLACE")
-    plan = stack.build_stack(
-        "p", specialists=list(_SPECIALISTS), profile=cfg,
-        rubric_gate=None, exec_client="EXEC",
-    )
-    assert plan.supervisor_prompt == "FULL_REPLACE"
+    with pytest.raises(ValueError, match="base_system_prompt.*removed"):
+        stack.build_stack(
+            "p", specialists=list(_SPECIALISTS), profile=cfg,
+            rubric_gate=None, exec_client="EXEC",
+        )
 
 
 def test_profile_system_prompt_suffix_appends(fake_tree, stub_factory):
@@ -677,7 +676,7 @@ def test_context_is_now_removable(fake_tree, stub_factory, monkeypatch):
     (the spec never ran → nothing emitted) — the user's 'selectively remove
     middleware' request, applied to the base capture/offload layer too."""
     monkeypatch.setattr(stack, "build_context_layer",
-                        lambda: (["CONTEXT"], [_mk_tool("ctx_recall")]))
+                        lambda **kw: (["CONTEXT"], [_mk_tool("ctx_recall")]))
     _write_middleware_block(fake_tree,
         "middleware:\n  supervisor:\n    remove: [context]\n")
     plan = stack.build_stack(

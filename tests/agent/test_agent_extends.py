@@ -112,13 +112,15 @@ def test_per_agent_suffix_after_org_wide(fake_tree):
 
 
 def test_per_agent_base_system_prompt_replaces_body(fake_tree):
-    """Per-agent ``base_system_prompt`` REPLACES the .md body (native semantic)."""
+    """Per-agent ``base_system_prompt`` was REMOVED — it was a global-REPLACE
+    that wiped the agent's own body. A frontmatter entry shipping it must FAIL
+    loud (a stray one is a gap, not a silent drop). Use ``system_prompt_suffix``
+    (append) instead."""
     root = fake_tree
     _write_agent(root, "a", org="o", fm_extra='base_system_prompt: "REPLACED"')
     _add_org(root, "o", agents=["a"])
-    sub = orgs_mod.load_subagents("o", [], **_ctx())[0]
-    assert sub["system_prompt"] == "REPLACED"
-    assert _BODY.strip() not in sub["system_prompt"]
+    with pytest.raises(ValueError, match="base_system_prompt.*removed"):
+        orgs_mod.load_subagents("o", [], **_ctx())
 
 
 def test_per_agent_excluded_tools(fake_tree):

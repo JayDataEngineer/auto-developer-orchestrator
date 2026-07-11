@@ -66,7 +66,7 @@ def fake_tree(tmp_path: Path, monkeypatch):
 def stub_factory(monkeypatch):
     """Stub build_stack's heavy deps so the resolver + plan assembly run real
     without Docker / real middleware / model init (mirrors test_stack.py)."""
-    monkeypatch.setattr(stack, "build_context_layer", lambda: ([], []))
+    monkeypatch.setattr(stack, "build_context_layer", lambda **kw: ([], []))
     monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
     monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
     monkeypatch.setattr(stack, "AuditMiddleware", lambda **kw: "AUDIT")

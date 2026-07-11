@@ -140,7 +140,7 @@ def captured_build(monkeypatch):
     # proven separately in test_context_offload.py. ``stack`` resolves the
     # grader model via its OWN ``get_model`` import when a rubric gate arms —
     # stub that too so the rubric tests see ``"MODEL"``.
-    monkeypatch.setattr(stack, "build_context_layer", lambda: ([], []))
+    monkeypatch.setattr(stack, "build_context_layer", lambda **kw: ([], []))
     monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
     monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
     # ModelRetryMiddleware is default-ON for every supervisor (mounted after
@@ -220,17 +220,18 @@ def test_excluded_tool_filtered_everywhere(fake_tree, captured_build):
 
 
 def test_base_system_prompt_replaces(fake_tree, captured_build):
-    """base_system_prompt (when set) REPLACES the assembled CTO prompt rather
-    than appending."""
+    """base_system_prompt was REMOVED — it was a global-REPLACE that wiped the
+    assembled prompt. A profile shipping it must FAIL loud, not silently drop
+    or apply the replace (that's a gap). Use ``system_prompt_suffix`` (append)
+    instead."""
     cfg = _cfg(base="FULL_REPLACE")
     mp = pytest.MonkeyPatch()
     mp.setattr(graph, "load_profile", lambda org: cfg)
     try:
-        graph.build_graph("p", checkpointer=None)
+        with pytest.raises(ValueError, match="base_system_prompt.*removed"):
+            graph.build_graph("p", checkpointer=None)
     finally:
         mp.undo()
-
-    assert captured_build["system_prompt"] == "FULL_REPLACE"
 
 
 def test_no_profile_is_byte_identical(fake_tree, captured_build):
@@ -273,7 +274,7 @@ def test_build_graph_requests_base_and_multimodal_roles(fake_tree, monkeypatch):
     # stack-level names so the factory runs to completion. This test only
     # asserts which roles ``graph.get_model`` was asked for at the graph layer
     # — not the middleware shape (that's captured_build's job elsewhere).
-    monkeypatch.setattr(stack, "build_context_layer", lambda: ([], []))
+    monkeypatch.setattr(stack, "build_context_layer", lambda **kw: ([], []))
     monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTING")
     monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "SESSION")
     monkeypatch.setattr(graph, "create_deep_agent", lambda **kw: "GRAPH")

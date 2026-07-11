@@ -49,7 +49,7 @@ def stubbed_factory(monkeypatch):
     CLASSES + the context layer) so the resolver + plan assembly run against
     REAL org config without Docker / real middleware / model init. The ORG
     config (roster / profile / prompt / specialists) stays real."""
-    monkeypatch.setattr(stack, "build_context_layer", lambda: ([], []))
+    monkeypatch.setattr(stack, "build_context_layer", lambda **kw: ([], []))
     monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
     monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
     monkeypatch.setattr(stack, "AuditMiddleware", lambda **kw: "AUDIT")
