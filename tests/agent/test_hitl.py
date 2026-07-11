@@ -106,7 +106,7 @@ def test_tool_name_is_ask_user():
 @pytest.mark.parametrize("transport,turn_based", [
     ("serve", False),
     ("agui", False),
-    ("acp", True),
+    ("acp", False),  # ACP uses interrupt() resume — not turn-based
     ("direct", True),
     ("tui", True),
     ("mcp", True),

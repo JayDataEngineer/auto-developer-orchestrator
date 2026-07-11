@@ -36,16 +36,19 @@ from pux_harness.tui_branding import (
 )
 
 # Orgs the resolver MUST find regardless of future reorgs — the specialist set
-# (post-f570305) plus the root ``general``.
+# plus the root ``general``. Updated post-rename: ``dev-bot`` → ``coder``;
+# ``web-search`` and ``orchestrator`` were added when they became specialists.
 KNOWN_SPECIALISTS = {
-    "dev-bot",
+    "coder",
     "deep-research-engine",
     "game-studio",
     "invest",
+    "orchestrator",
     "social-media-pipeline",
     "telegram-agent",
     "twitter-agent",
     "video-production",
+    "web-search",
 }
 
 

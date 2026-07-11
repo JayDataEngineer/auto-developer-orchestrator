@@ -61,13 +61,15 @@ def _ctx() -> dict:
 # ContextMiddleware — graph.py calls ``build_context_layer()``) PLUS
 # RoutingMiddleware + SessionGuideMiddleware + ModelRetryMiddleware (default-ON
 # for every supervisor — the time-dimension retry layer; disable per-org via
-# ``model_retry: {enabled: false}``). The ``captured_build`` fixture stubs
-# ``build_context_layer`` to empty + the named middleware to marker strings, so
-# a captured ``middleware`` list with no rubric gate is exactly this. Asserted
-# in the no-gate / disabled-gate tests; updating the baseline lives here, once.
-# (The capture/offload behavior itself is proven in test_context_offload.py —
-# here it's stubbed away to keep the profile test focused on the wiring shape.)
-_BASELINE_MIDDLEWARE = ["ROUTE", "GUIDE", "RETRY"]
+# ``model_retry: {enabled: false}``). PromptCaptureMiddleware (gap 4+5) is
+# also default-on, mounted right after session_guide. The ``captured_build``
+# fixture stubs ``build_context_layer`` to empty + the named middleware to
+# marker strings, so a captured ``middleware`` list with no rubric gate is
+# exactly this. Asserted in the no-gate / disabled-gate tests; updating the
+# baseline lives here, once. (The capture/offload behavior itself is proven in
+# test_context_offload.py — here it's stubbed away to keep the profile test
+# focused on the wiring shape.)
+_BASELINE_MIDDLEWARE = ["ROUTE", "GUIDE", "PROMPT", "RETRY"]
 
 
 @pytest.fixture
@@ -143,10 +145,15 @@ def captured_build(monkeypatch):
     monkeypatch.setattr(stack, "build_context_layer", lambda **kw: ([], []))
     monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
     monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
+    # PromptCaptureMiddleware is default-ON; stub to marker.
+    monkeypatch.setattr(stack, "PromptCaptureMiddleware", lambda: "PROMPT")
     # ModelRetryMiddleware is default-ON for every supervisor (mounted after
     # routing+session_guide); stub it to the ``"RETRY"`` marker so the no-gate
     # baseline stays a clean list of marker strings (not a raw object).
     monkeypatch.setattr(stack, "ModelRetryMiddleware", lambda *a, **k: "RETRY")
+    # driver_strong_orchestrator gates CodeInterpreterMiddleware — stub False
+    # so no real middleware object mounts in the baseline.
+    monkeypatch.setattr(stack, "driver_strong_orchestrator", lambda **kw: False)
     monkeypatch.setattr(stack, "get_model", lambda *a, **k: "MODEL")
     monkeypatch.setattr(
         graph, "create_deep_agent",
@@ -587,10 +594,10 @@ def _opt_in_ask_user(fake_tree: Path) -> None:
 
 def test_build_graph_threads_acp_facts_to_ask_user(fake_tree, captured_build):
     """``build_graph`` threads ``facts`` through to ``build_stack`` — the Phase C
-    seam. Opt-in + ``transport="acp"`` (turn-based) → ask_user IS in the tools
-    handed to ``create_deep_agent`` AND the system prompt carries the end-turn
-    suffix. Proves the entrypoint→factory→tool wiring end to end (not just the
-    build_stack unit gate in test_stack.py)."""
+    seam. Opt-in + ``transport="acp"`` → ask_user IS in the tools handed to
+    ``create_deep_agent``. ACP uses interrupt() resume (not turn-based), so the
+    end-turn suffix is NOT appended — the interrupt pause already gates the
+    reply. Proves the entrypoint→factory→tool wiring end to end."""
     from pux_harness.agent.stack import RuntimeFacts
     _opt_in_ask_user(fake_tree)
     graph.build_graph(
@@ -598,7 +605,9 @@ def test_build_graph_threads_acp_facts_to_ask_user(fake_tree, captured_build):
     )
     tool_names = {getattr(t, "name", None) for t in captured_build["tools"]}
     assert "ask_user" in tool_names
-    assert "END your turn" in captured_build["system_prompt"]
+    # ACP is resumable — no end-turn suffix (it would be stale by the time the
+    # interrupt resumes). Use transport="direct" to test the turn-based suffix.
+    assert "END your turn" not in captured_build["system_prompt"]
 
 
 def test_build_graph_drops_ask_user_when_mcp_active(fake_tree, captured_build):

@@ -122,7 +122,9 @@ def test_tools_resolved_to_specialist_surface(fake_tree):
     # into every subagent (specialist whitelist = python; the retrieval pair is
     # appended on top — graph.py retracts the old main-agent-only claim).
     assert {t.name for t in sub["tools"]} == {
-        "pux_sandbox_python", "ctx_recall", "ctx_search",
+        "pux_sandbox_python",
+        "ctx_recall", "ctx_search", "ctx_index",
+        "ctx_stats", "ctx_doctor", "ctx_purge",
     }
     # Each subagent carries the unified ContextMiddleware (capture +
     # offload in one pass) so the layer intercepts its own tool calls — the old
@@ -228,7 +230,9 @@ def test_md_agent_loads(fake_tree):
     # into every subagent (specialist whitelist = python; the retrieval pair is
     # appended on top — graph.py retracts the old main-agent-only claim).
     assert {t.name for t in sub["tools"]} == {
-        "pux_sandbox_python", "ctx_recall", "ctx_search",
+        "pux_sandbox_python",
+        "ctx_recall", "ctx_search", "ctx_index",
+        "ctx_stats", "ctx_doctor", "ctx_purge",
     }
     assert sub["skills"] == ["/sandbox/workspace/orgs/_shared/skills"]
     assert sub["model"].model_name == "mimo-v2.5"
