@@ -44,13 +44,13 @@ from pux_harness.sandbox.tools.registry import NATIVE_FS_TOOLS
 # --- the green gate ------------------------------------------------------
 
 EXPECTED_ORGS = {
-    "_demo", "deep-research-engine", "dev-bot", "game-studio", "general",
-    "invest", "orchestrator", "social-media-pipeline", "telegram-agent",
-    "twitter-agent", "video-production",
+    "_demo", "coder", "deep-research-engine", "fs-explorer", "game-studio",
+    "general", "invest", "orchestrator", "social-media-pipeline",
+    "telegram-agent", "twitter-agent", "video-production", "web-search",
 }
 
 
-def test_discover_orgs_finds_all_ten():
+def test_discover_orgs_finds_all_specialists():
     found = set(discover_orgs())
     assert found == EXPECTED_ORGS, f"missing={EXPECTED_ORGS - found} extra={found - EXPECTED_ORGS}"
 
@@ -245,7 +245,7 @@ def test_rule5_policy_unknown_section(fake_tree):
     assert any(v.rule == "policy-sections" for v in vs)
     assert KNOWN_POLICY_SECTIONS == {
         "workspace", "egress", "credentials", "sandbox", "browser", "host_setup",
-        "jobs", "tool_servers", "protocols",
+        "jobs", "tool_servers", "protocols", "tool_surface",
     }
 
 
@@ -781,96 +781,96 @@ def test_profile_yaml_non_mapping_reports_violation(fake_tree):
                for v in vs), vs
 
 
-# --- dev-bot roster redesign + no-general tripwire -------------------------
+# --- coder roster redesign + no-general tripwire -------------------------
 
-def test_dev_bot_roster_on_real_repo():
-    """dev-bot's shipped roster is exactly the three specialists — explorer
+def test_coder_roster_on_real_repo():
+    """coder's shipped roster is exactly the three specialists — explorer
     (recon), code-worker (mechanical one-shot execution), web-agent (e2e
     verification). The CTO does all the thinking; these three are the only
     delegation targets."""
-    slugs = orgs.org_agent_slugs("dev-bot")
-    assert slugs == ["dev-bot-explorer", "code-worker", "web-agent"], slugs
+    slugs = orgs.org_agent_slugs("coder")
+    assert slugs == ["coder-explorer", "code-worker", "web-agent"], slugs
 
 
-def test_dev_bot_no_general_subagent_tripwire_on_real_repo():
-    """The permanent tripwire: dev-bot must NOT roster a generic catch-all
+def test_coder_no_general_subagent_tripwire_on_real_repo():
+    """The permanent tripwire: coder must NOT roster a generic catch-all
     subagent (general / general-purpose / researcher) — that would let the CTO
     delegate the DESIGN itself, the exact anti-pattern the roster prevents.
     The shipped roster is clean."""
-    vs = check_org("dev-bot")
-    assert not any(v.rule == "dev-bot-no-general-subagent" for v in vs), vs
+    vs = check_org("coder")
+    assert not any(v.rule == "coder-no-general-subagent" for v in vs), vs
 
 
 @pytest.mark.parametrize("forbidden_slug", ["general", "general-purpose", "researcher"])
-def test_dev_bot_no_general_subagent_tripwire_fires(fake_tree, forbidden_slug):
-    """Adding any forbidden generic slug to dev-bot's roster is a HARD contract
+def test_coder_no_general_subagent_tripwire_fires(fake_tree, forbidden_slug):
+    """Adding any forbidden generic slug to coder's roster is a HARD contract
     failure — the gate blocks the commit, not a silent drift (no-legacy-left-
-    behind). The rule is dev-bot-scoped: only dev-bot's CTO does the thinking."""
+    behind). The rule is coder-scoped: only coder's CTO does the thinking."""
     add_org, add_agent = fake_tree
-    add_agent(forbidden_slug, org="dev-bot")
-    add_org("dev-bot", agents=[forbidden_slug])
-    vs = check_org("dev-bot")
-    rule_vs = [v for v in vs if v.rule == "dev-bot-no-general-subagent"]
+    add_agent(forbidden_slug, org="coder")
+    add_org("coder", agents=[forbidden_slug])
+    vs = check_org("coder")
+    rule_vs = [v for v in vs if v.rule == "coder-no-general-subagent"]
     assert len(rule_vs) == 1, vs
     assert forbidden_slug in rule_vs[0].message
 
 
-def test_dev_bot_tripwire_does_not_fire_for_other_orgs(fake_tree):
-    """The tripwire is dev-bot-scoped — another org rostering ``researcher``
-    (the shared general-purpose investigator) is fine. Only dev-bot's CTO
+def test_coder_tripwire_does_not_fire_for_other_orgs(fake_tree):
+    """The tripwire is coder-scoped — another org rostering ``researcher``
+    (the shared general-purpose investigator) is fine. Only coder's CTO
     refuses a generic subagent."""
     add_org, add_agent = fake_tree
     add_agent("researcher", org="invest")
     add_org("invest", agents=["researcher"])
     vs = check_org("invest")
-    assert not any(v.rule == "dev-bot-no-general-subagent" for v in vs), vs
+    assert not any(v.rule == "coder-no-general-subagent" for v in vs), vs
 
 
-# --- dev-bot-disables-general-purpose (sibling tripwire) -------------------
+# --- coder-disables-general-purpose (sibling tripwire) -------------------
 
-def test_dev_bot_disables_general_purpose_on_real_repo():
-    """Sibling tripwire (defense in depth, NEW code path): dev-bot's
+def test_coder_disables_general_purpose_on_real_repo():
+    """Sibling tripwire (defense in depth, NEW code path): coder's
     profile.yaml MUST declare ``general_purpose_subagent: {enabled: false}``.
     The roster rule above reads org.yaml and so NEVER sees the general-purpose
     slot deepagents auto-adds to every graph (graph.py:716-717); this rule reads
     profile.yaml and closes that gap. The shipped repo is clean."""
-    vs = check_org("dev-bot")
-    assert not any(v.rule == "dev-bot-disables-general-purpose" for v in vs), vs
+    vs = check_org("coder")
+    assert not any(v.rule == "coder-disables-general-purpose" for v in vs), vs
 
 
-def test_dev_bot_disables_general_purpose_fires_when_absent(fake_tree):
-    """A dev-bot whose profile.yaml OMITS the field trips the rule — deepagents
+def test_coder_disables_general_purpose_fires_when_absent(fake_tree):
+    """A coder whose profile.yaml OMITS the field trips the rule — deepagents
     would otherwise auto-add a heavy generic worker the roster rule can't see.
-    Only the explicit neuter (``enabled: false``) satisfies dev-bot's intent."""
+    Only the explicit neuter (``enabled: false``) satisfies coder's intent."""
     add_org, add_agent = fake_tree
-    add_agent("code-worker", org="dev-bot")
-    add_org("dev-bot", agents=["code-worker"])
+    add_agent("code-worker", org="coder")
+    add_org("coder", agents=["code-worker"])
     # profile.yaml present but WITHOUT general_purpose_subagent.
-    (contract._orgs_dir() / "dev-bot" / "profile.yaml").write_text(
+    (contract._orgs_dir() / "coder" / "profile.yaml").write_text(
         "system_prompt_suffix: |\n  be terse.\n")
-    vs = check_org("dev-bot")
-    rule_vs = [v for v in vs if v.rule == "dev-bot-disables-general-purpose"]
+    vs = check_org("coder")
+    rule_vs = [v for v in vs if v.rule == "coder-disables-general-purpose"]
     assert len(rule_vs) == 1, vs
     assert "general_purpose_subagent" in rule_vs[0].message
 
 
-def test_dev_bot_disables_general_purpose_fires_when_enabled_true(fake_tree):
-    """A dev-bot that EXPLICITLY enables the GP also trips the rule — only
+def test_coder_disables_general_purpose_fires_when_enabled_true(fake_tree):
+    """A coder that EXPLICITLY enables the GP also trips the rule — only
     ``enabled: false`` (the neuter spec) satisfies the no-catch-all intent."""
     add_org, add_agent = fake_tree
-    add_agent("code-worker", org="dev-bot")
-    add_org("dev-bot", agents=["code-worker"])
-    (contract._orgs_dir() / "dev-bot" / "profile.yaml").write_text(
+    add_agent("code-worker", org="coder")
+    add_org("coder", agents=["code-worker"])
+    (contract._orgs_dir() / "coder" / "profile.yaml").write_text(
         "general_purpose_subagent:\n  enabled: true\n")
-    vs = check_org("dev-bot")
-    rule_vs = [v for v in vs if v.rule == "dev-bot-disables-general-purpose"]
+    vs = check_org("coder")
+    rule_vs = [v for v in vs if v.rule == "coder-disables-general-purpose"]
     assert len(rule_vs) == 1, vs
 
 
-def test_dev_bot_specialists_resolve_on_worker_role(monkeypatch):
+def test_coder_specialists_resolve_on_worker_role(monkeypatch):
     """code-worker + web-agent have no frontmatter ``model:`` → both resolve on
     the ``worker`` role (cheap mimo, the "small one-shot worker" the user asked
-    for). Drives the REAL load_subagents('dev-bot') — no Docker, no tokens.
+    for). Drives the REAL load_subagents('coder') — no Docker, no tokens.
     Fake key only (get_model reads it at construction, never sends a request)."""
     monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
     from pux_harness.agent import orgs as orgs_mod
@@ -888,10 +888,10 @@ def test_dev_bot_specialists_resolve_on_worker_role(monkeypatch):
     from pux_harness.context.layer import build_context_layer
     mw, ctx_tools = build_context_layer()
     subs = orgs_mod.load_subagents(
-        "dev-bot", specialists, subagent_middleware=mw, retrieval_tools=ctx_tools,
+        "coder", specialists, subagent_middleware=mw, retrieval_tools=ctx_tools,
     )
     by_name = {s["name"]: s for s in subs}
-    assert set(by_name) == {"dev-bot-explorer", "code-worker", "web-agent"}, \
+    assert set(by_name) == {"coder-explorer", "code-worker", "web-agent"}, \
         set(by_name)
     # worker role resolves to a concrete model id (mimo-v2.5 default); the
     # resolved value is NOT a hardcoded literal — it comes from models.yaml.
@@ -902,7 +902,7 @@ def test_dev_bot_specialists_resolve_on_worker_role(monkeypatch):
     # (ctx_recall/ctx_search reach every subagent); web-agent carries the
     # browser surface (+ the same ctx pair).
     cw_tools = {t.name for t in by_name["code-worker"]["tools"]}
-    assert cw_tools == {"pux_sandbox_python", "ctx_recall", "ctx_search"}, cw_tools
+    assert cw_tools == {"pux_sandbox_python", "ctx_recall", "ctx_search", "ctx_index", "ctx_stats", "ctx_doctor", "ctx_purge"}, cw_tools
     web_tools = [t.name for t in by_name["web-agent"]["tools"]]
     assert "pux_sandbox_browser_navigate" in web_tools
     assert "pux_sandbox_describe_image" in web_tools

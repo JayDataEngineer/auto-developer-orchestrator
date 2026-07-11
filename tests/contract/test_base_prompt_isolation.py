@@ -56,6 +56,10 @@ BASE_MARKERS = [
     "Verify or die",
 ]
 
+# Orgs that are intentionally standalone — they don't ``extends: general``
+# (see each org.yaml for the rationale). Exempt from the base-present contract.
+STANDALONE_ORGS = frozenset({"fs-explorer", "web-search"})
+
 
 def _dev_guide_leaks(prompt: str) -> list[str]:
     return [m for m in DEV_GUIDE_MARKERS if m in prompt]
@@ -84,7 +88,12 @@ def test_dev_guide_never_leaks_into_org_base(org: str) -> None:
 def test_base_present_in_every_org(org: str) -> None:
     """Every org's base prompt carries the base-org markers — the base flows
     from ``general`` via ``extends:``, so a specialist that dropped its
-    ``extends: general`` (or general that lost its base) fails here."""
+    ``extends: general`` (or general that lost its base) fails here.
+
+    Standalone orgs (``fs-explorer``, ``web-search``) intentionally DON'T
+    extend general — they're exempt (see ``STANDALONE_ORGS``)."""
+    if org in STANDALONE_ORGS:
+        pytest.skip(f"{org} is a standalone org (does not extend: general)")
     prompt = build_system_prompt(org)
     missing = _base_missing(prompt)
     assert not missing, (

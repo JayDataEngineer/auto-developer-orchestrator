@@ -152,7 +152,7 @@ def test_exported_archive_captures_every_shared_script_ref(org, tmp_path, projec
     """No shared sandbox script referenced by ``host_setup`` or ``jobs`` may
     drop out of the archive. Regression contract: ``jobs:`` (the newer JobSpec
     mechanism, ``sandbox/policy.py``) was missed by
-    ``_resolve_shared_sandbox`` — dev-bot/general's ``warmup_browser.py``
+    ``_resolve_shared_sandbox`` — coder/general's ``warmup_browser.py``
     silently disappeared and the pre-run job FileNotFound'd at serve time. The
     round-trip-compile test does NOT catch it: ``compile_org`` never reads
     ``jobs:`` (a serve-time concern), so the graph compiles fine without the
@@ -186,17 +186,17 @@ def test_exported_archive_captures_every_shared_script_ref(org, tmp_path, projec
     )
 
 
-def test_dev_bot_export_includes_warmup_browser_job_script(tmp_path, project_root):
-    """The named regression anchor. dev-bot's ``jobs:`` block references
+def test_coder_export_includes_warmup_browser_job_script(tmp_path, project_root):
+    """The named regression anchor. coder's ``jobs:`` block references
     ``orgs/_shared/sandbox/warmup_browser.py``. Before the fix this was the one
     shared file that silently dropped — kept as a focused, legible guard so the
     parametrized invariant above always has a concrete failing example if the
     bug returns."""
-    archive = tmp_path / "dev-bot.tar.gz"
-    pack_org("dev-bot", archive, project_root=project_root)
+    archive = tmp_path / "coder.tar.gz"
+    pack_org("coder", archive, project_root=project_root)
     with tarfile.open(archive, "r:gz") as tar:
         names = [m.name for m in tar.getmembers()]
     assert any("warmup_browser.py" in n for n in names), (
-        "dev-bot jobs: warmup_browser.py missing from export — "
+        "coder jobs: warmup_browser.py missing from export — "
         "_resolve_shared_sandbox must capture jobs scripts, not just host_setup"
     )

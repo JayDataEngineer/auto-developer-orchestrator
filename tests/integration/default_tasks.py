@@ -14,16 +14,25 @@ DEFAULT_TASKS: dict[str, str] = {
         "to the `researcher` subagent — do NOT run tools yourself. Have it use the "
         "native `execute` tool: `ls -1 /sandbox/workspace`. Report its findings verbatim."
     ),
-    # The dev-bot sample Go package was removed in the pi-pivot; dev-bot now
+    # The coder sample Go package was removed in the pi-pivot; coder now
     # ships only its 3 specialist agents. Target THOSE — the explorer's real
     # read-only-investigator job (grep the frontmatter `name:` field, cite files).
-    "dev-bot": (
-        "What specialist agents does the dev-bot org ship? Delegate to the "
-        "`dev-bot-explorer` subagent — do NOT inspect the code yourself. The agent "
-        "definitions live under /sandbox/workspace/orgs/specialists/dev-bot/agents/. "
+    "coder": (
+        "What specialist agents does the coder org ship? Delegate to the "
+        "`coder-explorer` subagent — do NOT inspect the code yourself. The agent "
+        "definitions live under /sandbox/workspace/orgs/specialists/coder/agents/. "
         "Have the explorer find every agent's declared `name:` field (in each `.md` "
         "frontmatter) and report each name with its file citation. "
         "Report its findings verbatim."
+    ),
+    "fs-explorer": (
+        "What top-level directories exist under /sandbox/workspace/? "
+        "Use the native `execute` tool: `ls -1 /sandbox/workspace`. "
+        "Report the entries verbatim."
+    ),
+    "web-search": (
+        "Use the web_research `search` tool to look up 'pux sandbox orchestrator'. "
+        "Report the top result title and URL verbatim."
     ),
     # --- The remaining 7 orgs. Each forces delegation to a named
     # specialist and drives a NATIVE tool against the org's OWN bundled content

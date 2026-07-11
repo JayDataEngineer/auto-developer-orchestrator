@@ -1,10 +1,10 @@
 extends: general
-# The base PROMPT flows from general (extends:), but dev-bot's roster is
+# The base PROMPT flows from general (extends:), but coder's roster is
 # authoritative — it deliberately refuses the inherited base roster (a generic
 # researcher/browser would let the CTO delegate the thinking itself, the exact
 # anti-pattern its AGENTS.md forbids). Roster-only opt-out (D4).
 inherit_roster: false
-agents: [dev-bot-explorer, code-worker, web-agent]
+agents: [coder-explorer, code-worker, web-agent]
 
 # CU-4: foreign MCP tool server (was policy.yaml ``tool_servers:`` — now a
 # permanent contract failure). Bare catalog ref into

@@ -120,13 +120,13 @@ class TestResolveSharedAgents:
         assert any("researcher.md" in k for k in files)
         assert any("browser.md" in k for k in files)
 
-    def test_dev_bot_uses_local_only_roster(self):
-        """dev-bot ``extends: general`` (base PROMPT flows) but sets
+    def test_coder_uses_local_only_roster(self):
+        """coder ``extends: general`` (base PROMPT flows) but sets
         ``inherit_roster: false`` — its own three specialists are authoritative,
         deliberately refusing the inherited base roster (a generic
         researcher/browser would let the CTO delegate the thinking itself). All
         three are org-local, so NONE resolve to ``_shared``."""
-        files = _resolve_shared_agents("dev-bot")
+        files = _resolve_shared_agents("coder")
         assert files == {}, files
 
 
@@ -166,12 +166,11 @@ class TestResolveToolServers:
         assert files["orgs/_shared/tool_servers.yaml"].is_file()
 
     def test_org_without_declaration_returns_empty(self):
-        """An org whose policy.yaml has NO ``tool_servers:`` block packs
-        nothing extra (the default, MCP-free state). video-production has a real
-        policy.yaml (sandbox image, creds) but no tool_servers → empty, proving
-        the ``policy.get('tool_servers')``-is-None branch, not just the
-        no-policy-file branch."""
-        files = _resolve_tool_servers("video-production")
+        """An org whose org.yaml has NO ``capabilities:`` with kind: mcp packs
+        nothing extra (the default, MCP-free state). fs-explorer is a standalone
+        org with no capabilities → empty, proving the no-mcp-capabilities
+        branch, not just the no-org.yaml branch."""
+        files = _resolve_tool_servers("fs-explorer")
         assert files == {}
 
 
