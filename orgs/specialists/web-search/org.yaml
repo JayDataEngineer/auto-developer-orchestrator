@@ -1,0 +1,8 @@
+extends: general
+agents: [web-worker]
+
+# MCP is security-scoped + NOT inherited via extends:. Redeclare here so
+# the web-worker agent gets the web_research tools (search, scrape, research).
+# The server runs host-side (HTTP) — no sandbox-egress entry needed.
+capabilities:
+  - {kind: mcp, ref: web_research}

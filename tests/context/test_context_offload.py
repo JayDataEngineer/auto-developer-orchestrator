@@ -27,6 +27,15 @@ BIG = "x" * 20_000  # well over the 8000-char default threshold
 SMALL = "only a few hundred chars " * 5
 
 
+def _tool(store, name: str):
+    """Pull a single named tool from the built context-tools surface.
+
+    ``build_context_tools`` returns 6 tools (recall/search/index/stats/doctor/
+    purge); these tests only exercise recall + search, so a name lookup replaces
+    the old 2-tuple positional unpack."""
+    return {t.name: t for t in build_context_tools(store)}[name]
+
+
 def _req(name: str = "execute", tcid: str = "call_1") -> SimpleNamespace:
     """A minimal stand-in for langchain's ToolCallRequest — the middleware only
     reads ``request.tool_call`` (a dict), so SimpleNamespace suffices."""
@@ -118,7 +127,7 @@ def test_middleware_passes_small_through(tmp_path):
 
 def test_ctx_recall_returns_full_then_not_found(tmp_path):
     store = EventStore(tmp_path / "events.db")
-    recall, _ = build_context_tools(store)
+    recall = _tool(store, "ctx_recall")
     stash = store.stash_blob(BIG, tool="execute")
     assert recall.invoke({"handle": stash.handle}) == BIG
     # bare id also accepted
@@ -131,7 +140,7 @@ def test_ctx_search_finds_stashed_blob(tmp_path):
     store = EventStore(tmp_path / "events.db")
     store.stash_blob("the alpha deployment failed at step 3", tool="execute")
     store.stash_blob("unrelated log line", tool="execute")
-    _, search = build_context_tools(store)
+    search = _tool(store, "ctx_search")
     out = search.invoke({"query": "alpha deployment"})
     assert "1 hit" in out
     assert "alpha deployment failed" in out
@@ -159,7 +168,7 @@ def test_search_caps_results(tmp_path):
     store = EventStore(tmp_path / "events.db")
     for _ in range(7):
         store.stash_blob("needleneedle here", tool="execute")
-    _, search = build_context_tools(store)
+    search = _tool(store, "ctx_search")
     out = search.invoke({"query": "needle", "limit": 3})
     assert "3 hit" in out
 

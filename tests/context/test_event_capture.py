@@ -101,7 +101,7 @@ def test_recent_filter_by_thread(tmp_path):
 def test_event_priority_lookup(tmp_path):
     store = EventStore(tmp_path / "events.db")
     # Known types get default priorities
-    rid = store.capture("task_started")
+    store.capture("task_started")
     store.flush()
     row = store.recent(event_type="task_started")[0]
     assert row.priority == P1  # task_started is P1
@@ -271,7 +271,7 @@ def test_ctx_search_finds_event(tmp_path):
     store.capture("tool_call", {"output_preview": "grep completed"})
     store.flush()
 
-    _, search = build_context_tools(store)
+    search = {t.name: t for t in build_context_tools(store)}["ctx_search"]
     out = search.invoke({"query": "authentication"})
     assert "1 hit" in out
     assert "tool_call" in out  # the event type is surfaced in the [event] line
@@ -282,7 +282,7 @@ def test_ctx_search_no_match(tmp_path):
     store.capture("tool_call", {"output_preview": "nothing relevant"})
     store.flush()
 
-    _, search = build_context_tools(store)
+    search = {t.name: t for t in build_context_tools(store)}["ctx_search"]
     out = search.invoke({"query": "zzznonexistent"})
     assert "no prior tool output or event" in out  # unified empty-message phrasing
 

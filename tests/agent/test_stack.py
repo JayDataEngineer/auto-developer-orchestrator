@@ -33,6 +33,13 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
 from pux_harness.agent import orgs, stack
+from pux_harness.agent.prompt_parts import (
+    SUPERVISOR_PROMPT_PARTS,
+    PromptCtx,
+    PromptScope,
+    _interpreter_mounted,
+    assemble_prompt,
+)
 
 
 # --- fakes -----------------------------------------------------------------
@@ -98,6 +105,9 @@ def stub_factory(monkeypatch):
     monkeypatch.setattr(stack, "build_context_layer", lambda: ([], []))
     monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
     monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
+    # PromptCaptureMiddleware (gaps 4+5) — supervisor-only, default-on, mounts
+    # right after session_guide. Stubbed to a marker for order observability.
+    monkeypatch.setattr(stack, "PromptCaptureMiddleware", lambda: "PROMPT")
     # AuditMiddleware is opt-in; stub to a marker so the resolver test
     # can observe its presence/position without constructing a real one (which
     # would bind shared_event_store() and touch the real .pux/events.sqlite). The
@@ -152,30 +162,36 @@ def test_registry_lists_documented_names():
     added the opt-in ``audit`` spec (default OFF)."""
     names = stack.middleware_names()
     assert set(names) == {"audit", "context", "routing", "session_guide",
-                          "rubric", "model_retry", "tool_retry", "browser_vision"}
+                          "prompt_capture", "rubric", "model_retry",
+                          "tool_retry", "browser_vision"}
     # No duplicate registrations.
     assert len(names) == len(set(names))
 
 
 def test_defaults_match_pre_factory_baseline():
     """The defaults ARE the mount order, now expressed through the
-    registry: context + routing + session_guide + browser_vision on the
-    supervisor, context + browser_vision on subagents. (``rubric`` is
-    gate-driven, not a default.)"""
+    registry: context + routing + session_guide + prompt_capture +
+    browser_vision on the supervisor, context + browser_vision on subagents.
+    (``rubric`` is gate-driven, not a default.)"""
     assert stack.DEFAULT_SUPERVISOR == ["context", "routing", "session_guide",
-                                        "model_retry", "browser_vision"]
+                                        "prompt_capture", "model_retry",
+                                        "browser_vision"]
     assert stack.DEFAULT_SUBAGENT == ["context", "browser_vision"]
 
 
 def test_registry_scopes_are_correct():
-    """``audit`` + ``context`` + ``browser_vision`` are dual-scope (supervisor
-    AND subagent); ``routing`` / ``session_guide`` / ``rubric`` are supervisor-
-    only (the subagent scope grows when a subagent-scoped middleware is
-    registered)."""
+    """``audit`` + ``context`` + ``rubric`` + ``browser_vision`` are dual-scope
+    (supervisor AND subagent); ``routing`` / ``session_guide`` /
+    ``prompt_capture`` / ``model_retry`` / ``tool_retry`` are supervisor-only.
+    ``rubric`` is dual-scope so a dumb worker can mount the same non-skippable
+    verify-gate the supervisor has — tool enforcement, not a prompt plea
+    (opt-in via frontmatter; still gate-gated, so read-only agents pay
+    nothing)."""
     by_name = {s.name: s for s in stack.MIDDLEWARE_REGISTRY}
-    for name in ("routing", "session_guide", "rubric", "model_retry", "tool_retry"):
+    for name in ("routing", "session_guide", "prompt_capture",
+                 "model_retry", "tool_retry"):
         assert by_name[name].scope == {stack.Scope.SUPERVISOR}, name
-    for name in ("audit", "context", "browser_vision"):
+    for name in ("audit", "context", "rubric", "browser_vision"):
         assert by_name[name].scope == {stack.Scope.SUPERVISOR,
                                        stack.Scope.SUBAGENT}, name
 
@@ -193,7 +209,7 @@ def test_no_profile_byte_identical_baseline(fake_tree, stub_factory):
         rubric_gate=None,
         exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY"]
     sup_names = {t.name for t in plan.supervisor_tools}
     assert {"pux_sandbox_python", "pux_sandbox_browser_navigate"} <= sup_names
     # Prompt is the root + org + harness addendum (the org prose lands).
@@ -329,7 +345,7 @@ def test_browser_vision_mounts_innermost_when_enabled(fake_tree, stub_factory, m
     assert isinstance(plan.supervisor_middleware[-1], BrowserVisionMiddleware)
     assert isinstance(plan.subagents[0]["middleware"][-1], BrowserVisionMiddleware)
     # the rest of the stack is the same baseline (ROUTE, GUIDE, RETRY)
-    assert plan.supervisor_middleware[:-1] == ["ROUTE", "GUIDE", "RETRY"]
+    assert plan.supervisor_middleware[:-1] == ["ROUTE", "GUIDE", "PROMPT", "RETRY"]
 
 
 def test_browser_vision_absent_when_disabled(fake_tree, stub_factory):
@@ -341,7 +357,7 @@ def test_browser_vision_absent_when_disabled(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY"]
     assert not any(isinstance(m, BrowserVisionMiddleware)
                    for m in plan.supervisor_middleware)
     assert not any(isinstance(m, BrowserVisionMiddleware)
@@ -386,7 +402,7 @@ def test_rubric_gate_armed_appends_rubric(fake_tree, stub_factory):
         rubric_gate=_gate(max_iterations=5), exec_client="EXEC",
     )
     mw = plan.supervisor_middleware
-    assert mw == ["ROUTE", "GUIDE", "RUBRIC", "RETRY"]
+    assert mw == ["ROUTE", "GUIDE", "PROMPT", "RUBRIC", "RETRY"]
     assert mw.index("ROUTE") < mw.index("RUBRIC")  # baseline before rubric
     assert stub_factory["rubric"][0]["max_iterations"] == 5
     # Grader model via the role-resolved path (stub_factory → "MODEL"); 3 tools.
@@ -401,7 +417,7 @@ def test_rubric_gate_disabled_mounts_no_rubric(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=_gate(enabled=False), exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY"]
     assert stub_factory["rubric"] == []
 
 
@@ -429,7 +445,7 @@ def test_override_supervisor_remove_drops_routing(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["GUIDE", "RETRY"]
+    assert plan.supervisor_middleware == ["GUIDE", "PROMPT", "RETRY"]
 
 
 def test_override_supervisor_add_is_idempotent(fake_tree, stub_factory):
@@ -441,7 +457,7 @@ def test_override_supervisor_add_is_idempotent(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY"]
 
 
 def test_override_add_wins_over_remove(fake_tree, stub_factory):
@@ -464,7 +480,7 @@ def test_override_empty_block_is_byte_identical(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY"]
 
 
 # --- the opt-in ``audit`` spec ---------------------------------------------
@@ -496,7 +512,7 @@ def test_audit_opt_in_supervisor_mounts_outermost(fake_tree, stub_factory):
     mw = plan.supervisor_middleware
     assert mw[0] == "AUDIT", mw  # outermost
     # the default-on baseline still follows, unchanged, in registry order
-    assert mw[1:] == ["ROUTE", "GUIDE", "RETRY"], mw
+    assert mw[1:] == ["ROUTE", "GUIDE", "PROMPT", "RETRY"], mw
 
 
 def test_audit_opt_in_subagent_scope_allowed(fake_tree, stub_factory):
@@ -524,7 +540,7 @@ def test_excluded_middleware_field_honored(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=cfg,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["GUIDE", "RETRY"]
+    assert plan.supervisor_middleware == ["GUIDE", "PROMPT", "RETRY"]
 
 
 # --- fail-loud: unknown names + wrong scopes -------------------------------
@@ -650,7 +666,7 @@ def test_context_mounts_outermost_and_emits_tools(fake_tree, stub_factory, monke
         rubric_gate=None, exec_client="EXEC",
     )
     # context outermost, then routing, session_guide, model_retry (vision off).
-    assert plan.supervisor_middleware == ["CONTEXT", "ROUTE", "GUIDE", "RETRY"]
+    assert plan.supervisor_middleware == ["CONTEXT", "ROUTE", "GUIDE", "PROMPT", "RETRY"]
     # The retrieval tool escaped the spec into the supervisor surface.
     assert "ctx_recall" in {t.name for t in plan.supervisor_tools}
 
@@ -668,7 +684,7 @@ def test_context_is_now_removable(fake_tree, stub_factory, monkeypatch):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY"]
     assert "ctx_recall" not in {t.name for t in plan.supervisor_tools}
 
 
@@ -684,7 +700,7 @@ def test_browser_vision_is_now_removable_when_enabled(fake_tree, stub_factory, m
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "RETRY"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY"]
     assert not any(isinstance(m, BrowserVisionMiddleware)
                    for m in plan.supervisor_middleware)
 
@@ -703,7 +719,7 @@ def test_full_supervisor_order_is_canonical_registry_order(fake_tree, stub_facto
         rubric_gate=_gate(), exec_client="EXEC",
     )
     mw = plan.supervisor_middleware
-    assert mw[:4] == ["CONTEXT", "ROUTE", "GUIDE", "RUBRIC"]
+    assert mw[:4] == ["CONTEXT", "ROUTE", "GUIDE", "PROMPT", "RUBRIC"]
     assert isinstance(mw[-1], BrowserVisionMiddleware)
     assert len(mw) == 6  # context, routing, session_guide, rubric, model_retry, browser_vision
 
@@ -746,10 +762,13 @@ def test_ask_user_present_when_opted_in_over_web(fake_tree, stub_factory):
     assert "END your turn" not in plan.supervisor_prompt
 
 
-def test_ask_user_over_editor_appends_end_turn_suffix(fake_tree, stub_factory):
-    """Opt-in + editor transport (acp) → ask_user present AND the supervisor
-    prompt gains the end-turn suffix (the editor can't free-text in a permission
-    popover, so the agent must stop + the user answers next turn)."""
+def test_ask_user_over_editor_interrupts_no_suffix(fake_tree, stub_factory):
+    """Opt-in + editor transport (acp) → ask_user IS present AND the supervisor
+    prompt does NOT gain the end-turn suffix. Over ACP the tool halts via a real
+    langgraph interrupt (the server presents the question, ends the turn, and the
+    user's next freeform message resumes the thread) — so the suffix is unneeded,
+    same as the web path. Only ``direct``/``tui`` (no resumable channel) append
+    the suffix; see ``test_ask_user_turn_based_predicate`` in test_hitl.py."""
     _opt_in_ask_user(fake_tree)
     plan = stack.build_stack(
         "p", specialists=list(_SPECIALISTS), profile=None,
@@ -757,7 +776,7 @@ def test_ask_user_over_editor_appends_end_turn_suffix(fake_tree, stub_factory):
         facts=stack.RuntimeFacts(transport="acp"),
     )
     assert "ask_user" in _names(plan)
-    assert "END your turn" in plan.supervisor_prompt
+    assert "END your turn" not in plan.supervisor_prompt
 
 
 def test_ask_user_dropped_over_mcp_even_if_opted_in(fake_tree, stub_factory):
@@ -1000,3 +1019,128 @@ def test_tool_retry_requires_nonempty_tools(fake_tree, stub_factory):
     _write_profile(fake_tree, "tool_retry:\n  max_retries: 2\n")
     with pytest.raises(TypeError, match="tools"):
         profile.load_tool_retry("p")
+
+
+# --- constructed-from-parts prompt assembly (prompt_parts) ------------------
+# The supervisor prompt is no longer scattered ad-hoc string ops in build_stack —
+# it is ``assemble_prompt`` over ``SUPERVISOR_PROMPT_PARTS``. These two prove the
+# factory actually ROUTES through that registry (no inline ops left behind) and
+# that the dead ``base_system_prompt`` nuclear-replace is a runtime failure too.
+# The org-agnostic assembler unit tests + the per-agent / validate_profile
+# rejection sites live in pux-harness/tests/harness/test_prompt_parts.py.
+
+
+def test_build_stack_rejects_base_system_prompt_profile(fake_tree, stub_factory):
+    """Runtime defense-in-depth for the long-lived server path (which bypasses
+    the offline ``validate_profile`` tripwire): a ``base_system_prompt`` on the
+    profile fails BEFORE prompt assembly + model init. The guard fires after
+    middleware resolution, so the stubbed resolver keeps it cheap."""
+    with pytest.raises(ValueError, match="base_system_prompt"):
+        stack.build_stack(
+            "p",
+            specialists=list(_SPECIALISTS),
+            profile=HarnessProfileConfig(base_system_prompt="NUKE"),
+            rubric_gate=None,
+            exec_client="EXEC",
+        )
+
+
+def test_supervisor_prompt_is_the_assembled_registry(fake_tree, stub_factory):
+    """The factory's supervisor prompt EQUALS ``assemble_prompt`` over the
+    registry with the SAME inputs build_stack uses — proving no inline string
+    op shapes the prompt. The static base is ``orgs.build_system_prompt`` (the
+    very call agents_md_core wraps); each conditional flag is read off its
+    AUTHORITATIVE source — the interpreter gate from the RESOLVED middleware
+    (the same ``_interpreter_mounted(supervisor_middleware)`` call the factory
+    makes), the ask_user gate from the suffix's presence in the live prompt —
+    so the test asserts the decomposition whatever the mount/flag decision is
+    today (the prompt routes through the registry regardless)."""
+    from pux_harness.agent.hitl import ASK_USER_PROMPT_SUFFIX
+
+    plan = stack.build_stack(
+        "p",
+        specialists=list(_SPECIALISTS),
+        profile=None,
+        rubric_gate=None,
+        exec_client="EXEC",
+    )
+    expected = assemble_prompt(
+        SUPERVISOR_PROMPT_PARTS,
+        PromptCtx(
+            agents_md_base=orgs.build_system_prompt("p"),
+            system_prompt_suffix=None,
+            ask_user_active=ASK_USER_PROMPT_SUFFIX in plan.supervisor_prompt,
+            interpreter_mounted=_interpreter_mounted(plan.supervisor_middleware),
+        ),
+        PromptScope.SUPERVISOR,
+    )
+    assert plan.supervisor_prompt == expected
+
+
+# --- per-org tool-surface scoping (policy.yaml tool_surface.groups) --------
+# The SUPERVISOR's specialist tools are scoped by capability group; the
+# subagent surface stays full (subagents resolve their own tools: allowlist
+# against the un-scoped tools_surface). This is the prompt-bloat fix: a coding
+# org drops browser/desktop from the CTO prompt without losing capability.
+
+def test_scope_supervisor_tools_unit():
+    """``_scope_supervisor_tools`` drops only ``pux_sandbox_*`` specialists whose
+    group/slug isn't allowed; native (no prefix), mcp (``mcp__``), context
+    retrieval, and ``ask_user`` pass through untouched. ``None`` allow = keep
+    everything (byte-identical default)."""
+    tools = [
+        _mk_tool("pux_sandbox_python"),
+        _mk_tool("pux_sandbox_browser_navigate"),
+        _mk_tool("execute"),          # native fs/shell (no prefix)
+        _mk_tool("mcp__web_research__search"),
+        _mk_tool("ctx_recall"),       # context retrieval
+        _mk_tool("ask_user"),         # HITL, appended after scoping
+    ]
+    # None -> unchanged
+    assert [t.name for t in stack._scope_supervisor_tools(tools, None)] == [
+        t.name for t in tools
+    ]
+    # only python allowed -> browser dropped, everything else kept
+    scoped = stack._scope_supervisor_tools(tools, frozenset({"python"}))
+    names = {t.name for t in scoped}
+    assert names == {
+        "pux_sandbox_python", "execute", "mcp__web_research__search",
+        "ctx_recall", "ask_user",
+    }
+
+
+def _write_policy(fake_tree: Path, body: str) -> None:
+    (fake_tree / "orgs" / "p" / "policy.yaml").write_text(body)
+
+
+def test_tool_surface_scopes_supervisor_not_subagents(fake_tree, stub_factory, monkeypatch):
+    """With ``tool_surface.groups: [code]`` the supervisor loses
+    ``browser_navigate`` but the ``browserish`` subagent (which lists
+    ``browser_navigate`` in its ``tools:``) KEEPS it — it resolves against the
+    full ``tools_surface``, never the scoped supervisor list."""
+    # build_stack reads policy via its OWN imported ``_orgs_dir`` binding, so the
+    # fixture's monkeypatch on orgs._orgs_dir doesn't reach it — patch both.
+    monkeypatch.setattr(stack, "_orgs_dir", orgs._orgs_dir)
+    _write_policy(fake_tree, "tool_surface:\n  groups: [code]\n")
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+    )
+    sup_names = {t.name for t in plan.supervisor_tools}
+    assert "pux_sandbox_python" in sup_names
+    assert "pux_sandbox_browser_navigate" not in sup_names
+    # subagent still resolves its declared browser tool
+    assert plan.subagents[0]["name"] == "browserish"
+    sub_tools = {t.name for t in plan.subagents[0]["tools"]}
+    assert "pux_sandbox_browser_navigate" in sub_tools
+
+
+def test_no_tool_surface_is_byte_identical(fake_tree, stub_factory):
+    """An org with NO ``tool_surface`` block keeps the FULL specialist surface
+    on the supervisor (byte-identical to today)."""
+    plan = stack.build_stack(
+        "p", specialists=list(_SPECIALISTS), profile=None,
+        rubric_gate=None, exec_client="EXEC",
+    )
+    sup_names = {t.name for t in plan.supervisor_tools}
+    assert {"pux_sandbox_python", "pux_sandbox_browser_navigate"} <= sup_names

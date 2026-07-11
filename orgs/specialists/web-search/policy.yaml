@@ -1,0 +1,12 @@
+# Declarative sandbox policy for org web-search.
+#
+# No egress ACL needed: this org's only capability is the web_research MCP
+# server, which runs HOST-SIDE (HTTP at ${PUX_MCP_WEB_RESEARCH_URL}). The
+# sandbox reaches it via Docker bridge networking; the MCP server itself
+# makes all outbound web requests. The sandbox never touches the internet
+# directly.
+
+protocols:
+  - acp
+
+jobs: []
