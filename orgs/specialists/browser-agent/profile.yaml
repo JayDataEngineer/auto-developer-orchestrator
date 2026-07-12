@@ -1,0 +1,6 @@
+# Pin base_model to the worker tier — browser tasks are mechanical
+# (navigate, click, type, extract) and don't need the reasoning model's budget.
+models:
+  base_model: "@worker"
+
+ask_user: true
