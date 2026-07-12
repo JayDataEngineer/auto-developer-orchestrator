@@ -34,28 +34,47 @@ sandbox.
 ## Quick start
 
 ```bash
-# 1. Clone (with the pux-harness submodule) + sync the orchestrator venv
+# 1. Clone (with submodules) + sync the orchestrator venv
 git clone --recursive <this-repo> pux && cd pux
 uv sync                    # resolves pux-harness from the ./pux-harness/ submodule
 
-# 2. Build the sandbox image (one-time)
-cd sandbox && docker build -t pux-sandbox:latest . && cd ..
+# 2. Start host-side infra (SurrealDB + media-mcp) — one command
+make infra                 # or: make infra-core (SurrealDB only, lighter)
+                           # GPU: MEDIA_DEVICE=cuda TORCH_VARIANT=cu124 make infra
 
-# 3. Boot the sandbox container (harness-owned; or it self-boots on first tool use)
+# 3. Build the sandbox image (one-time)
+make sandbox               # or: cd sandbox && docker build -t pux-sandbox:latest .
+
+# 4. Boot the sandbox container (harness-owned; or it self-boots on first tool use)
 pux sandbox start                  # with $PUX_ORG policy if set
 
-# 4. Start the Agent Protocol server
+# 5. Start the Agent Protocol server
 #    prod (this repo's deployment): scripts/start_pux_aegra.sh   (Aegra on :9988)
 #    local keyless dev:             cd pux-harness && uv run langgraph dev
 
-# 5. Drive it (client — requires the server running)
-pux agents                         # list the 10 orgs
-pux dispatch --org general "describe this project"   # one-shot run
-pux resume                         # list recent threads
+# 6. Drive it (client — requires the server running)
+pux agents                         # list the 14 orgs
+pux dispatch --org general "describe this project"   # one-shot run → thread_id
+pux resume                         # list recent threads (+ task snippets, offline-capable)
+pux show <thread_id>               # prints last msg + the exact resume command
 
 # No server? In-process runner for dev:
 pux direct --org general --task "describe this project"   # runs the graph directly, no HTTP
 ```
+
+### What `make infra` starts
+
+| Service | Port | Used by |
+|---------|------|---------|
+| **SurrealDB** | `localhost:8000` | deep-research-engine (ns: research, db: main), game-studio, social-media-pipeline. The shared knowledge graph — persists across runs, query it to resume research. |
+| **media-mcp** | `localhost:8101` | deep-research-engine (Parakeet ASR + Pyannote diarization + Florence-2 vision). Built from the `infra/media-mcp` submodule. |
+| **ollama** | `localhost:11434` | Optional (`make infra-embeddings`). Embedding model for SurrealDB vector search. |
+
+The sandbox reaches these via `host.docker.internal` (the docker gateway). Orgs
+that need host-side services declare the URLs in their `policy.yaml`
+`sandbox.env` block — no manual configuration needed. Ray cluster (LLM, TTS,
+3D, music) is NOT managed here — only game-studio needs it; bring your own GPU
+box or set `OPENROUTER_API_KEY` for LLM fallback.
 
 The Agent Protocol server is **Aegra** in prod (OSS langgraph-api drop-in —
 `scripts/start_pux_aegra.sh`, binds the Tailscale IP on :9988) or `langgraph dev`
@@ -71,14 +90,16 @@ the harness drives the Docker sandbox directly over the SDK.
 | `pux acp [--org <name>]` | ACP stdio server — exposes one org to ACP editors (Zed / VS Code / Neovim); the editor IS the TUI. |
 | `pux mcp` | FastMCP server (SSE on :9987) wrapping the Agent Protocol — exposes orgs as MCP tools to any MCP client (Hermes, Claude Desktop, Zed). Requires the Agent Protocol server running (Aegra / `langgraph dev`). |
 | `pux direct --org <name> --task "..."` | In-process runner — no server. The verify/dev path. |
-| `pux sandbox <start\|stop\|status\|ensure>` | Docker sandbox lifecycle (harness-owned, 8g). Replaces the old `task start/stop/status`. |
+| `pux sandbox <start\|stop\|status\|ensure\|pause\|unpause\|dump-persist>` | Docker sandbox lifecycle (harness-owned, 8g). Replaces the old `task start/stop/status`. `pause`/`unpause` use the cgroup freezer — processes freeze in place (memory resident), no teardown, no re-boot. `dump-persist` streams the named Docker volume to a host tarball (the bits the workspace bind-mount does NOT cover). |
 | `pux agents` | List orgs as Agent Protocol agents (+ their specialists). |
 | `pux dispatch --org <name> "task"` | Ephemeral blocking run; prints the answer + a resumable `thread_id`. |
-| `pux resume [--org <name>]` | List recent threads. |
-| `pux show <thread_id>` | Print a thread's last message + status. |
+| `pux resume [--org <name>]` | List recent threads (with task snippets + offline fallback to the sqlite store when the server is down). The first half of "pick up where I left off". |
+| `pux show <thread_id>` | Print a thread's last message + status, AND the exact `pux direct --thread <id> --task "…"` command to resume it. Works offline. |
 | `pux history <thread_id>` | Print a thread's revision history (langgraph checkpoints). |
 | `pux run <thread_id> "task"` | Background run on an existing thread → `run_id`. |
 | `pux wait <run_id>` | Block for a background run's output. |
+| `pux direct --thread <thread_id> --task "…"` | **Resume a thread in-process** — the checkpointer restores the full conversation, the agent sees every prior turn. No server needed. |
+| `pux bundle <thread_id>` | **Optional** tarball export — transcript + artifacts + memos in one file. Works offline. `--all` ignores mtime, `--since ISO8601` filters, `--no-files` is transcript-only. |
 
 ## Tool surface
 
@@ -155,10 +176,96 @@ writes a resumable thread; revisions are langgraph checkpoints:
 
 ```bash
 pux dispatch --org general "..."   # → thread_id
-pux show <thread_id>               # last message + status
+pux resume                         # list threads (with task snippets; offline-capable)
+pux show <thread_id>               # last message + status + the resume command
 pux history <thread_id>            # revisions
-pux run <thread_id> "follow up"    # continue on the same thread
+pux run <thread_id> "follow up"    # continue on the same thread (server mode)
+pux direct --thread <thread_id> --task "follow up"   # continue in-process (no server)
 ```
+
+## Picking up where you left off (session preservation)
+
+A run is **not single-use**. Every thread's full conversation is checkpointed
+to disk, the sandbox can be frozen in place (no teardown), and the workspace
+bind-mount means files appear on the host the moment the agent writes them.
+Resume is the default; export is the optional extra.
+
+### The short version
+
+```bash
+pux resume                                    # list threads (+ task snippets)
+pux show dre-deadbeef                         # prints last msg + the resume cmd
+pux direct --thread dre-deadbeef --task "now write the substack version"
+# (equivalently: pux run dre-deadbeef "now write the substack version"  → run_id)
+
+# Freeze the sandbox between sessions instead of stop/start:
+pux sandbox pause                             # cgroup freezer — processes frozen, memory resident
+pux sandbox unpause                           # thaw — every process resumes in place
+```
+
+`pux direct --thread <id>` and `pux run <id> "…"` both route through the
+langgraph checkpointer. The agent on resume **sees every prior turn** — the
+research, the brief, the citations — as if the process never stopped. This
+holds whether the original run was `pux direct` or `pux dispatch`.
+
+### What persists, and where
+
+Every run writes to **four layers**, each with a different persistence story.
+`pux sandbox status` surfaces the sandbox ID + persist volume + thread store
+location so you can verify the state is safe before stopping.
+
+| Layer | Where it lives | Survives `sandbox stop`? | How to retrieve |
+|-------|----------------|--------------------------|-----------------|
+| Conversation + checkpoints | SQLite at `<project>/.pux/agent-protocol.sqlite` (or Postgres under Aegra prod) | yes | `pux resume`, `pux show <id>`, `pux direct --thread <id>` |
+| Workspace files (`artifacts/`, `memos/`, `.pux/sessions/`, `wild-runs/`) | **bind-mount** — `<project>/<dir>/` on host the moment the agent writes | yes (host files) | `ls <project>/artifacts/` |
+| Per-thread provenance | `<project>/.pux/sessions/<thread_id>.meta.json` (written by `pux direct`) | yes | `cat <project>/.pux/sessions/<thread_id>.meta.json` |
+| Chrome profile + apt list + `/root` dotfiles | **named Docker volume** `sandbox-<id>-persist` | yes — `destroy()` starts a stopped container to snapshot before removing; `pause`/`unpause` keeps the container alive without teardown | `pux sandbox status` (shows volume size); `pux sandbox dump-persist` for a tarball |
+
+**`PUX_SANDBOX_ID` (defaults to `mcp-default`) is the key for the named
+persist volume.** Do NOT change it between runs — doing so orphans the old
+volume (Chrome profile, installs, dotfiles) and starts a fresh one. The
+`pux sandbox status` output names the volume explicitly so you can verify.
+
+### `pause` vs `stop` — when to use which
+
+| Action | Container | Processes | Memory | Use when |
+|--------|-----------|-----------|--------|----------|
+| `pause` | stays running (frozen) | frozen in place | resident | you'll resume within hours; want zero re-boot cost |
+| `stop`  | removed | killed | gone (volume survives) | you're done for the day; frees RAM |
+| `unpause` | still running | resumed mid-instruction | resident | continuing a paused session |
+
+`pause` is the right answer to "I want to come back to this exact session
+after lunch." `stop` is the right answer to "I'm done with the sandbox
+entirely." **The thread store survives both** — `pux direct --thread <id>`
+works regardless of container state (it boots a fresh container if needed,
+then restores the conversation from the checkpointer).
+
+### Exporting a run (optional)
+
+`pux bundle` packages a thread into one tarball — useful for archival or
+handing the work to someone who doesn't have Pux installed. Works offline
+(falls back to the on-disk thread store + meta.json when the server is down):
+
+```bash
+pux bundle dre-deadbeef                       # → ./dre-deadbeef.tgz
+pux bundle dre-deadbeef --all                 # ignore mtime filter
+pux bundle dre-deadbeef --since 2026-07-12T00:00:00Z
+pux bundle dre-deadbeef --no-files            # transcript only
+
+# The named-volume bits (Chrome cookies, apt list, dotfiles):
+pux sandbox dump-persist                      # → ./sandbox-<id>-persist-<ts>.tgz
+```
+
+The bundle tarball contains `MANIFEST.json` (thread_id, agent_id, file
+inventory with sizes + mtimes, transcript source `server` or `disk`),
+`transcript.json` (full thread state + revision history), and every
+workspace file the agent wrote during the run.
+
+Workspace files are gitignored (runtime state, not source). The bundle
+output is gitignored too — it's a tarball, push it elsewhere. Artifact
+files SHOULD carry a `pux:agent=… saved=… task=… stage=…` HTML-comment
+provenance header (see `orgs/specialists/deep-research-engine/AGENTS.md`
+"Provenance") so a future reader can trace a file back to its producing run.
 
 ## Tests
 
