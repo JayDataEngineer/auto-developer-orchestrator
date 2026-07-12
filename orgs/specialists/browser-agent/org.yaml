@@ -1,3 +1,11 @@
 # No subagents. The CTO drives the browser directly via the
 # pux_sandbox_browser_* tool surface (SeleniumBase Chrome in the sandbox).
+#
+# web_research MCP (search + fetch only) is a BACKUP: when the browser is
+# blocked (paywall, captcha, JS-rendered dead end), the CTO can fall back to
+# search/fetch to get the information. Narrowed from the full [search, fetch,
+# research] catalog allowlist — "research" is omitted because the browser is
+# the primary research tool here, not the MCP.
 agents: []
+capabilities:
+  - {kind: mcp, ref: web_research, tools: [search, fetch]}

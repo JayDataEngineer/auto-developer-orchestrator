@@ -70,6 +70,11 @@ Never get stuck behind a cookie banner.
   and checking login state.
 - **Escape hatch.** `browser_evaluate` runs arbitrary JS for anything the
   dedicated tools can't do. Reach for it last.
+- **Web research backup.** If the browser is blocked (paywall, captcha,
+  JS-rendered dead end, infinite scroll), fall back to
+  `mcp__web_research__search` (title/snippet results) and
+  `mcp__web_research__fetch` (read one URL's content). These are a safety net —
+  prefer the live browser whenever possible.
 
 ## Return format
 
