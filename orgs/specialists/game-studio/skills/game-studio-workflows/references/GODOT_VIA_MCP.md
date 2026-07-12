@@ -85,10 +85,41 @@ The full tool list (39 tools, 11 families): scene-*, node-*, script-*, screensho
 
 | Failure | Recovery |
 |---------|----------|
-| `GODOT_MCP_DOWN` | Tell the CTO immediately; it routes to gameplay_programmer CLI fallback |
+| `GODOT_MCP_DOWN` | **Fall back to the headless harness** — see below. No editor bridge needed. |
 | Editor hung (timeout on call) | Don't retry — likely the editor is mid-modal. Surface the error and stop the cycle |
 | Script update rejected (parse error) | Read the error, fix the GDScript, retry once. Don't blind-retry. |
-| Screenshot file not written | Check disk space; fall back to CLI `godot --headless --screenshot` if available |
+| Screenshot file not written | Check disk space; use `godot_test_screenshot` headless instead |
+
+## MCP-Bridge-Down Fallback: Headless Godot Harness
+
+When `godot_client.py health` returns `GODOT_MCP_DOWN`, the sandbox has a
+**backup path** that downloads Godot from GitHub and runs it headlessly — no
+editor, no MCP server needed.
+
+### Step 1: Bootstrap the binary (once)
+
+```
+pux_sandbox_godot_bootstrap
+```
+
+Downloads the latest stable Godot 4.x Linux x86_64 binary from
+`godotengine/godot-builds` GitHub releases into `/sandbox/.bin/`. Resolution
+order: `godot` on PATH → cached binary → download. Idempotent — a warm cache
+or PATH hit is zero network.
+
+### Step 2: Use headless tools
+
+| Tool | What it does | Godot flag |
+|------|-------------|------------|
+| `godot_test_version` | Print the binary version | `--version` |
+| `godot_test_syntax` | Syntax-check all `.gd` files | `--check-gdscript` |
+| `godot_test_import` | Import assets (generates `.godot/imported/`) | `--import` |
+| `godot_test_screenshot` | Render a scene + capture PNG | `--screenshot` |
+| `godot_test_validate` | Validate project (script errors) | `--editor --quit` |
+| `godot_test_run` | Run GUT unit tests headlessly | `-s <script>` |
+
+All tools pass `--headless` automatically. The same binary that runs headless
+can also export builds (`--export-release`) if needed.
 
 ## What This Bridge Does NOT Do
 

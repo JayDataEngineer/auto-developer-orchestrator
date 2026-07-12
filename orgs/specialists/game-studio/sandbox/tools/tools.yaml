@@ -137,3 +137,101 @@ tools:
         required: false
         default: "{}"
         description: "JSON arguments for the tool, e.g. '{\"path\":\"res://x\"}'"
+
+  # --- godot_bootstrap.py — download headless Godot from GitHub -----------
+  # The BACKUP path: when the MCP bridge is DOWN and Godot isn't on PATH,
+  # this downloads the latest stable Godot 4.x Linux binary from
+  # godotengine/godot-builds GitHub releases into /sandbox/.bin/. Resolution
+  # order: PATH → cache → download. Idempotent. The same binary runs headless
+  # (--headless), as editor (-e), or exports (--export-release).
+  - name: godot_bootstrap
+    description: >-
+      Download headless Godot from GitHub releases if not already on PATH.
+      Returns the binary path. Idempotent: PATH → cache → download.
+      Called automatically by godot_test; call directly to pre-warm.
+    script: godot_bootstrap.py
+    invoke: flags
+    returns: text
+    timeout: 300
+
+  # --- godot_test.py — headless Godot harness (MCP bridge fallback) -------
+  # When godot_client.py health returns GODOT_MCP_DOWN, this is the fallback.
+  # Uses the locally-bootstrapped Godot binary for headless operations:
+  # syntax checks, asset import, screenshots, scene validation, test runs.
+  - name: godot_test_version
+    description: >-
+      Print the Godot version from the bootstrapped binary. Use to verify
+      Godot is available before running headless operations.
+    script: godot_test.py
+    subcommand: version
+    invoke: flags
+    returns: text
+    timeout: 300
+
+  - name: godot_test_syntax
+    description: >-
+      GDScript syntax check on all .gd files under the project. The
+      headless fallback when the MCP bridge is down. Returns per-file
+      OK/FAIL and a summary count.
+    script: godot_test.py
+    subcommand: syntax
+    invoke: flags
+    returns: text
+    timeout: 180
+
+  - name: godot_test_import
+    description: >-
+      Headless asset import. Generates .godot/imported/ metadata so scenes
+      can be opened without a running editor. Run once after adding assets.
+    script: godot_test.py
+    subcommand: import
+    invoke: flags
+    returns: text
+    timeout: 180
+
+  - name: godot_test_screenshot
+    description: >-
+      Render a scene headlessly and capture a screenshot. The MCP-bridge-down
+      fallback for QA viewport capture. Provide a Godot resource path and an
+      output PNG path inside the sandbox.
+    script: godot_test.py
+    subcommand: screenshot
+    invoke: flags
+    returns: text
+    timeout: 120
+    args:
+      - name: scene
+        type: string
+        required: true
+        description: "Godot resource path, e.g. res://scenes/main.tscn"
+      - name: out
+        type: string
+        required: true
+        description: "Output PNG path, e.g. /sandbox/workspace/qa/shot.png"
+
+  - name: godot_test_validate
+    description: >-
+      Headless project/scene validation. Opens the project headlessly to
+      check for script errors and scene structure issues. Reports SCRIPT
+      ERROR / ERROR lines if any.
+    script: godot_test.py
+    subcommand: validate
+    invoke: flags
+    returns: text
+    timeout: 60
+
+  - name: godot_test_run
+    description: >-
+      Run a GDScript test suite headlessly. Provide the resource path to a
+      test script that extends SceneTree (standard GUT pattern). The
+      MCP-bridge-down fallback for unit testing.
+    script: godot_test.py
+    subcommand: run
+    invoke: flags
+    returns: text
+    timeout: 120
+    args:
+      - name: script
+        type: string
+        required: true
+        description: "Godot resource path, e.g. res://tests/run_tests.gd"
