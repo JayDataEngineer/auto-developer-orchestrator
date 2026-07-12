@@ -49,7 +49,10 @@ services:
       - surrealdb-data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      # The surrealdb image is distroless (apko/Chainguard) — no curl, no
+      # shell. Use the surreal binary's own readiness check (same as the
+      # image's built-in HEALTHCHECK).
+      test: ["CMD", "/surreal", "isready", "--endpoint", "http://localhost:8000"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -77,6 +80,20 @@ services:
       MEDIA_IDLE_TIMEOUT: ${MEDIA_IDLE_TIMEOUT:-1800}
     volumes:
       - media-models:/app/models
+    healthcheck:
+      # FastMCP exposes no /health; verify the MCP endpoint answers JSON-RPC
+      # (same approach as media-mcp's own docker-compose.yml).
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -X POST http://localhost:8001/mcp
+          -H 'Content-Type: application/json'
+          -H 'Accept: application/json, text/event-stream'
+          -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"hc","version":"1"}}}'
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   ollama:
     image: ollama/ollama:latest
