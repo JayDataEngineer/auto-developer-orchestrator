@@ -1,17 +1,17 @@
 """ACP ship-readiness test suite.
 
 The comprehensive gate: every org in the repo must boot, handshake, and speak
-ACP correctly. Split into four sections of escalating scope:
+ACP correctly. Split into five sections of escalating scope:
 
 Section 1 — Handshake (no tokens, always runs):
-    All 13 orgs do initialize + new_session over the REAL stdio transport.
+    All 14 orgs do initialize + new_session over the REAL stdio transport.
     Proves each org's factory compiles, the AgentServerACP wiring is correct,
     and a session is minted. No model tokens, no sandbox boot — the factory
     fires lazily from ``prompt``, never reached here. This is the cheapest
     "does it boot?" gate.
 
 Section 2 — Live prompt (PUX_E2E=1):
-    All 13 orgs respond to a trivial prompt with streamed
+    All 14 orgs respond to a trivial prompt with streamed
     ``agent_message_chunk`` text. Proves the full wire path end-to-end:
     subprocess → JSON-RPC → factory → graph → real model → streamed response.
 
@@ -28,9 +28,14 @@ Section 4 — game-studio godot routing (PUX_E2E=1):
     A godot-provoking prompt triggers a ``mcp__godot-mcp-runtime__*`` tool
     call, proving the per-agent MCP gate routes over the live wire.
 
+Section 5 — browser-agent e2e (PUX_E2E=1):
+    browser-agent drives the in-container SeleniumBase Chrome. A navigation
+    prompt must trigger a ``pux_sandbox_browser_*`` tool call — proving the
+    full sandbox → sb_server → Chrome → tool-injection chain is ship-ready.
+
     PUX_E2E=1 uv run pytest tests/integration/test_acp_ship_readiness.py -q
 
-Section 1 runs unconditionally; Sections 2-4 skip without PUX_E2E=1.
+Section 1 runs unconditionally; Sections 2-5 skip without PUX_E2E=1.
 """
 from __future__ import annotations
 
@@ -435,4 +440,61 @@ def test_game_studio_godot_routes_to_gameplay_programmer() -> None:
     assert godot_calls, (
         f"game-studio: supervisor did not route to gameplay-programmer, or "
         f"godot-mcp-runtime tools not injected; tool_calls={tools!r}"
+    )
+
+
+# ===========================================================================
+# Section 5 — browser-agent e2e (sandbox browser tool execution)
+# ===========================================================================
+#
+# browser-agent is a standalone org (no subagents — the CTO IS the browser
+# agent, mirroring web-search's pattern). Its entire tool surface is
+# ``pux_sandbox_browser_*`` running inside the Docker sandbox's SeleniumBase
+# Chrome (sb_server). The generic live-prompt test ("Reply with one word: ready.
+# Use no tools.") proves the wire path, but for a browser org "use no tools" is
+# the wrong axis — the browser IS all tools. This section exercises the actual
+# browser: a navigation prompt must trigger a ``pux_sandbox_browser_*`` tool call
+# streamed over ACP.
+#
+# This is the most infrastructure-dependent test in the suite: the sandbox
+# container must be up, sb_server must have survived its stealth-mode boot
+# (Chrome cold-start + CDP attach), and the agent must successfully invoke the
+# in-container browser. If this passes, the full browser chain is ship-ready:
+# org.yaml → policy.yaml → sandbox boot → sb_server → Chrome → tool injection →
+# agent invocation → ACP stream.
+
+
+@_live
+def test_browser_agent_navigates_real_page() -> None:
+    """A navigation prompt triggers a real browser tool call over ACP.
+
+    browser-agent must drive the in-container SeleniumBase Chrome via a
+    ``pux_sandbox_browser_*`` tool (navigate, search, or screenshot). This
+    proves: (1) the standalone org arms the browser specialist tools correctly,
+    (2) the sandbox sb_server is up and responsive (stealth Chrome survived
+    boot — the ``pkill -f chromium`` self-kill bug is NOT present), (3) the
+    warmup job (policy.yaml ``jobs:``) or cold-start brought the browser online,
+    (4) the tool call streams back as a ``tool_call`` session_update over ACP.
+
+    If this fails with no browser tool call, check (in order): sb_server logs
+    inside the container (``docker exec ... cat /var/log/supervisor/sb-server-
+    error.log``), the container's memory limit (``docker inspect ... --format
+    '{{.HostConfig.Memory}}'`` — must be 4 GiB for browser orgs), and the
+    pkill patterns in ``sandbox/scripts/sb_server.py`` (bare ``chromium``
+    matches ``--use-chromium`` in sb_server's own argv → self-SIGKILL).
+    """
+    _text, _kinds, tools, resp = asyncio.run(
+        _prompt_and_collect(
+            "Use your browser to navigate to https://example.com and tell me "
+            "the page title. You MUST call browser_navigate to do this — do "
+            "not use any web search or fetch tool.",
+            org="browser-agent",
+        )
+    )
+    assert resp is not None, "browser-agent: prompt returned None"
+    browser_calls = [t for t in tools if "browser" in t.lower()]
+    assert browser_calls, (
+        f"browser-agent: no pux_sandbox_browser_* tool call streamed; the "
+        f"in-container sb_server may not be running (check sandbox boot). "
+        f"tool_calls={tools!r}"
     )

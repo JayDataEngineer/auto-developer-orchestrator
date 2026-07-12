@@ -21,6 +21,14 @@
 
 sandbox:
   tier: isolated
+  # Chrome + SeleniumBase + sb_server cold-start spikes well above the harness
+  # default (2 GiB). Under 2 GiB the OOM killer reaps Chrome and sb_server
+  # before they ever bind (SIGKILL, exit 137 — supervisord logs "Exited too
+  # quickly"). 4 GiB / 4 cores covers the cold-start spike with headroom;
+  # steady-state settles back under 1 GiB. Coding orgs that don't mount a
+  # browser leave this unset and inherit the lean default.
+  memory_mb: 4096
+  cpu_cores: 4.0
 
 browser:
   cookies_env: BROWSER_COOKIES_B64

@@ -617,7 +617,9 @@ class BrowserState:
 
         import subprocess as _sp
         import time as _t
-        for _pat in ("google-chrome", "chromium-browser", "chromium"):
+        # Precise binary names only — see _init_browser_stealth for why bare
+        # "chromium" is fatal (matches --use-chromium in our own argv).
+        for _pat in ("google-chrome-stable", "chromium-browser"):
             try:
                 _sp.run(
                     ["pkill", "-9", "-f", "%s.*--user-data-dir=/tmp/uc_" % _pat],
@@ -648,8 +650,17 @@ class BrowserState:
         import subprocess as _sp
         import time as _t
 
-        # Kill ALL existing Chrome processes — supervisord's and any strays
-        for _pat in ("google-chrome", "chromium-browser", "chromium"):
+        # Kill ALL existing Chrome processes — supervisord's and any strays.
+        # Patterns MUST be precise binary names, NOT substrings like bare
+        # "chromium" — pkill -f matches against /proc/<pid>/cmdline, and
+        # sb_server's OWN argv is
+        #   "python3 .../sb_server.py --stealth --use-chromium"
+        # so ``pkill -9 -f chromium`` matches "--use-chromium" → self-SIGKILL
+        # → silent exit before the server ever binds (no log, no traceback,
+        # supervisord reports "Exited too quickly"). The full Debian package
+        # binary names (google-chrome-stable / chromium-browser) are unique
+        # enough to never collide with our own argv.
+        for _pat in ("google-chrome-stable", "chromium-browser"):
             try:
                 _sp.run(["pkill", "-9", "-f", _pat], capture_output=True, timeout=5)
             except Exception:
