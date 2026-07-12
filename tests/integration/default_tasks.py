@@ -34,6 +34,10 @@ DEFAULT_TASKS: dict[str, str] = {
         "Use the web_research `search` tool to look up 'pux sandbox orchestrator'. "
         "Report the top result title and URL verbatim."
     ),
+    "browser-agent": (
+        "Use the `browser_navigate` tool to open https://example.com and report "
+        "the page title verbatim."
+    ),
     # --- The remaining 7 orgs. Each forces delegation to a named
     # specialist and drives a NATIVE tool against the org's OWN bundled content
     # (no external keys/images needed). Answers are verifiable against the FS.

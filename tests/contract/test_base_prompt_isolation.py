@@ -58,7 +58,7 @@ BASE_MARKERS = [
 
 # Orgs that are intentionally standalone — they don't ``extends: general``
 # (see each org.yaml for the rationale). Exempt from the base-present contract.
-STANDALONE_ORGS = frozenset({"fs-explorer", "web-search"})
+STANDALONE_ORGS = frozenset({"browser-agent", "fs-explorer", "web-search"})
 
 
 def _dev_guide_leaks(prompt: str) -> list[str]:

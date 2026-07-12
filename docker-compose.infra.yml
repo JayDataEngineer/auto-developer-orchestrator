@@ -1,0 +1,100 @@
+# Host-side shared infrastructure for auto-developer-orchestrator.
+#
+# Everything an org needs that ISN'T the sandbox container. One command:
+#
+#   make infra                      # or: docker compose -f docker-compose.infra.yml up -d
+#
+# What lives here:
+#   surrealdb   The shared knowledge graph + task_run store. Used by
+#               deep-research-engine (ns: research, db: main),
+#               game-studio (ns: studio, db: game-studio),
+#               social-media-pipeline (task_run persistence).
+#               Orgs reach it inside the sandbox via host.docker.internal:8000.
+#
+#   media-mcp   Audio (Parakeet ASR + Pyannote diarization), vision (Florence-2,
+#               YOLO, WD14), and video analysis. Used by deep-research-engine
+#               for ingest. Exposed on port 8101 — what audio_client.py defaults
+#               to (MEDIA_MCP_URL=http://localhost:8101). Built from the
+#               infra/media-mcp submodule. CPU by default; GPU override via
+#               MEDIA_DEVICE=cuda TORCH_VARIANT=cu124 (see media-mcp Dockerfile).
+#
+#   ollama      Local embedding model (mxbai-embed-large) for SurrealDB vector
+#               search. OPTIONAL — only needed for vector-search queries, not
+#               for basic insert/select. Started in the "embeddings" profile;
+#               `make infra` starts it, `make infra-core` skips it.
+#
+# What does NOT live here (bring your own — game-studio only):
+#   Ray cluster (Tailscale) — LLM, TTS, 3D, music, ComfyUI. That's a GPU box
+#   for the game studio render pipeline. No other org needs it. If you don't
+#   have it, set OPENROUTER_API_KEY for LLM fallback.
+#
+# Data persistence:
+#   Named volumes survive container rebuilds and `make infra-down`.
+#   Use `make infra-destroy` to wipe the data volumes.
+
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    container_name: orchestrator-surrealdb
+    # The official image runs as user "nonroot" by default, but the named
+    # volume mounts as root:root → "Permission denied" on first write. Run
+    # as root for the dev infra — this is a local dev container, not prod.
+    user: "0:0"
+    ports:
+      - "8000:8000"
+    # surrealdb 2.x deprecated file:// — use surrealkv (pure-Rust embedded
+    # store, the recommended single-node backend).
+    command: ["start", "--user", "root", "--pass", "root", "surrealkv:/data/srdb.db"]
+    volumes:
+      - surrealdb-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  media-mcp:
+    build:
+      context: ./infra/media-mcp
+      args:
+        TORCH_VARIANT: ${TORCH_VARIANT:-cpu}
+    image: orchestrator-media-mcp:latest
+    container_name: orchestrator-media-mcp
+    init: true
+    restart: unless-stopped
+    ports:
+      # 8101 is what DRE's audio_client.py defaults to
+      # (MEDIA_MCP_URL=http://localhost:8101). Sandbox reaches it via
+      # host.docker.internal:8101.
+      - "8101:8001"
+    environment:
+      MEDIA_HOST: "0.0.0.0"
+      MEDIA_PORT: "8001"
+      MEDIA_DEVICE: ${MEDIA_DEVICE:-cpu}
+      MEDIA_PROFILE: ${MEDIA_PROFILE:-standard}
+      MEDIA_IDLE_TIMEOUT: ${MEDIA_IDLE_TIMEOUT:-1800}
+    volumes:
+      - media-models:/app/models
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: orchestrator-ollama
+    profiles: ["embeddings"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  surrealdb-data:
+  media-models:
+  ollama-models:

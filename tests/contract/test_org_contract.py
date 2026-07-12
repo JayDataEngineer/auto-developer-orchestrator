@@ -44,8 +44,8 @@ from pux_harness.sandbox.tools.registry import NATIVE_FS_TOOLS
 # --- the green gate ------------------------------------------------------
 
 EXPECTED_ORGS = {
-    "_demo", "coder", "deep-research-engine", "fs-explorer", "game-studio",
-    "general", "invest", "orchestrator", "social-media-pipeline",
+    "_demo", "browser-agent", "coder", "deep-research-engine", "fs-explorer",
+    "game-studio", "general", "invest", "orchestrator", "social-media-pipeline",
     "telegram-agent", "twitter-agent", "video-production", "web-search",
 }
 

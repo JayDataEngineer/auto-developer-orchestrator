@@ -1,35 +1,51 @@
 # Declarative sandbox policy for org deep-research-engine.
 #
-# Migrated off host networking (default TierBridged) to bridge + egress
-# allowlist. Two classes of upstream dependency:
+# Bridge + egress allowlist. All upstream deps are host-side services managed
+# by `make infra` (docker-compose.infra.yml) — reached inside the sandbox via
+# host.docker.internal:
 #
-#   1. Ray cluster (Tailscale 100.86.69.57) — reachable from bridge, proven
-#      by game-studio. Carries the LLM API ingress, media-mcp, and web-mcp.
-#         18080 — API Ingress (LLM, used by context_engine / entity_extract)
-#         8101  — media-mcp (face / audio / video ingest clients)
-#         8327  — web-mcp (web research tools)
+#   1. Host-side media-mcp (port 8101) — Parakeet ASR + Pyannote diarization +
+#      face/video analysis. Built from infra/media-mcp submodule. This is what
+#      audio_client.py hits (MEDIA_MCP_URL=http://localhost:8101 default).
 #
-#   2. Host-side SurrealDB (port 8000) — the shared knowledge graph,
-#      started on the operator's machine via shared-docker-infra. Under
-#      bridge networking this is reached via host.docker.internal, which
-#      Docker maps to the host-gateway IP. The Go egress resolver passes
-#      that name through verbatim and apply-egress-policy.sh resolves it
-#      inside the container via /etc/hosts (local lookup, no DNS).
+#   2. Host-side SurrealDB (port 8000) — the shared knowledge graph
+#      (namespace: research, database: main). Persists across runs — query it
+#      to resume research or check what's already ingested.
 #
-# Public-internet fallbacks: openrouter.ai (LLM when OPENROUTER_API_KEY is
-# set instead of the Ray ingress) + github.com (source pulls).
+# LLM: context_engine / entity_extract default to http://localhost:18080 (the
+# Ray API ingress). If the Ray cluster is unreachable, set OPENROUTER_API_KEY
+# and they fall back to OpenRouter automatically.
+#
+# Public-internet: openrouter.ai (fallback LLM) + github.com (source pulls).
 
 sandbox:
   tier: isolated
+  # Static config for host-side infra started by `make infra`. These are NOT
+  # secrets (no auth tokens) — just the URLs the sandbox needs to reach the
+  # host-side services via the docker gateway. Secrets belong in credentials.
+  env:
+    # Direct SurrealDB (no /surreal Caddy prefix — that's for the proxy setup).
+    # The sandbox reaches the host via host.docker.internal (the docker
+    # gateway, mapped in container.py via extra_hosts).
+    SURREALDB_URL: "http://host.docker.internal:8000"
+    SURREALDB_NS: "research"
+    SURREALDB_DB: "main"
+    # media-mcp (Parakeet ASR + Pyannote + vision) on host port 8101.
+    MEDIA_MCP_URL: "http://host.docker.internal:8101"
 
 egress:
   allow:
-    # Ray cluster on Tailscale — LLM ingress + media-mcp + web-mcp.
-    - host: 100.86.69.57
-      ports: [18080, 8101, 8327]
-    # Host-side SurrealDB — resolved inside the container via host-gateway.
+    # Host-side media-mcp (Parakeet ASR, Pyannote, face/video) — started by
+    # `make infra`. Resolved inside the container via host-gateway.
+    - host: host.docker.internal
+      port: 8101
+    # Host-side SurrealDB — the knowledge graph.
     - host: host.docker.internal
       port: 8000
+    # Ray cluster API ingress (LLM). Only needed if OPENROUTER_API_KEY is NOT
+    # set. Game-studio also uses this for TTS/3D/music — DRE only needs LLM.
+    - host: 100.86.69.57
+      port: 18080
     # OpenRouter fallback LLM path (entity_extract / context_engine).
     - host: openrouter.ai
       port: 443
