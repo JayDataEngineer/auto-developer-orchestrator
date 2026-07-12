@@ -15,6 +15,22 @@
 sandbox:
   tier: isolated
 
+# Resolve GODOT_PATH host-side BEFORE the MCP session opens. The
+# godot-mcp-runtime MCP server inherits this env var and uses it to find
+# (or launch) the Godot binary. Resolution order in godot_bootstrap.py:
+# (1) godot on PATH → use it, zero download; (2) cached binary in
+# /sandbox/.bin → use it; (3) download latest stable 4.x from
+# godotengine/godot-builds GitHub releases. Idempotent.
+#
+# The LLM sees mcp__godot-mcp-runtime__* tools — the SAME surface regardless
+# of which resolution path fired. That's the point of MCP: where the server
+# (and its dependency) lives is infrastructure, not the LLM's concern.
+host_setup:
+  - name: resolve_godot
+    helper_script: orgs/specialists/game-studio/sandbox/godot_bootstrap.py
+    exports:
+      GODOT_PATH: stdout
+
 egress:
   allow:
     # Ray cluster on Tailscale.

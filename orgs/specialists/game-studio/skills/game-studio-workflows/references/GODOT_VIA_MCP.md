@@ -1,129 +1,110 @@
 # GODOT_VIA_MCP
 
-How to drive the Godot editor from a sandbox via the IvanMurzak/Godot-MCP HTTP bridge.
+How to drive Godot from the game-studio org via the `godot-mcp-runtime` MCP server.
 
-## Pre-flight: Check the Bridge
+## The MCP surface
 
-```bash
-python3 /sandbox/godot_client.py health
+The LLM sees `mcp__godot-mcp-runtime__*` tools — 36 tools covering scene
+editing, node management, scripting, screenshots, input simulation, project
+management, autoloads, and more. This is the SINGLE Godot surface.
+
+**Where Godot lives doesn't matter.** The `godot-mcp-runtime` MCP server
+finds Godot via `GODOT_PATH` (env var). The resolution is:
+
+1. Godot on PATH → use it, zero download.
+2. Cached binary at `.pux/godot/` → use it.
+3. Download latest stable 4.x from `godotengine/godot-builds` GitHub releases.
+
+The `godot_bootstrap.py` script (run by the `host_setup` hook in
+`policy.yaml` before the MCP session opens, and also resolved into `.env`)
+handles this. The LLM never sees the resolution — it just sees the tools.
+
+## Common workflows
+
+### Launch the editor
+
+```
+mcp__godot-mcp-runtime__launch_editor
 ```
 
-Responses:
-- JSON with `status: ok` + editor state → bridge is up, Godot editor is connected
-- `GODOT_MCP_DOWN` → server not reachable OR Godot editor not running with plugin
+Launches the Godot editor (headless or GUI depending on the environment).
 
-**On `GODOT_MCP_DOWN`:** Do NOT retry in a tight loop. The CTO needs to know. Return cleanly with a "GODOT_MCP_DOWN — falling back to CLI" message so it can route to gameplay_programmer for headless test runs instead.
+### Open / create / save scenes
 
-## Common Workflows
-
-### Open a scene for editing
-
-```bash
-python3 /sandbox/godot_client.py scene-open res://scenes/player.tscn
+```
+mcp__godot-mcp-runtime__create_scene
+mcp__godot-mcp-runtime__attach_project
+mcp__godot-mcp-runtime__save_scene
+mcp__godot-mcp-runtime__get_scene_tree
+mcp__godot-mcp-runtime__get_scene_dependencies
 ```
 
-### Read a script (before editing)
+### Node management
 
-```bash
-python3 /sandbox/godot_client.py script-read res://scripts/player_controller.gd
+```
+mcp__godot-mcp-runtime__add_node
+mcp__godot-mcp-runtime__duplicate_node
+mcp__godot-mcp-runtime__delete_nodes
+mcp__godot-mcp-runtime__get_node_properties
+mcp__godot-mcp-runtime__set_node_properties
+mcp__godot-mcp-runtime__connect_signal
+mcp__godot-mcp-runtime__disconnect_signal
 ```
 
-### Update a script
+### Scripts
 
-Write the new content to a file first, then push:
-
-```bash
-cat > /sandbox/workspace/edits/player_controller.gd << 'EOF'
-extends CharacterBody2D
-
-# new content here
-EOF
-
-python3 /sandbox/godot_client.py script-update \
-    res://scripts/player_controller.gd \
-    --content /sandbox/workspace/edits/player_controller.gd
+```
+mcp__godot-mcp-runtime__run_script       # live GDScript eval
+mcp__godot-mcp-runtime__attach_script
 ```
 
-### Save the active scene
+### Screenshots and input
 
-```bash
-python3 /sandbox/godot_client.py scene-save
+```
+mcp__godot-mcp-runtime__take_screenshot
+mcp__godot-mcp-runtime__simulate_input
+mcp__godot-mcp-runtime__get_ui_elements
 ```
 
-### Capture viewport for QA
+### Run and debug
 
-```bash
-python3 /sandbox/godot_client.py screenshot-viewport \
-    --out /sandbox/workspace/qa/cycle-1/viewport.png
+```
+mcp__godot-mcp-runtime__run_project
+mcp__godot-mcp-runtime__stop_project
+mcp__godot-mcp-runtime__get_debug_output
 ```
 
-### Inspect runtime errors after a playtest
+### Autoloads
 
-```bash
-python3 /sandbox/godot_client.py runtime-errors-get
-python3 /sandbox/godot_client.py console-logs
+```
+mcp__godot-mcp-runtime__list_autoloads
+mcp__godot-mcp-runtime__add_autoload
+mcp__godot-mcp-runtime__remove_autoload
+mcp__godot-mcp-runtime__update_autoload
 ```
 
-### Escape hatch — call any of the 39 tools
+### Project management
 
-```bash
-python3 /sandbox/godot_client.py call node-find --args '{"path":"res://scenes/player.tscn/Player"}'
-python3 /sandbox/godot_client.py call resource-find --args '{"type":"Sprite2D"}'
-python3 /sandbox/godot_client.py call editor-selection-get --args '{}'
+```
+mcp__godot-mcp-runtime__list_projects
+mcp__godot-mcp-runtime__get_project_info
+mcp__godot-mcp-runtime__get_project_settings
+mcp__godot-mcp-runtime__get_project_files
+mcp__godot-mcp-runtime__search_project
+mcp__godot-mcp-runtime__validate
 ```
 
-The full tool list (39 tools, 11 families): scene-*, node-*, script-*, screenshot-*, resource-*, editor-*, console-*, reflection-*, runtime-errors-*. See [IvanMurzak/Godot-MCP](https://github.com/IvanMurzak/Godot-MCP) for argument schemas.
+## Coordination
 
-## Coordination with the CTO
+- **One scene change per call.** Don't batch parallel edits — the editor
+  serializes them and you risk write conflicts.
+- **Save after meaningful changes.** Don't accumulate unsaved edits.
+- **Screenshot after every playtest.** QA needs the visual.
 
-- **Always health-check first.** Don't burn a delegation round on a dead server.
-- **One scene change per call.** Don't batch 5 script-update calls in parallel — the editor serializes them anyway and you risk write conflicts.
-- **Save after meaningful changes.** Don't accumulate 10 unsaved edits — if the editor crashes, all are lost.
-- **Screenshot after every playtest.** QA needs the visual; vibes are scored from screenshots, not logs.
-
-## Failure Modes
+## Failure modes
 
 | Failure | Recovery |
 |---------|----------|
-| `GODOT_MCP_DOWN` | **Fall back to the headless harness** — see below. No editor bridge needed. |
-| Editor hung (timeout on call) | Don't retry — likely the editor is mid-modal. Surface the error and stop the cycle |
-| Script update rejected (parse error) | Read the error, fix the GDScript, retry once. Don't blind-retry. |
-| Screenshot file not written | Check disk space; use `godot_test_screenshot` headless instead |
-
-## MCP-Bridge-Down Fallback: Headless Godot Harness
-
-When `godot_client.py health` returns `GODOT_MCP_DOWN`, the sandbox has a
-**backup path** that downloads Godot from GitHub and runs it headlessly — no
-editor, no MCP server needed.
-
-### Step 1: Bootstrap the binary (once)
-
-```
-pux_sandbox_godot_bootstrap
-```
-
-Downloads the latest stable Godot 4.x Linux x86_64 binary from
-`godotengine/godot-builds` GitHub releases into `/sandbox/.bin/`. Resolution
-order: `godot` on PATH → cached binary → download. Idempotent — a warm cache
-or PATH hit is zero network.
-
-### Step 2: Use headless tools
-
-| Tool | What it does | Godot flag |
-|------|-------------|------------|
-| `godot_test_version` | Print the binary version | `--version` |
-| `godot_test_syntax` | Syntax-check all `.gd` files | `--check-gdscript` |
-| `godot_test_import` | Import assets (generates `.godot/imported/`) | `--import` |
-| `godot_test_screenshot` | Render a scene + capture PNG | `--screenshot` |
-| `godot_test_validate` | Validate project (script errors) | `--editor --quit` |
-| `godot_test_run` | Run GUT unit tests headlessly | `-s <script>` |
-
-All tools pass `--headless` automatically. The same binary that runs headless
-can also export builds (`--export-release`) if needed.
-
-## What This Bridge Does NOT Do
-
-- Run the game head-to-head with the previous build (use godot CLI for A/B)
-- Author new scenes from scratch (use Godot editor manually)
-- Profile performance (use Godot's built-in profiler via the editor)
-- Package exports (use godot CLI `--export-release`)
+| Server unreachable | The host_setup hook resolves GODOT_PATH before the session opens; if the download itself failed, check network + disk space, then re-run `python3 orgs/specialists/game-studio/sandbox/godot_bootstrap.py` |
+| Editor hung (timeout) | Don't retry — likely mid-modal. Surface the error and stop |
+| Script error | Read the error, fix the GDScript, retry once |

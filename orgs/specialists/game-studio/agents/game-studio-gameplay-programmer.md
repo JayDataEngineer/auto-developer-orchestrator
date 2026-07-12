@@ -55,21 +55,6 @@ python3 departments/engineering/game/tools/godot_test.py evaluate     # AI playt
 
 ## Skills (reference)
 
-- **GODOT_VIA_MCP** — drive the Godot editor from the sandbox via HTTP. Use when you need scene edits, script-read/update, or viewport screenshots. Health-check first.
+- **GODOT_VIA_MCP** — the `mcp__godot-mcp-runtime__*` tools are your Godot surface. Use them for scene edits, script-read/update, screenshots, input simulation, live GDScript eval, project management, autoloads, and more. 36 tools total.
 
-Use `/sandbox/godot_client.py` — it reads `GODOT_MCP_URL` from env. The local Godot editor must be running with the IvanMurzak plugin for the bridge to work.
-
-### MCP-bridge-down fallback
-
-On `GODOT_MCP_DOWN`, fall back to the **headless Godot harness** — no editor bridge needed:
-
-1. `pux_sandbox_godot_bootstrap` — download headless Godot from GitHub releases into `/sandbox/.bin/` (PATH → cache → download; idempotent). Call once to pre-warm.
-2. `pux_sandbox_godot_test_*` — the headless harness tools:
-   - `godot_test_version` — verify the binary is available
-   - `godot_test_syntax` — `--check-gdscript` on all `.gd` files
-   - `godot_test_import` — headless asset import (generates `.godot/imported/`)
-   - `godot_test_screenshot` — headless render + screenshot
-   - `godot_test_validate` — headless project validation (script errors)
-   - `godot_test_run` — run GUT unit tests headlessly
-
-The bootstrap script (`/sandbox/godot_bootstrap.py`) auto-downloads the latest stable Godot 4.x Linux binary when `godot` isn't on PATH. The same binary runs headless, as editor, or exports — `--headless` is the switch.
+Where Godot lives doesn't matter to you — it's resolved transparently (pre-installed on the host OR downloaded from GitHub releases by `godot_bootstrap.py`). You always see the same `mcp__godot-mcp-runtime__*` tools regardless.

@@ -141,7 +141,10 @@ def ensure_godot() -> str | None:
     if on_path:
         return on_path
 
-    dest_dir = Path(os.environ.get("GODOT_BOOTSTRAP_DIR", "/sandbox/.bin"))
+    dest_dir = Path(os.environ.get(
+        "GODOT_BOOTSTRAP_DIR",
+        str(Path(__file__).resolve().parent.parent.parent.parent.parent / ".pux" / "godot"),
+    ))
 
     # (2) cache hit — any Godot executable in dest_dir from a prior run
     if dest_dir.is_dir():
