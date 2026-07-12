@@ -1,0 +1,38 @@
+# Declarative sandbox policy for org browser-agent.
+#
+# A single-browser-agent org for general web tasks. The sandbox runs an
+# in-container SeleniumBase Chrome (sb_server) that the browser agent drives
+# via the pux_sandbox_browser_* tool surface.
+#
+# Cookies:
+#   Optional pre-seed via BROWSER_COOKIES_B64 env var. The operator exports
+#   base64-encoded cookie JSON (typically from extract_browser_cookies.py):
+#
+#     export BROWSER_COOKIES_B64=$(python3 orgs/_shared/sandbox/extract_browser_cookies.py \
+#         --browser brave --domain example.com --b64)
+#
+#   The seed-cookies supervisor decodes + injects them at boot. Cookies are
+#   NOT required — the org works without them (the browser agent handles
+#   cookie consent banners on its own). Set the env var only when you need
+#   authenticated sessions.
+#
+# Egress: open (no allowlist) — a general-purpose browser org must reach any
+# site. The sandbox runs on the default isolated Docker bridge.
+
+sandbox:
+  tier: isolated
+
+browser:
+  cookies_env: BROWSER_COOKIES_B64
+
+protocols:
+  - acp
+  - agui
+
+# Pre-run: warm the in-container SeleniumBase Chrome so the first browser tool
+# call doesn't pay the SeleniumBase CDP-attach cold start.
+jobs:
+  - name: warmup_browser
+    script: orgs/_shared/sandbox/warmup_browser.py
+    timeout: 90
+    description: "Pre-warm the in-container SeleniumBase Chrome (sb_server /warmup) so the first browser tool call skips cold-start latency"

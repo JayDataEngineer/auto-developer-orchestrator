@@ -51,6 +51,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # first (no specialists), then the specialist orgs alphabetically.
 ALL_ORGS = [
     "_demo",
+    "browser-agent",
     "coder",
     "deep-research-engine",
     "fs-explorer",

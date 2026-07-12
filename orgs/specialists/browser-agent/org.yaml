@@ -1,0 +1,3 @@
+extends: general
+inherit_roster: false
+agents: [browser]
