@@ -12,46 +12,32 @@ The CTO loop: `delegate_to ingestion-director → delegate_to auditor → if gap
 
 If your task created tables not covered by check 7's hardcoded list (e.g. `pdf_chunk` from a future PDF pipeline), add a count query for that table's embedding column before yielding. Don't ship a new vector column without a coverage check.
 
-## Setup
+## How to run queries
 
-```bash
-# Required env (loaded by sandbox workers)
-export SURREAL_PASSWORD=root    # matches docker-compose.yml surrealdb service
+EVERY query in this skill is run via the `mcp__surreal__query` tool. You call it by name — you never construct URLs, run curl, or manage auth. The tool handles the SurrealDB connection internally.
+
+```
+mcp__surreal__query(sql="<SurrealQL statement>")
 ```
 
-All queries go directly to SurrealDB on `http://localhost:8000/sql` with headers `surreal-ns: research` + `surreal-db: main` (SurrealDB v3.1+ requires lowercase header names — the uppercase `NS`/`DB` form was deprecated).
+Returns JSON results. For quick table counts, use `mcp__surreal__query(sql="RETURN count(SELECT id FROM item)")`.
 
 ## Check 1 — transcripts_complete
 
 **Goal:** every `item` of type `voice` or `video` has a `transcript` child with non-empty `text`. Target: 100% coverage of populated voice/video items.
 
-```bash
+```
 # Count voice/video items missing a transcript OR with empty-text transcript.
-# SurrealDB v3 syntax: array::len() on graph-traversed field.
-# ->transcribed_by->transcript.text returns array of text values from linked transcripts.
-MISSING=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d 'SELECT count() FROM item WHERE type IN ["voice", "video"] AND (count(->transcribed_by->transcript) = 0 OR array::len(->transcribed_by->transcript.text) = 0) GROUP ALL' \
-    | jq -r '.[0].result[0].count')
+mcp__surreal__query(sql="SELECT count() FROM item WHERE type IN ['voice', 'video'] AND (count(->transcribed_by->transcript) = 0 OR array::len(->transcribed_by->transcript.text) = 0) GROUP ALL")
 
-TOTAL=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d 'SELECT count() FROM item WHERE type IN ["voice", "video"] GROUP ALL' \
-    | jq -r '.[0].result[0].count')
-
-echo "transcripts: $((TOTAL - MISSING))/$TOTAL"
+# Total voice/video items
+mcp__surreal__query(sql="SELECT count() FROM item WHERE type IN ['voice', 'video'] GROUP ALL")
 ```
 
 **Pass:** MISSING = 0.
 **Fail sample:** list first 5 missing IDs:
-```bash
-curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d 'SELECT id FROM item WHERE type IN ["voice", "video"] AND (count(->transcribed_by->transcript) = 0 OR array::len(->transcribed_by->transcript.text) = 0) LIMIT 5' \
-    | jq -r '.[0].result[].id'
+```
+mcp__surreal__query(sql="SELECT id FROM item WHERE type IN ['voice', 'video'] AND (count(->transcribed_by->transcript) = 0 OR array::len(->transcribed_by->transcript.text) = 0) LIMIT 5")
 ```
 
 **Common failure cause:** ASR provider 429'd mid-batch. Re-delegate INGEST_AUDIO_DIARIZATION with the explicit list of missing IDs.
@@ -60,26 +46,17 @@ curl -sX POST http://localhost:8000/sql \
 
 **Silent videos — legitimate edge case:** some videos are recorded with no microphone input (audio measures -91 dB = digital silence). ASR correctly returns empty text. The pipeline writes a transcript with `text="[no speech detected ...]"` and `is_silent: true` so the audit reflects reality rather than masking silence as a failure. The query above counts these as success because `text` is non-empty. If you want to see how many transcripts are silent markers vs real speech:
 
-```bash
-curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN { speech: count(SELECT id FROM transcript WHERE is_silent != true), silent: count(SELECT id FROM transcript WHERE is_silent = true) }" \
-    | jq -r '.[0].result'
+```
+mcp__surreal__query(sql="RETURN { speech: count(SELECT id FROM transcript WHERE is_silent != true), silent: count(SELECT id FROM transcript WHERE is_silent = true) }")
 ```
 
 ## Check 2 — sender_names_clean
 
 **Goal:** zero `sender` values contain a timestamp. Target: 0.
 
-```bash
-# SurrealDB v3 regex: use string::matches() with double-escaped backslashes.
-# Single quote outside, double backslash inside the SQL literal.
-POLLUTED=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM item WHERE string::matches(sender, '\\\\d{2}\\\\.\\\\d{2}\\\\.\\\\d{4}'))" \
-    | jq -r '.[0].result')
+```
+# SurrealDB v3 regex: string::matches() with double-escaped backslashes.
+mcp__surreal__query(sql="RETURN count(SELECT id FROM item WHERE string::matches(sender, '\\\\d{2}\\\\.\\\\d{2}\\\\.\\\\d{4}'))")
 ```
 
 **Pass:** POLLUTED = 0.
@@ -89,20 +66,11 @@ POLLUTED=$(curl -sX POST http://localhost:8000/sql \
 
 **Goal:** <5% of items have `sender='Unknown'`. Target: rate < 5% of total items.
 
-```bash
-UNKNOWN=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM item WHERE sender = 'Unknown')" \
-    | jq -r '.[0].result')
+```
+UNKNOWN = mcp__surreal__query(sql="RETURN count(SELECT id FROM item WHERE sender = 'Unknown')")
+TOTAL   = mcp__surreal__query(sql="RETURN count(SELECT id FROM item)")
 
-TOTAL=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM item)" \
-    | jq -r '.[0].result')
-
-echo "unknown rate: $(echo "scale=2; $UNKNOWN * 100 / $TOTAL" | bc)%"
+# rate = UNKNOWN * 100 / TOTAL
 ```
 
 **Pass:** rate < 5%.
@@ -112,12 +80,8 @@ echo "unknown rate: $(echo "scale=2; $UNKNOWN * 100 / $TOTAL" | bc)%"
 
 **Goal:** `topic` table has ≥5 rows. Target: ≥5.
 
-```bash
-TOPICS=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM topic)" \
-    | jq -r '.[0].result')
+```
+mcp__surreal__query(sql="RETURN count(SELECT id FROM topic)")
 ```
 
 **Pass:** TOPICS ≥ 5.
@@ -127,12 +91,8 @@ TOPICS=$(curl -sX POST http://localhost:8000/sql \
 
 **Goal:** ≥3 distinct `person` clusters from face+voice clustering. Target: ≥3.
 
-```bash
-PERSONS=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM person)" \
-    | jq -r '.[0].result')
+```
+mcp__surreal__query(sql="RETURN count(SELECT id FROM person)")
 ```
 
 **Pass:** PERSONS ≥ 3.
@@ -142,12 +102,8 @@ PERSONS=$(curl -sX POST http://localhost:8000/sql \
 
 **Goal:** ≥1 `person` node has BOTH `face_centroid` AND `voice_centroid`. Target: ≥1.
 
-```bash
-LINKED=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM person WHERE face_centroid != NONE AND voice_centroid != NONE)" \
-    | jq -r '.[0].result')
+```
+mcp__surreal__query(sql="RETURN count(SELECT id FROM person WHERE face_centroid != NONE AND voice_centroid != NONE)")
 ```
 
 **Pass:** LINKED ≥ 1.
@@ -157,56 +113,24 @@ LINKED=$(curl -sX POST http://localhost:8000/sql \
 
 **Goal:** every vector column is populated on every row that should have one. A 4%-populated HNSW index is a trap — semantic search silently misses 96% of the corpus. Target: 0 missing on each count below.
 
-```bash
+```
 # Items without text embeddings
-ITEMS_NO_VEC=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM item WHERE text_embedding = NONE OR array::len(text_embedding) != 1024)" \
-    | jq -r '.[0].result')
+mcp__surreal__query(sql="RETURN count(SELECT id FROM item WHERE text_embedding = NONE OR array::len(text_embedding) != 1024)")
 
 # Transcripts without embeddings
-TR_NO_VEC=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM transcript WHERE embedding = NONE)" \
-    | jq -r '.[0].result')
+mcp__surreal__query(sql="RETURN count(SELECT id FROM transcript WHERE embedding = NONE)")
 
 # Face appearances without embeddings (orphan detection vectors)
-FACE_NO_VEC=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM face_appearance WHERE embedding = NONE)" \
-    | jq -r '.[0].result')
+mcp__surreal__query(sql="RETURN count(SELECT id FROM face_appearance WHERE embedding = NONE)")
 
 # Topics without centroid embeddings (can't be semantic-search targets)
-TOPIC_NO_VEC=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM topic WHERE centroid_embedding = NONE)" \
-    | jq -r '.[0].result')
+mcp__surreal__query(sql="RETURN count(SELECT id FROM topic WHERE centroid_embedding = NONE)")
 
 # Orphan media (videos registered but never processed through video_frames.py)
-MEDIA_NO_TYPE=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM media WHERE type = NONE)" \
-    | jq -r '.[0].result')
+mcp__surreal__query(sql="RETURN count(SELECT id FROM media WHERE type = NONE)")
 
 # Orphan persons (no face or voice evidence linked)
-PERSON_NO_EDGE=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM person WHERE count(<-appears_in<-face_appearance) = 0 AND count(<-speaks_in<-speaker_turn) = 0)" \
-    | jq -r '.[0].result')
-
-echo "embedding coverage gaps:"
-echo "  item.text_embedding:        $ITEMS_NO_VEC"
-echo "  transcript.embedding:       $TR_NO_VEC"
-echo "  face_appearance.embedding:  $FACE_NO_VEC"
-echo "  topic.centroid_embedding:   $TOPIC_NO_VEC"
-echo "  media.type (orphans):       $MEDIA_NO_TYPE"
-echo "  person with no edges:       $PERSON_NO_EDGE"
+mcp__surreal__query(sql="RETURN count(SELECT id FROM person WHERE count(<-appears_in<-face_appearance) = 0 AND count(<-speaks_in<-speaker_turn) = 0)")
 ```
 
 **Pass:** ALL counts = 0.

@@ -39,6 +39,23 @@ media:
   # Env: PUX_MCP_MEDIA_URL — the SSE endpoint of the media-analysis MCP server
   # (vision/audio/video tools), e.g. http://<host>:41721/mcp or via Tailscale Serve.
 
+# ── surreal (SurrealDB built-in MCP) ─────────────────────────────────────────
+# Source: SurrealDB 3.1+ includes a first-party MCP server at /mcp.
+# No external package needed — the endpoint is on the existing SurrealDB port.
+# Exposes: query, select, create, insert, upsert, update, delete, relate, info,
+# list, use, run. Schema auto-discovery via surrealdb://schema/* resources.
+surreal:
+  kind: mcp
+  transport: http
+  url: ${PUX_MCP_SURREAL_URL}
+  headers:
+    surreal-ns: research
+    surreal-db: main
+    Authorization: "Basic ${PUX_MCP_SURREAL_AUTH}"
+  # Env: PUX_MCP_SURREAL_URL — the MCP endpoint (http://localhost:8000/mcp for
+  # local `make infra`).
+  # Env: PUX_MCP_SURREAL_AUTH — base64(user:pass), e.g. cm9vdDpyb290 for root:root.
+
 # ── equibles-mcp (Equibles) ─────────────────────────────────────────────────
 # Source: https://github.com/daniel3303/Equibles
 # Docker Compose service — SEC filings, institutional holdings, insider trading,

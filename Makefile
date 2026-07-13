@@ -31,18 +31,19 @@ submodules: ## Init + update git submodules (pux-harness, infra/media-mcp)
 
 # ── Host-side infrastructure ────────────────────────────────────────────────
 
-infra: ## Start SurrealDB + media-mcp (everything DRE needs)
-	$(INFRA_COMPOSE) up -d surrealdb media-mcp
+infra: ## Start SurrealDB + media-mcp + TEI embeddings (everything DRE needs)
+	$(INFRA_COMPOSE) up -d surrealdb media-mcp tei
 	@echo ""
 	@echo "Waiting for SurrealDB to be healthy..."
 	@timeout 30 sh -c 'until curl -sf http://localhost:8000/health >/dev/null 2>&1; do sleep 1; done' \
 		&& echo "SurrealDB healthy" || echo "WARNING: SurrealDB not healthy — check: make infra-logs"
-	@echo "SurrealDB at http://localhost:8000 (root:root)"
+	@echo "SurrealDB at http://localhost:8000 (root:root, MCP at /mcp)"
 	@echo "media-mcp at http://localhost:8101"
+	@echo "TEI embeddings at http://localhost:8080 (harrier-oss-v1-0.6b)"
 	@echo ""
 	@echo "Infra is up. Run any org: uv run pux direct --org deep-research-engine --task '...'"
 
-infra-core: ## Start SurrealDB only (lighter — skip media-mcp model load)
+infra-core: ## Start SurrealDB only (lighter — skip media-mcp + TEI model load)
 	$(INFRA_COMPOSE) up -d surrealdb
 	@echo ""
 	@echo "Waiting for SurrealDB to be healthy..."
@@ -50,11 +51,12 @@ infra-core: ## Start SurrealDB only (lighter — skip media-mcp model load)
 		&& echo "SurrealDB healthy" || echo "WARNING: SurrealDB not healthy — check: make infra-logs"
 	@echo "SurrealDB at http://localhost:8000 (root:root)"
 
-infra-embeddings: ## Start Ollama for vector search (optional profile)
-	$(INFRA_COMPOSE) --profile embeddings up -d ollama
-	@echo "Pulling embedding model (mxbai-embed-large, ~670MB)..."
-	@timeout 300 docker exec orchestrator-ollama ollama pull mxbai-embed-large \
-		|| echo "(pull timed out — run manually: docker exec orchestrator-ollama ollama pull mxbai-embed-large)"
+infra-embeddings: ## Start TEI embeddings only (harrier-oss-v1-0.6b)
+	$(INFRA_COMPOSE) up -d tei
+	@echo ""
+	@echo "Waiting for TEI to be healthy..."
+	@timeout 120 sh -c 'until curl -sf http://localhost:8080/health >/dev/null 2>&1; do sleep 2; done' \
+		&& echo "TEI healthy (harrier-oss-v1-0.6b)" || echo "WARNING: TEI not healthy — check: make infra-logs"
 
 infra-status: ## Show infra container status
 	$(INFRA_COMPOSE) ps

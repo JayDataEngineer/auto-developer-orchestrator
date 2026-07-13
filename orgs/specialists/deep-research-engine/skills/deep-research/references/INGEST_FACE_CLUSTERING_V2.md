@@ -126,7 +126,7 @@ Response:
 For each face in `face_embeddings.json` (using its cluster label from step 3), write a SurrealDB record:
 
 ```bash
-python3 sandbox/surreal_client.py insert --table face_appearance --record '{
+mcp__surreal__create(table="face_appearance", data= '{
   "id": "face_001",
   "item_id": "photo_108",
   "image_path": "data/.../photo_108.jpg",
@@ -140,7 +140,7 @@ python3 sandbox/surreal_client.py insert --table face_appearance --record '{
 For keyframes, also store `frame_sec` (computed from filename pattern `_0001.jpg` → 1 second in):
 
 ```bash
-python3 sandbox/surreal_client.py insert --table face_appearance --record '{
+mcp__surreal__create(table="face_appearance", data= '{
   "id": "face_042",
   "item_id": "video_2",
   "image_path": ".../video_2_0042.jpg",
@@ -159,7 +159,7 @@ One `person` per cluster:
 
 ```bash
 for cluster_id in 0 1 2 3; do
-    python3 sandbox/surreal_client.py insert --table person --record "{
+    mcp__surreal__create(table="person", data= "{
       \"id\": \"person_${cluster_id}\",
       \"canonical_name\": null,
       \"face_centroid\": <from cluster centroids output>,
@@ -177,7 +177,7 @@ Don't try to assign canonical names yet — that's a separate supervised step (o
 For each `face_appearance` record, link its person → source item:
 
 ```bash
-python3 sandbox/surreal_client.py relate \
+mcp__surreal__relate(
     --from person:person_0 --edge appears_in --to item:photo_108 \
     --data '{"role": "photographed", "face_appearance_id": "face_001"}'
 ```

@@ -18,10 +18,11 @@
 #               infra/media-mcp submodule. CPU by default; GPU override via
 #               MEDIA_DEVICE=cuda TORCH_VARIANT=cu124 (see media-mcp Dockerfile).
 #
-#   ollama      Local embedding model (mxbai-embed-large) for SurrealDB vector
-#               search. OPTIONAL — only needed for vector-search queries, not
-#               for basic insert/select. Started in the "embeddings" profile;
-#               `make infra` starts it, `make infra-core` skips it.
+#   tei         HuggingFace Text Embeddings Inference running
+#               microsoft/harrier-oss-v1-0.6b (1024-dim, MTEB v2 69.0, 94 langs).
+#               The SOTA embedding model for SurrealDB vector search. Replaces
+#               Ollama/mxbai-embed-large. Exposed on port 8080; SurrealDB reaches
+#               it at http://tei:80 for in-query embedding via http::post().
 #
 # What does NOT live here (bring your own — game-studio only):
 #   Ray cluster (Tailscale) — LLM, TTS, 3D, music, ComfyUI. That's a GPU box
@@ -95,23 +96,29 @@ services:
       retries: 10
       start_period: 30s
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: orchestrator-ollama
-    profiles: ["embeddings"]
+  tei:
+    # HuggingFace Text Embeddings Inference — purpose-built embedding server.
+    # Runs microsoft/harrier-oss-v1-0.6b: 1024-dim, MTEB v2 69.0, 94 languages.
+    # SOTA multilingual embedding model. Replaces Ollama/mxbai-embed-large.
+    #
+    # CPU image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
+    # GPU image: ghcr.io/huggingface/text-embeddings-inference:89-1.5 (change tag)
+    image: ghcr.io/huggingface/text-embeddings-inference:${TEI_VARIANT:-cpu-1.5}
+    container_name: orchestrator-tei
+    command: ["--model-id", "microsoft/harrier-oss-v1-0.6b"]
     ports:
-      - "11434:11434"
+      - "8080:80"
     volumes:
-      - ollama-models:/root/.ollama
+      - tei-cache:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      test: ["CMD", "curl", "-sf", "http://localhost:80/health"]
       interval: 5s
       timeout: 3s
       retries: 10
-      start_period: 5s
+      start_period: 60s
 
 volumes:
   surrealdb-data:
   media-models:
-  ollama-models:
+  tei-cache:

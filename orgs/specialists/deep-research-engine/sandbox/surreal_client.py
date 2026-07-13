@@ -17,6 +17,9 @@ graph operation the DRE pipeline needs:
   start-task    — record that a pipeline run started (idempotency check)
   complete-task — record that a pipeline run finished
   task-status   — check whether a task already completed (resume support)
+  vector-search — embed a query via Ollama + rank records by cosine similarity
+  upsert-person — create/update a person node (idempotent on canonical_name)
+  relate        — create a graph edge between two records (idempotent)
 
 The agent NEVER calls this script directly. The declared tools in tools.yaml
 (pux_sandbox_surreal_query, pux_sandbox_surreal_save_items, etc.) exec this
@@ -585,6 +588,145 @@ def cmd_backfill(args):
 
 
 # ---------------------------------------------------------------------------
+# Embedding + vector search
+# ---------------------------------------------------------------------------
+
+def _embed(text: str) -> list[float]:
+    """Embed text via the Ollama embedding API (OpenAI-compatible).
+
+    Reads EMB_URL + EMB_MODEL from env (injected by policy.yaml sandbox.env).
+    Returns a 1024-dim vector (mxbai-embed-large).
+    """
+    emb_url = os.environ.get("EMB_URL", "http://localhost:11434/v1/embeddings")
+    emb_model = os.environ.get("EMB_MODEL", "mxbai-embed-large")
+    payload = json.dumps({"model": emb_model, "input": text[:8000]}).encode()
+    req = urllib.request.Request(
+        emb_url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+    except Exception as e:
+        raise RuntimeError(f"Embedding API unreachable at {emb_url}: {e}") from e
+    return data["data"][0]["embedding"]
+
+
+# Default embedding field per table — agents can override with --field.
+_DEFAULT_EMB_FIELD = {
+    "item": "text_embedding",
+    "transcript": "embedding",
+    "source": "embedding",
+    "topic": "centroid_embedding",
+    "face_appearance": "embedding",
+}
+
+
+def cmd_vector_search(args):
+    """Semantic similarity search: embed the query, then rank by cosine.
+
+    Usage:
+        vector-search --table transcript --query "infiltration confession" --k 5
+        vector-search --table topic --field centroid_embedding --query "gun ownership" --k 3
+    """
+    table = args.table
+    field = args.field or _DEFAULT_EMB_FIELD.get(table, "embedding")
+    k = args.k
+    try:
+        query_vec = _embed(args.query)
+    except RuntimeError as e:
+        print(json.dumps({"status": "error", "error": str(e)}))
+        sys.exit(1)
+
+    vec_str = json.dumps(query_vec)
+    sql = (
+        f"SELECT id, "
+        f"vector::similarity::cosine({field}, {vec_str}) AS score "
+        f"FROM {table} WHERE {field} != NONE "
+        f"ORDER BY score DESC LIMIT {k};"
+    )
+    try:
+        results = execute_sql(sql, timeout=args.timeout)
+        rows = results[0].get("result", []) if results else []
+    except Exception as e:
+        print(json.dumps({"status": "error", "error": str(e)[:300]}))
+        sys.exit(1)
+    # Clean output: just id + score
+    output = [{"id": r.get("id"), "score": round(r.get("score", 0), 4)} for r in rows]
+    print(json.dumps({"status": "ok", "table": table, "field": field,
+                      "query": args.query[:100], "results": output}))
+
+
+# ---------------------------------------------------------------------------
+# Person upsert + graph edges
+# ---------------------------------------------------------------------------
+
+def _safe_record_id(prefix: str, raw: str) -> str:
+    """Build a deterministic record id: prefix:sanitized_name."""
+    safe = "".join(c if c.isalnum() else "_" for c in raw.lower().strip())[:60]
+    return f"{prefix}:{safe}"
+
+
+def cmd_upsert_person(args):
+    """Create or update a person node (idempotent on canonical_name).
+
+    Usage:
+        upsert-person --name "Elon Musk" --role subject --notes "CEO of SpaceX"
+        upsert-person --name "Grady" --source-id source:abc123 --role subject
+    """
+    rid = _safe_record_id("person", args.name)
+    parts = [
+        f"canonical_name = {json.dumps(args.name)}",
+        f"name = {json.dumps(args.name)}",
+    ]
+    if args.role:
+        parts.append(f"role = {json.dumps(args.role)}")
+    if args.notes:
+        parts.append(f"notes = {json.dumps(args.notes)}")
+    if args.face_centroid:
+        parts.append(f"face_centroid = {args.face_centroid}")
+    if args.voice_centroid:
+        parts.append(f"voice_centroid = {args.voice_centroid}")
+    parts.append("updated_at = time::now()::format('%Y-%m-%dT%H:%M:%SZ')")
+    sql = f"UPSERT {rid} SET {', '.join(parts)};"
+    execute_sql(sql, timeout=10)
+
+    # Optionally link to a source via extracted_from edge
+    if args.source_id:
+        edge_sql = f"RELATE {rid}->extracted_from->{args.source_id};"
+        try:
+            execute_sql(edge_sql, timeout=5)
+        except Exception:
+            pass  # edge may already exist
+
+    print(json.dumps({"status": "ok", "id": rid, "name": args.name}))
+
+
+def cmd_relate(args):
+    """Create a graph edge between two records (idempotent).
+
+    Usage:
+        relate --src topic:abc123 --edge extracted_from --tgt source:def456
+        relate --src person:john_doe --edge appears_in --tgt item:xyz789
+    """
+    # Build edge table name (SurrealDB graph edges are table names)
+    edge = args.edge
+    sql = f"RELATE {args.src}->{edge}->{args.tgt}"
+    if args.props:
+        # props is a JSON string like '{"role":"speaker"}'
+        try:
+            props = json.loads(args.props)
+            set_clause = ", ".join(f"{k} = {json.dumps(v)}" for k, v in props.items())
+            sql += f" SET {set_clause}"
+        except json.JSONDecodeError:
+            pass  # ignore malformed props
+    sql += ";"
+    execute_sql(sql, timeout=10)
+    print(json.dumps({"status": "ok", "edge": edge, "src": args.src, "tgt": args.tgt}))
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -634,6 +776,27 @@ def main():
     p_ts = sub.add_parser("task-status", help="check if task already ran")
     p_ts.add_argument("--task-id", required=True)
 
+    p_vs = sub.add_parser("vector-search", help="semantic similarity search")
+    p_vs.add_argument("--table", required=True, help="table to search (transcript, item, source, topic, face_appearance)")
+    p_vs.add_argument("--query", required=True, help="natural-language query (will be embedded)")
+    p_vs.add_argument("--field", default="", help="embedding column name (auto-detected from table if omitted)")
+    p_vs.add_argument("--k", type=int, default=5, help="number of results")
+    p_vs.add_argument("--timeout", type=int, default=30)
+
+    p_up = sub.add_parser("upsert-person", help="create/update a person node")
+    p_up.add_argument("--name", required=True, help="canonical name")
+    p_up.add_argument("--source-id", default="", help="source record to link via extracted_from")
+    p_up.add_argument("--role", default="", help="subject / mentioned / author")
+    p_up.add_argument("--notes", default="", help="free-text notes")
+    p_up.add_argument("--face-centroid", default="", help="face centroid vector JSON")
+    p_up.add_argument("--voice-centroid", default="", help="voice centroid vector JSON")
+
+    p_rel = sub.add_parser("relate", help="create a graph edge")
+    p_rel.add_argument("--src", required=True, help="source record id (e.g. topic:abc123)")
+    p_rel.add_argument("--edge", required=True, help="edge table name (e.g. extracted_from, appears_in, mentions)")
+    p_rel.add_argument("--tgt", required=True, help="target record id (e.g. source:def456)")
+    p_rel.add_argument("--props", default="", help='edge properties JSON (e.g. \'{"role":"speaker"}\')')
+
     args = ap.parse_args()
 
     handlers = {
@@ -649,6 +812,9 @@ def main():
         "start-task": cmd_start_task,
         "complete-task": cmd_complete_task,
         "task-status": cmd_task_status,
+        "vector-search": cmd_vector_search,
+        "upsert-person": cmd_upsert_person,
+        "relate": cmd_relate,
     }
     handlers[args.cmd](args)
 

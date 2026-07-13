@@ -116,15 +116,11 @@ For unsupervised pipelines (no known names), skip this step and treat
 Convert cluster output into `person` nodes + `appears_in` edges:
 
 ```bash
-python3 sandbox/surreal_client.py insert \
-    --table person \
-    --record '{"id": "person_0", "label": "Person 0", "face_count": 4, "embedding": [...]}'
+mcp__surreal__create(table="person", data= '{"id": "person_0", "label": "Person 0", "face_count": 4, "embedding": [...]}'
 
-python3 sandbox/surreal_client.py insert \
-    --table media \
-    --record '{"id": "photo_108", "path": "data/.../photo_108.jpg", "type": "image"}'
+mcp__surreal__create(table="media", data= '{"id": "photo_108", "path": "data/.../photo_108.jpg", "type": "image"}'
 
-python3 sandbox/surreal_client.py relate \
+python3 sandbox/the SurrealDB MCP tools relate \
     --from person:person_0 \
     --edge appears_in \
     --to media:photo_108 \

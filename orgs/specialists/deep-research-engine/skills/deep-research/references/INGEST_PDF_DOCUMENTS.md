@@ -111,14 +111,10 @@ Read `raw.txt`. Identify:
 **(b) SurrealDB source record** — one per PDF document (not per section). Run this once after extracting the document:
 
 ```bash
-python3 /sandbox/surreal_client.py save-source \
-  --kind pdf \
-  --path "/abs/path/to/document.pdf" \
-  --title "<title from pdfinfo>" \
-  --author "<author from pdfinfo>" \
-  --published-at "<CreationDate ISO-formatted>" \
-  --content-file "artifacts/pdf/<doc-slug>/raw.txt" \
-  --topic-ids "topic:abc123"
+mcp__surreal__upsert(table="source", data={
+  "kind": "pdf", "path": "/abs/path/to/document.pdf", "title": "<title from pdfinfo>",
+  "author": "<author from pdfinfo>", "published_at": "<CreationDate ISO-formatted>",
+})
 ```
 
 This atomically:
@@ -129,8 +125,7 @@ This atomically:
 **For sections that reference existing topics or persons**, create additional extracted_from edges manually:
 
 ```bash
-python3 /sandbox/surreal_client.py relate \
-  --src "topic:abc123" --edge extracted_from --tgt "source:<source_id>"
+mcp__surreal__relate(src="topic:abc123", edge="extracted_from", tgt="source:<source_id>")
 ```
 
 ### Step 5 — Build the index

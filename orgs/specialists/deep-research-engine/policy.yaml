@@ -12,14 +12,28 @@
 #      (namespace: research, database: main). Persists across runs — query it
 #      to resume research or check what's already ingested.
 #
-# LLM: context_engine / entity_extract default to http://localhost:18080 (the
-# Ray API ingress). If the Ray cluster is unreachable, set OPENROUTER_API_KEY
-# and they fall back to OpenRouter automatically.
+# LLM: the sandbox scripts (entity_extract / content_cluster / context_engine)
+# are DUMB CONSUMERS. They read LLM_API_URL / LLM_MODEL / LLM_API_KEY from the
+# environment and do NOT re-resolve the provider, model, or key. The single
+# `sandbox.llm: worker` declaration below triggers the harness to:
 #
-# Public-internet: openrouter.ai (fallback LLM) + github.com (source pulls).
+#   1. Resolve the role → models.yaml tier (default → worker_model = mimo-v2.5)
+#   2. Resolve the model → provider (opencode-go, kind: openai)
+#   3. Inject LLM_API_URL / LLM_MODEL into the sandbox env
+#   4. Inject LLM_API_KEY from the provider's api_key_env (OPENCODE_API_KEY)
+#   5. Auto-allow the provider host (opencode.ai:443) in the egress rules
+#
+# This is the SHARED PATTERN: orgs declare a role, the harness owns resolution.
+# To repoint DRE at a different model, change the tier in models.yaml (ONE
+# place) — no policy.yaml edits, no script edits, no key-chain edits.
 
 sandbox:
   tier: isolated
+  # `llm: worker` — resolve from models.yaml's default tier worker_model
+  # (mimo-v2.5 via opencode-go). Cheap (~$0.001/call), multimodal, the right
+  # size for entity extraction / clustering / synthesis. The harness injects
+  # LLM_API_URL + LLM_MODEL + LLM_API_KEY and auto-allows opencode.ai:443.
+  llm: worker
   # Static config for host-side infra started by `make infra`. These are NOT
   # secrets (no auth tokens) — just the URLs the sandbox needs to reach the
   # host-side services via the docker gateway. Secrets belong in credentials.
@@ -32,6 +46,10 @@ sandbox:
     SURREALDB_DB: "main"
     # media-mcp (Parakeet ASR + Pyannote + vision) on host port 8101.
     MEDIA_MCP_URL: "http://host.docker.internal:8101"
+    # TEI (Text Embeddings Inference) running microsoft/harrier-oss-v1-0.6b.
+    # 1024-dim, MTEB v2 69.0, 94 languages. SOTA embedding model.
+    # Used by batch jobs for embedding text before SurrealDB vector insert.
+    EMB_URL: "http://host.docker.internal:8080"
 
 egress:
   allow:
@@ -42,21 +60,19 @@ egress:
     # Host-side SurrealDB — the knowledge graph.
     - host: host.docker.internal
       port: 8000
-    # Ray cluster API ingress (LLM). Only needed if OPENROUTER_API_KEY is NOT
-    # set. Game-studio also uses this for TTS/3D/music — DRE only needs LLM.
-    - host: 100.86.69.57
-      port: 18080
-    # OpenRouter fallback LLM path (entity_extract / context_engine).
-    - host: openrouter.ai
-      port: 443
+    # Host-side TEI (harrier-oss-v1-0.6b embeddings).
+    - host: host.docker.internal
+      port: 8080
     # Source pulls for research ingest.
     - host: github.com
       port: 443
+    # NOTE: opencode.ai:443 is auto-allowed by `sandbox.llm: worker` above —
+    # the harness resolves the provider host from models.yaml and appends it
+    # to the egress rules. No need to mirror it here.
 
 credentials:
   optional:
-    - OPENROUTER_API_KEY     # fallback LLM when Ray ingress is unused
-    - COMPREFACE_API_KEY     # face recognition (face_client.py)
+    - COMPREFACE_API_KEY    # face recognition (face_client.py)
 
 jobs:
   # `when:` is a shell predicate (exit 0 -> run, non-zero -> skip). Each job

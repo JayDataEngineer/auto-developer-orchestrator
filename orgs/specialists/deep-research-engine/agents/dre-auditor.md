@@ -51,9 +51,9 @@ with refined scope based on your report.
 
 ## What you check (the 7 success criteria)
 
-Run each check via `pux_sandbox_surreal_query(sql="...")` — the typed tool.
+Run each check via `mcp__surreal__query(sql="...")` — the typed tool.
 You never see a URL or run curl. For a quick overview of every table's row
-count, call `pux_sandbox_surreal_count()`. Checks 1–6 apply only to multimodal-ingest tasks. Check 7 applies to every
+count, call `mcp__surreal__query(sql="RETURN count(SELECT id FROM item)")`. Checks 1–6 apply only to multimodal-ingest tasks. Check 7 applies to every
 task that produces embeddings. Skip 1–6 if the task didn't populate the
 multimodal tables (e.g. web-only research, PDF-only ingestion).
 

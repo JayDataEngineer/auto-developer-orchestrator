@@ -42,7 +42,7 @@ rubric: |
     THIS subject is unsupported). Either way, leaving it in the brief unmarked
     is an automatic fail. The grounding check's exit code (0=PASS, 1=FAIL) +
     the UNGROUNDED ENTITIES list must be visible in the transcript.
-  - The brief was persisted to SurrealDB via the `pux_sandbox_surreal_save_source`
+  - The brief was persisted to SurrealDB via the `mcp__surreal__upsert`
     tool so future agents can discover it (cite the tool call + its output).
   - The return summary cites claim count, source count, conflict count,
     open-question count — matching what's in the file.
@@ -112,9 +112,9 @@ writer can turn into content.
    ```
 
 5. **Persist the brief** as a `source` record so future agents can find it.
-   Call the `pux_sandbox_surreal_save_source` tool:
+   Call the `mcp__surreal__upsert` tool:
    ```
-   pux_sandbox_surreal_save_source(
+   mcp__surreal__upsert(
        kind="brief",
        path="artifacts/brief.md",
        topic="<topic>"

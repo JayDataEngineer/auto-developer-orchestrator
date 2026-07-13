@@ -70,19 +70,14 @@ If you find only echo-chamber sources, note that in `_INDEX.md`.
 <optional: caveats, related findings, follow-ups>
 ```
 
-**(b) SurrealDB source record** via `surreal_client.py save-source`:
+**(b) SurrealDB source record** via `mcp__surreal__upsert`:
 
 ```bash
-python3 /sandbox/surreal_client.py save-source \
-  --kind web \
-  --url "https://example.com/article" \
-  --title "Article Title" \
-  --author "Author Name" \
-  --published-at "2026-06-15" \
-  --accessed-at "$(date -u +%Y-%m-%d)" \
-  --content "$(cat artifacts/research/finding-slug.md)" \
-  --topic-ids "topic:abc123" "topic:def456" \
-  --person-ids "person:xyz789"
+mcp__surreal__upsert(table="source", data={
+  "kind": "web", "url": "https://example.com/article", "title": "Article Title",
+  "author": "Author Name", "published_at": "2026-06-15",
+  "content": <read finding-slug.md>,
+})
 ```
 
 This atomically:
@@ -96,11 +91,7 @@ This atomically:
 **When to link person_ids**: only when the source directly discusses or quotes a person. If the person doesn't exist in the DB yet, create them via `upsert-person`:
 
 ```bash
-python3 /sandbox/surreal_client.py upsert-person \
-  --name "Elon Musk" \
-  --source-id "source:abc123" \
-  --role "subject" \
-  --notes "CEO of SpaceX, quoted in this article about Starship"
+mcp__surreal__upsert(table="person", data={"canonical_name": "Elon Musk", "role": "subject", "notes": "CEO of SpaceX, quoted in this article about Starship"})
 ```
 
 Only create persons for individuals the source is **about** or **quotes directly** — not every proper noun. Use your judgment.

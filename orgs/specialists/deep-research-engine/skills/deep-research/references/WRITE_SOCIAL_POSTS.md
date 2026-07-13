@@ -71,11 +71,7 @@ After drafting, save every post file as a `source` record so future agents can f
 ```bash
 for f in artifacts/posts/*.md; do
   [ "$(basename "$f")" = "_INDEX.md" ] && continue
-  python3 /sandbox/surreal_client.py save-source \
-    --kind post \
-    --path "$f" \
-    --content-file "$f" \
-    --title "$(basename "$f" .md)"
+  mcp__surreal__upsert(table="source", id="$(basename ", data={"kind": "post", "path": "$f", "title": "$(basename "})$f" .md)"
 done
 ```
 

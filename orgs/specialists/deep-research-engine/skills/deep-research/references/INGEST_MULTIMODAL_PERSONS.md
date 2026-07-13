@@ -35,45 +35,29 @@ In single-speaker videos (the 80% case for typical voice-memo / direct-to-camera
 
 ### Step 1 — Verify upstream
 
-```bash
+```
 # Faces clustered?
-FACE_COUNT=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM face_appearance)" \
-    | jq -r '.[0].result')
+mcp__surreal__query(sql="RETURN count(SELECT id FROM face_appearance)")
 
 # Voice turns clustered?
-TURN_COUNT=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM speaker_turn)" \
-    | jq -r '.[0].result')
-
-echo "upstream: $FACE_COUNT faces, $TURN_COUNT speaker turns"
-[[ "$FACE_COUNT" -eq 0 || "$TURN_COUNT" -eq 0 ]] && exit 1
+mcp__surreal__query(sql="RETURN count(SELECT id FROM speaker_turn)")
 ```
+
+If either count is 0, upstream ingestion (face clustering / diarization) hasn't run yet. Stop and re-delegate to the ingest pipeline.
 
 ### Step 2 — Build voice clusters (if not already)
 
 If `speaker_turn` records have raw embeddings but no `voice_cluster_id`, cluster them now:
 
-```bash
+```
 # Extract embeddings
-curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "SELECT embedding FROM speaker_turn" \
-    | jq '[.[0].result[].embedding]' > /tmp/voice_vectors.json
+mcp__surreal__query(sql="SELECT embedding FROM speaker_turn")
 
-# Cluster via media-mcp
-curl -sX POST http://localhost:8102/mcp \
-    -H 'Content-Type: application/json' \
-    -d @<(jq -c '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"cluster_embeddings",arguments:{embeddings:.}}}' /tmp/voice_vectors.json) \
-    > /tmp/voice_clusters.json
+# Cluster via media-mcp tool
+mcp__media__cluster_embeddings(embeddings=[...])
 
 # Write voice_cluster_id back to each speaker_turn
-# (iterate labels + speaker_turn IDs in parallel, UPDATE each)
+mcp__surreal__query(sql="UPDATE speaker_turn:<id> SET voice_cluster_id = <label>")
 ```
 
 ### Step 3 — Walk every speaker_turn
@@ -170,10 +154,7 @@ End-to-end on a tiny dataset:
 # Expected: 1 person node with face_centroid + voice_centroid + appears_in + speaks_in edges
 
 # Verify
-curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "SELECT *, ->appears_in->item.path AS photos, ->speaks_in->item.id AS videos FROM person WHERE face_centroid != NONE AND voice_centroid != NONE"
+mcp__surreal__query(sql="SELECT *, ->appears_in->item.path AS photos, ->speaks_in->item.id AS videos FROM person WHERE face_centroid != NONE AND voice_centroid != NONE")
 ```
 
 Expected: at least 1 person with non-empty `photos` + `videos` arrays.
@@ -188,29 +169,15 @@ Expected: at least 1 person with non-empty `photos` + `videos` arrays.
 
 ## Verification
 
-```bash
+```
 # Cross-modal success rate
-LINKED=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM person WHERE face_centroid != NONE AND voice_centroid != NONE)" \
-    | jq -r '.[0].result')
+mcp__surreal__query(sql="RETURN count(SELECT id FROM person WHERE face_centroid != NONE AND voice_centroid != NONE)")
 
 # Deferred (multi-face) cases
-DEFERRED=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM pending_link)" \
-    | jq -r '.[0].result')
+mcp__surreal__query(sql="RETURN count(SELECT id FROM pending_link)")
 
 # Off-camera speakers
-VOICE_ONLY=$(curl -sX POST http://localhost:8000/sql \
-    -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASSWORD" \
-    -d "RETURN count(SELECT id FROM person WHERE face_centroid = NONE AND voice_centroid != NONE)" \
-    | jq -r '.[0].result')
-
-echo "linked: $LINKED, deferred: $DEFERRED, voice_only: $VOICE_ONLY"
+mcp__surreal__query(sql="RETURN count(SELECT id FROM person WHERE face_centroid = NONE AND voice_centroid != NONE)")
 ```
 
 For a typical multimodal corpus, expect roughly: linked ≥ 1 (criteria #6), deferred depends on video count, voice_only depends on off-camera speech.

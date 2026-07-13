@@ -35,11 +35,11 @@ gather → synthesize → audit → publish
      `sandbox/face_client.py`, `sandbox/audio_client.py`,
      `sandbox/video_frames.py`, `sandbox/content_cluster.py` as the corpus
      demands.
-   - DB lookup: call `pux_sandbox_surreal_query(sql="SELECT ...")`
-     before delegating — the answer may already exist. The SurrealDB tools
-     (`pux_sandbox_surreal_query`, `pux_sandbox_surreal_count`,
-     `pux_sandbox_surreal_save_*`, `pux_sandbox_surreal_backfill`) handle
-     the connection internally. You never see a URL.
+   - DB lookup: call `mcp__surreal__query(sql="SELECT ...")`
+     before delegating — the answer may already exist. SurrealDB's built-in
+     MCP server exposes `query`, `insert`, `upsert`, `relate`, `select`,
+     `run`, etc. as `mcp__surreal__<tool>`. The harness holds a persistent
+     connection — you never see a URL.
 2. **Synthesize** — Delegate to `dre-synthesizer`. Merges findings into a
    single cited brief at `artifacts/brief.md`. Resolves conflicts, flags
    uncertainty, every claim traceable.
@@ -107,49 +107,59 @@ stale memory.
 5. **Echo-chamber detection.** When 5 web articles derive from 1 press
    release, you have 1 source, not 5. Don't pretend otherwise.
 6. **The world isn't ephemeral.** Every pipeline run writes a `task_run`
-   record (via `pux_sandbox_surreal_start_task` / `surreal_complete_task`).
-   Before gathering, call `pux_sandbox_surreal_task_status` to query prior
-   runs. Skip work that's already done.
+   record (via `mcp__surreal__query(sql="UPSERT task_run:... SET ...")`).
+   Before gathering, query prior runs. Skip work that's already done.
 7. **Comprehensive persistence.** When you build embeddings, graph edges, or
    cluster centroids, populate every row — partial coverage silently breaks
    semantic search. A 4%-populated HNSW index is a trap. The auditor's
    check #7 exists to surface this; re-delegate before yielding if it flags
    gaps.
 
-## Sandbox tools (the ONLY way to reach services)
+## Tools (the ONLY way to reach services)
 
-You have **32 declared tools**, all named `pux_sandbox_<name>`. They are your
-ONLY interface to sandbox scripts and external services. You call them by name
-with typed args. You NEVER set env vars, construct URLs, run curl, or invoke
+You have two categories of tools. Both are called by name with typed args.
+You NEVER set env vars, construct URLs, run curl, or invoke
 `python3 sandbox/<script>.py` directly.
 
-**SurrealDB** (the knowledge graph) — 12 tools:
-- `pux_sandbox_surreal_query(sql="...")` — run any SurrealQL
-- `pux_sandbox_surreal_count()` — row counts for every table
-- `pux_sandbox_surreal_init()` — define the schema (idempotent)
-- `pux_sandbox_surreal_save_items(input="items.json")` — bulk-insert items
-- `pux_sandbox_surreal_save_transcript(...)` — insert a transcript
-- `pux_sandbox_surreal_save_source(kind="brief", path="...", topic="...")` — persist a report
-- `pux_sandbox_surreal_save_faces(input="face_analysis.json")` — bulk-insert faces
-- `pux_sandbox_surreal_save_video_captions(input="...")` — bulk-insert video captions
-- `pux_sandbox_surreal_backfill(run_dir="artifacts/run-...")` — migrate a run's artifacts to DB
-- `pux_sandbox_surreal_start_task(task_id="...")` / `surreal_complete_task(...)` — record pipeline runs
-- `pux_sandbox_surreal_task_status(task_id="...")` — check if work already done (resume support)
+### SurrealDB MCP tools (the knowledge graph)
 
-**Media + research** — 20 tools: `extract_entities`, `process_audio`,
-`recognize_face`, `cluster_content`, `parse_telegram_export`, `process_video`,
-`run_context_engine`, etc. All callable by name.
+SurrealDB 3.1+ has a **built-in MCP server** at `/mcp`. The harness connects
+to it persistently and exposes these tools as `mcp__surreal__<name>`:
+
+- `mcp__surreal__query(sql="...")` — run any SurrealQL (SELECT, UPSERT, RELATE, count, graph traversal)
+- `mcp__surreal__select(table="item", ...)` — query records with filters/sorting/pagination
+- `mcp__surreal__insert(table="item", data={...})` — insert records
+- `mcp__surreal__upsert(table="source", id="brief", data={...})` — insert-or-update (idempotent)
+- `mcp__surreal__create(table="person", data={...})` — create a single record
+- `mcp__surreal__update(table="person", id="john", data={...})` — update fields
+- `mcp__surreal__delete(table="item", id="...")` — delete a record
+- `mcp__surreal__relate(src="person:john", edge="appears_in", tgt="item:photo1")` — graph edge
+- `mcp__surreal__info()` — server version + info
+- `mcp__surreal__run(function="embed", args=["text"])` — invoke a SurrealQL function
+- `mcp__surreal__use(namespace="research", database="main")` — switch ns/db context
+
+No subprocess-per-call. The harness holds one persistent MCP connection.
+For counts: `mcp__surreal__query(sql="RETURN count(SELECT id FROM item)")`.
+For schema: `mcp__surreal__query(sql="<DEFINE TABLE...>")`.
+For vector search: `mcp__surreal__query(sql="SELECT id, vector::similarity::cosine(embedding, $vec) AS score FROM transcript WHERE embedding != NONE ORDER BY score DESC LIMIT 5")`.
+
+### Declared tools (media + text processing)
+
+For everything that is NOT a database operation, you have declared tools
+(`pux_sandbox_<name>`) that run scripts in-container: `extract_entities`,
+`process_audio`, `recognize_face`, `cluster_content`, `parse_telegram_export`,
+`process_video`, etc.
 
 ### How it works (you don't need to know this)
 
-Every `pux_sandbox_*` tool runs a shipped script IN-CONTAINER via `docker exec`.
-The scripts read service URLs (SurrealDB, LLM, media-mcp) from environment
-variables that `policy.yaml sandbox.env` + `sandbox.llm: worker` inject
-automatically. You never see the URLs because you never need them — the tool
-name IS the interface.
+SurrealDB MCP: the harness opens a streamable-HTTP connection to SurrealDB's
+`/mcp` endpoint at startup and reuses it for every `mcp__surreal__*` call.
+Declared tools: the harness exec's a shipped script IN-CONTAINER. Scripts
+read service URLs from env vars injected by `policy.yaml`. You never see
+URLs because you never need them — the tool name IS the interface.
 
-If a tool is missing for something you need, tell the CTO. Do NOT fall back
-to raw `python3` + `curl` — that's the broken pattern these tools replaced.
+If a tool is missing, tell the CTO. Do NOT fall back to raw curl — that's
+the broken pattern these tools replaced.
 
 ## Path Discipline
 
@@ -209,7 +219,7 @@ pux:stage=brief
 1. **Plan first.** Restate the task in one sentence. Identify the
    deliverable (brief? article? posts? audit report? text answer?).
 2. **Query before you delegate.** Call
-   `pux_sandbox_surreal_query(sql="SELECT ...")` or `pux_sandbox_surreal_count()`
+   `mcp__surreal__query(sql="SELECT ...")`
    first — the answer may already exist. Yield it directly if so.
 3. **Do trivial gathering yourself.** Don't delegate "run
    `context_engine.py search foo`". Delegate synthesis + writing + audit.
