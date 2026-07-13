@@ -320,7 +320,7 @@ def main():
         except Exception as e:
             print(f"    FAILED: {e}", flush=True)
             cache[stem] = {"error": str(e)[:200]}
-            out_path.write_text(json.dumps(cache, indent=2))
+            out_path.write_text(json.dumps(cache, indent=2, ensure_ascii=False))
             results.append({"video": stem, "error": str(e)[:200]})
 
     # Write a human-readable index
