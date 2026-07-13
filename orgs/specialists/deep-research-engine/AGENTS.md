@@ -31,10 +31,28 @@ gather → synthesize → audit → publish
 1. **Gather** — You do this yourself. Trivial work, no specialist needed.
    - Web research: `python3 sandbox/context_engine.py search "<query>"`.
    - PDF ingest: `python3 sandbox/entity_extract.py --pdf <path>`.
-   - Multimodal ingest: `python3 sandbox/telegram_parser.py`, then
-     `sandbox/face_client.py`, `sandbox/audio_client.py`,
-     `sandbox/video_frames.py`, `sandbox/content_cluster.py` as the corpus
-     demands.
+   - Multimodal ingest (GENERIC — works for any chat export or media corpus):
+     1. Parse: `sandbox/telegram_parser.py` (or any parser that produces
+        `item` rows in SurrealDB).
+     2. Face analysis: `sandbox/face_client.py` → voice clustering via
+        `sandbox/voice_embed.py` (resemblyzer, open weights).
+     3. Audio transcription: `sandbox/audio_client.py`.
+     4. Video keyframes: `sandbox/extract_all_video_frames.py`.
+     5. **Video summaries**: `sandbox/video_summarize.py` (MiMo-V2.5-Pro
+        structured analysis + open diarization). See `SUMMARIZE_VIDEOS.md`.
+        Conditional — only runs if videos exist.
+     6. **OCR text screenshots**: `sandbox/ocr_no_face_photos.py`
+        (separates pure-text screenshots from entity-bearing photos).
+     7. Content clustering: `sandbox/content_cluster.py`.
+     8. **Build graph**: `sandbox/close_graph_gaps.py` (entity extraction,
+        topic→item edges, sender→authored edges).
+     9. **Resolve identities**: `sandbox/resolve_identities.py` (DYNAMIC
+        identity linking — see `INGEST_MULTIMODAL_PERSONS.md`). Links
+        face↔voice clusters via video co-occurrence, resolves voice
+        clusters to senders, creates `same_as` edges.
+     10. **Entity folders**: `sandbox/build_entity_folders.py` (browse
+         index: face clusters, voice clusters, text screenshots, video
+         summaries).
    - DB lookup: call `mcp__surreal__query(sql="SELECT ...")`
      before delegating — the answer may already exist. SurrealDB's built-in
      MCP server exposes `query`, `insert`, `upsert`, `relate`, `select`,
