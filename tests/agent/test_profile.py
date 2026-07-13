@@ -69,7 +69,7 @@ def _ctx() -> dict:
 # baseline lives here, once. (The capture/offload behavior itself is proven in
 # test_context_offload.py — here it's stubbed away to keep the profile test
 # focused on the wiring shape.)
-_BASELINE_MIDDLEWARE = ["ROUTE", "GUIDE", "PROMPT", "RETRY"]
+_BASELINE_MIDDLEWARE = ["ROUTE", "GUIDE", "PROMPT", "RETRY", "CACHE"]
 
 
 @pytest.fixture
@@ -151,6 +151,9 @@ def captured_build(monkeypatch):
     # routing+session_guide); stub it to the ``"RETRY"`` marker so the no-gate
     # baseline stays a clean list of marker strings (not a raw object).
     monkeypatch.setattr(stack, "ModelRetryMiddleware", lambda *a, **k: "RETRY")
+    # AnthropicPromptCachingMiddleware is default-ON; stub to marker.
+    monkeypatch.setattr(stack, "AnthropicPromptCachingMiddleware",
+                        lambda **kw: "CACHE")
     # driver_strong_orchestrator gates CodeInterpreterMiddleware — stub False
     # so no real middleware object mounts in the baseline.
     monkeypatch.setattr(stack, "driver_strong_orchestrator", lambda **kw: False)
