@@ -38,6 +38,10 @@ gather → synthesize → audit → publish
         `sandbox/voice_embed.py` (resemblyzer, open weights).
      3. Audio transcription: `sandbox/audio_client.py`.
      4. Video keyframes: `sandbox/extract_all_video_frames.py`.
+        After extraction, run `sandbox/normalize_artifact_urls.py` to
+        rewrite any transient http URLs in `face_analysis.json` /
+        `video_frame_analysis.json` to relative paths (kills ghost URLs
+        left by the ephemeral HTTP server used during media-mcp calls).
      5. **Video summaries**: `sandbox/video_summarize.py` (MiMo-V2.5-Pro
         structured analysis + open diarization). See `SUMMARIZE_VIDEOS.md`.
         Conditional — only runs if videos exist.

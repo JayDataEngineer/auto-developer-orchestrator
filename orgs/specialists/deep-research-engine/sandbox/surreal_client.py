@@ -364,6 +364,10 @@ def cmd_save_video_captions(args):
 
     Each entry has {frame, url, caption}. Persist the caption + frame name
     so the grounding check and report can cite them.
+
+    Ghost-URL hardening: if `url` is an http(s) URL (a transient server that
+    died), DO NOT persist it — http URLs are ephemeral and become permanently
+    dead references. Persist only the relative `frame` path under video_frames/.
     """
     data = json.loads(Path(args.input).read_text())
     if not isinstance(data, list):
@@ -374,13 +378,18 @@ def cmd_save_video_captions(args):
         frame = entry.get("frame", f"frame_{i}")
         caption = entry.get("caption", "")
         url = entry.get("url", "")
+        # Never persist an http URL — they're ephemeral. Use a relative path.
+        if isinstance(url, str) and url.startswith("http"):
+            url = f"video_frames/{frame}"
+        elif not url:
+            url = f"video_frames/{frame}"
         rid = _safe_id("media", frame)
         sql = (
             f"UPSERT {rid} SET "
             f"type = 'video_frame', "
-            f"frame = {json.dumps(frame)}, "
-            f"caption = {json.dumps(caption)}, "
-            f"url = {json.dumps(url)};"
+            f"frame = {json.dumps(frame, ensure_ascii=False)}, "
+            f"caption = {json.dumps(caption, ensure_ascii=False)}, "
+            f"url = {json.dumps(url, ensure_ascii=False)};"
         )
         try:
             execute_sql(sql, timeout=10)

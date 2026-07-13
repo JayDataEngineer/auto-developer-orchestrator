@@ -29,6 +29,11 @@ VIDEO_DIR = Path(os.environ.get("VIDEO_DIR",
 RUN_DIR = Path(os.environ.get("RUN_DIR",
     "orgs/specialists/deep-research-engine/artifacts/run-2026-07-12"))
 SURREALDB_URL = os.environ.get("SURREALDB_URL", "")
+SURREALDB_NS = os.environ.get("SURREALDB_NS", "research")
+SURREALDB_DB = os.environ.get("SURREALDB_DB", "main")
+# Read auth from env (set by policy.yaml sandbox.env or operator). Default is
+# the local-dev root:root — production deployments override via Infisical.
+SURREALDB_AUTH = os.environ.get("SURREALDB_AUTH", "Basic cm9vdDpyb290")
 DIARIZE = os.environ.get("DIARIZE", "1") == "1"
 _rpc_id = 0
 
@@ -228,8 +233,10 @@ def diarize_video(path):
 
 def sql(body):
     req = urllib.request.Request(SURREALDB_URL, data=body.encode(),
-        headers={"Accept": "application/json", "surreal-ns": "research",
-                 "surreal-db": "main", "Authorization": "Basic cm9vdDpyb290"})
+        headers={"Accept": "application/json",
+                 "surreal-ns": SURREALDB_NS,
+                 "surreal-db": SURREALDB_DB,
+                 "Authorization": SURREALDB_AUTH})
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.loads(r.read())
 

@@ -27,7 +27,11 @@ from collections import Counter
 from pathlib import Path
 
 URL = os.environ.get("SURREALDB_URL", "http://127.0.0.1:8000/sql")
-NS = "research"; DB = "main"; AUTH = "Basic cm9vdDpyb290"
+NS = os.environ.get("SURREALDB_NS", "research")
+DB = os.environ.get("SURREALDB_DB", "main")
+# Read auth from env (set by policy.yaml sandbox.env or operator). Default is
+# the local-dev root:root — production deployments override via Infisical.
+AUTH = os.environ.get("SURREALDB_AUTH", "Basic cm9vdDpyb290")
 RUN_DIR = Path(os.environ.get("RUN_DIR",
     "/sandbox/workspace/orgs/specialists/deep-research-engine/artifacts/run-2026-07-12"))
 

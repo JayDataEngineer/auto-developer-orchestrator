@@ -70,6 +70,12 @@ egress:
 credentials:
   optional:
     - COMPREFACE_API_KEY    # face recognition (face_client.py)
+    # SurrealDB auth — when production SurrealDB uses a non-root:root password,
+    # the operator sets SURREALDB_AUTH="Basic <base64>" via Infisical → .env.
+    # Local dev leaves this unset; scripts default to root:root.
+    - SURREALDB_AUTH
+    - SURREALDB_USER        # alternative: raw user (default root)
+    - SURREALDB_PASS        # alternative: raw pass (default root)
 
 jobs:
   # `when:` is a shell predicate (exit 0 -> run, non-zero -> skip). Each job
