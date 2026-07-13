@@ -105,14 +105,17 @@ REPORT TEXT:
 {text[:30000]}
 """
     # Reasoning models (e.g. mimo-v2.5) emit chain-of-thought into
-    # `reasoning_content` BEFORE the final answer. If max_tokens is too low,
-    # the entire budget is consumed by reasoning and `content` comes back null.
-    # Use a generous budget so reasoning finishes AND the answer lands.
+    # `reasoning_content` BEFORE the final answer. thinking:{type:disabled}
+    # turns the reasoning pass OFF — entity extraction from the report is a
+    # structured task, not a reasoning task, so skipping it is faster (~2s vs
+    # 10-30s) AND avoids the null-content trap entirely. We still fall back to
+    # reasoning_content below for safety.
     data = json.dumps({
         "messages": [{"role": "user", "content": prompt}],
         "model": model,
         "temperature": 0.0,
         "max_tokens": 16000,
+        "thinking": {"type": "disabled"},
     }).encode()
     headers = {
         "Content-Type": "application/json",
