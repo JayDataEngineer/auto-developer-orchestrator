@@ -29,16 +29,33 @@ DEFAULT_RUN = Path(__file__).parent.parent / "artifacts" / "run-2026-07-12"
 
 def _verify(rel_path: str, run_dir: Path) -> bool:
     """Check that a relative path resolves to a real file. Searches run_dir,
-    the source dataset, entities/.../photos, and face_clusters/*/photos
-    (face-bearing photos get copied into cluster dirs during clustering)."""
+    any dataset under data/, entities/.../photos, and face_clusters/*/photos
+    (face-bearing photos get copied into cluster dirs during clustering).
+
+    Generic: works with ANY dataset — scans data/*/ for the source dir rather
+    than hardcoding a specific export name."""
     candidates = [
         run_dir / rel_path,                                    # direct
-        run_dir.parent.parent.parent.parent / "data" / "telegram-dump" / "Raw_ChatExport_2026-03-13" / rel_path,
         run_dir / "entities" / "text_and_scenes" / rel_path,   # copied photos
         run_dir / "entities" / rel_path,
     ]
     if any(c.is_file() for c in candidates):
         return True
+    # Search ANY dataset under data/ (generic — not hardcoded to one export).
+    # run_dir is .../orgs/specialists/deep-research-engine/artifacts/run-XX;
+    # the workspace root is 5 levels up.
+    workspace = run_dir
+    for _ in range(6):
+        workspace = workspace.parent
+        if workspace.name == "workspace" or (workspace / "data").is_dir():
+            break
+    data_root = workspace / "data"
+    if data_root.is_dir():
+        for ds in data_root.iterdir():
+            if ds.is_dir():
+                for export in ds.iterdir():
+                    if (export / rel_path).is_file():
+                        return True
     # Photos with detected faces get organized into cluster folders. If
     # rel_path is photos/<name>, also scan entities/face_clusters/*/photos/.
     parts = rel_path.split("/", 1)

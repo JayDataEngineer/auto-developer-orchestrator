@@ -147,7 +147,8 @@ def gap5_extracted_from_edges():
         print(f"  gap 5: entity_extract unavailable ({e}) — skipping")
         return 0
 
-    run_dir = Path(__file__).parent.parent / "artifacts" / "run-2026-07-12"
+    run_dir = Path(os.environ.get("RUN_DIR",
+        str(Path(__file__).parent.parent / "artifacts" / "run-2026-07-12")))
     asum_path = run_dir / "audio_summaries.json"
     if not asum_path.exists():
         print("  gap 5: no audio_summaries.json — skipping")
@@ -293,7 +294,8 @@ def gap7_sender_authored_edges():
 
 # ---------------------------------------------------------------------------
 def main():
-    run_dir = Path(__file__).parent.parent / "artifacts" / "run-2026-07-12"
+    run_dir = Path(os.environ.get("RUN_DIR",
+        str(Path(__file__).parent.parent / "artifacts" / "run-2026-07-12")))
     if len(sys.argv) > 1:
         run_dir = Path(sys.argv[1])
     print(f"=== close_graph_gaps: {run_dir} ===")
