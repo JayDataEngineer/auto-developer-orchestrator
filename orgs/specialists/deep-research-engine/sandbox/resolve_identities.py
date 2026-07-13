@@ -122,8 +122,12 @@ def create_voice_cluster_nodes():
         for fname in files:
             stem = Path(fname).stem
             try:
-                # Match item by path containing the stem (audio files are named like IMG_5795.wav)
-                r = sql(f"SELECT id, sender FROM item WHERE type = 'voice' "
+                # Match item by path containing the stem. Audio files can be
+                # either voice messages (type='voice') OR video audio tracks
+                # (type='video' — the audio was extracted from the video).
+                # Query BOTH types so video audio clusters resolve to senders.
+                r = sql(f"SELECT id, sender FROM item WHERE "
+                        f"(type = 'voice' OR type = 'video') "
                         f"AND path CONTAINS {jval(stem)} LIMIT 1;")
                 items = r[0].get("result", []) if r and isinstance(r[0].get("result"), list) else []
                 for it in items:
