@@ -42,7 +42,7 @@ gather → synthesize → audit → publish
         rewrite any transient http URLs in `face_analysis.json` /
         `video_frame_analysis.json` to relative paths (kills ghost URLs
         left by the ephemeral HTTP server used during media-mcp calls).
-     5. **Video summaries**: `sandbox/video_summarize.py` (MiMo-V2.5-Pro
+     5. **Video summaries**: `sandbox/video_summarize.py` (MiMo-V2.5
         structured analysis + open diarization). See `SUMMARIZE_VIDEOS.md`.
         Conditional — only runs if videos exist.
      6. **OCR text screenshots**: `sandbox/ocr_no_face_photos.py`

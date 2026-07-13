@@ -1,4 +1,4 @@
-# Summarize Videos (MiMo-V2.5-Pro + Open Diarization)
+# Summarize Videos (MiMo-V2.5 + Open Diarization)
 
 ## When to use this
 
@@ -15,7 +15,7 @@ If `n = 0`, stop. Do not run the summarizer.
 ## What it does
 
 For each video:
-1. **Structural summary** via MiMo-V2.5-Pro (cloud multimodal model, 1M token context, Video-MME 87.7%). The model sees the ENTIRE video (not just keyframes) and produces a structured analysis: what's happening, who's present, timeline, visible text, audio/speech, setting/context, key takeaways.
+1. **Structural summary** via MiMo-V2.5 (cloud multimodal model, 1M token context, Video-MME 87.7%). The model sees the ENTIRE video (not just keyframes) and produces a structured analysis: what's happening, who's present, timeline, visible text, audio/speech, setting/context, key takeaways.
 2. **Speaker diarization** via an open pipeline (ffmpeg → webrtcvad → resemblyzer → HDBSCAN). Identifies WHO speaks WHEN. Non-gated (no HuggingFace token needed — unlike pyannote).
 
 Both outputs are paired together so the researcher can see "this person said X at timestamp Y while Z was visible on screen."
@@ -46,7 +46,7 @@ If `SURREALDB_URL` is set, each video item record gets:
 ## How it works (technical)
 
 ### Video summary (cloud_vlm)
-The script encodes each video as a **data URI** (base64-inline) because the cloud provider cannot fetch `localhost` URLs. The data URI is sent to media-mcp's `cloud_vlm` tool, which dispatches to MiMo-V2.5-Pro. The model's `response` field contains the structured summary text.
+The script encodes each video as a **data URI** (base64-inline) because the cloud provider cannot fetch `localhost` URLs. The data URI is sent to media-mcp's `cloud_vlm` tool, which dispatches to MiMo-V2.5. The model's `response` field contains the structured summary text.
 
 **Large videos (12MB+):** the base64 expansion (~33% overhead) can produce 16MB+ data URIs. These work but are slow. The script handles failures gracefully and caches successful results.
 

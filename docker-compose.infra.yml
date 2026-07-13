@@ -78,8 +78,12 @@ services:
       MEDIA_DEVICE: ${MEDIA_DEVICE:-cpu}
       MEDIA_PROFILE: ${MEDIA_PROFILE:-standard}
       MEDIA_IDLE_TIMEOUT: ${MEDIA_IDLE_TIMEOUT:-1800}
-      # cloud_vlm (MiMo-V2.5-Pro video/image/audio understanding) needs the
-      # OpenCode Go API key. Reuses the same key as the LLM provider.
+      # cloud_vlm (MiMo-V2.5 — the MULTIMODAL variant) for video/image/audio
+      # understanding. NOTE: MiMo-V2.5-Pro is text-only (reasoning); MiMo-V2.5
+      # is multimodal. Pin the model explicitly so it can never regress to Pro
+      # (which would silently produce hallucinated summaries from blind text
+      # generation instead of real multimodal analysis).
+      MEDIA_CLOUD_VLM_MODEL: ${MEDIA_CLOUD_VLM_MODEL:-mimo-v2.5}
       MEDIA_CLOUD_VLM_API_KEY: ${OPENCODE_API_KEY:-}
     volumes:
       - media-models:/app/models

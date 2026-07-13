@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize videos via MiMo-V2.5-Pro (cloud_vlm) + optional diarization.
+"""Summarize videos via MiMo-V2.5 (cloud_vlm) + optional diarization.
 
 For each video: upload → cloud_vlm with a structured-summary prompt → store.
 If diarization is available, pair speaker turns with the visual summary for
@@ -100,7 +100,7 @@ def _data_uri(path):
 
 
 def summarize_video(path):
-    """Send video to MiMo-V2.5-Pro via cloud_vlm (data URI inline — the cloud
+    """Send video to MiMo-V2.5 via cloud_vlm (data URI inline — the cloud
     provider can't fetch localhost URLs, so we inline the bytes)."""
     uri = _data_uri(path)
     r = _rpc("cloud_vlm", {"video": uri, "prompt": SUMMARY_PROMPT,
@@ -332,7 +332,7 @@ def main():
 
     # Write a human-readable index
     idx = RUN_DIR / "entities" / "video_frames" / "video_summaries.md"
-    lines = ["# Video summaries (MiMo-V2.5-Pro + Open Diarization)", "",
+    lines = ["# Video summaries (MiMo-V2.5 + Open Diarization)", "",
              f"**Videos:** {len(results)}", "",
              "Each video was analyzed end-to-end by the multimodal model (not just keyframes). "
              "Speaker diarization via open pipeline (ffmpeg + webrtcvad + resemblyzer + HDBSCAN) "
