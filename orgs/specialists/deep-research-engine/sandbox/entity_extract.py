@@ -64,14 +64,18 @@ def _llm_env_required():
     return url, model
 
 
-def call_llm(prompt, model=None, temperature=0.1, max_tokens=10000):
+def call_llm(prompt, model=None, temperature=0.1, max_tokens=10000, disable_thinking=True):
     """Call LLM API and return response text.
 
     Handles reasoning models (e.g. mimo-v2.5) that emit chain-of-thought into
     `reasoning_content` before the final answer. With a low token budget the
-    entire budget is spent on reasoning and `content` returns null. We fall
-    back to `reasoning_content` when `content` is empty, then retry once with
-    a doubled budget if both are empty.
+    entire budget is spent on reasoning and `content` returns null.
+
+    disable_thinking=True (default) sends `thinking: {type: disabled}` which
+    skips the reasoning pass entirely. Entity extraction is a structured task
+    that doesn't need chain-of-thought — without it, each call is ~1-2s instead
+    of 10-30s. We still fall back to `reasoning_content` when `content` is
+    empty, then retry once with a doubled budget if both are empty.
     """
     import urllib.request
 
@@ -87,12 +91,18 @@ def call_llm(prompt, model=None, temperature=0.1, max_tokens=10000):
         headers["Authorization"] = f"Bearer {api_key}"
 
     def _do_request(budget):
-        data = json.dumps({
+        payload = {
             "messages": [{"role": "user", "content": prompt}],
             "model": model or default_model,
             "temperature": temperature,
             "max_tokens": budget,
-        }).encode()
+        }
+        # thinking:{type:disabled} turns off the reasoning pass on reasoning
+        # models (mimo-v2.5 via opencode-go / z.ai coding endpoint). Without
+        # this, mimo spends its entire token budget on chain-of-thought.
+        if disable_thinking:
+            payload["thinking"] = {"type": "disabled"}
+        data = json.dumps(payload).encode()
         req = urllib.request.Request(url, data=data, headers=headers)
         with urllib.request.urlopen(req, timeout=180) as resp:
             return json.loads(resp.read())

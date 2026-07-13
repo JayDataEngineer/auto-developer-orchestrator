@@ -216,22 +216,32 @@ def gap5_extracted_from_edges():
 def gap6_mentions_edges():
     """topic -> mentions -> item (keyword overlap)."""
     topics_res = sql("SELECT id, name FROM topic;")
-    topics = topics_res[0]["result"] if topics_res else []
+    topics = topics_res[0]["result"] if topics_res and isinstance(topics_res[0].get("result"), list) else []
     total = 0
     for t in topics:
-        tid = t["id"]
+        if not isinstance(t, dict):
+            continue
+        tid = t.get("id")
         name = t.get("name", "")
-        if not name or len(name) < 4:
+        if not tid or not name or len(name) < 4:
             continue
         # Find items whose text contains the topic name
-        matches = sql(
-            f"SELECT id FROM item WHERE text != NONE AND string::lowercase(text) "
-            f"CONTAINS {jval(name.lower())} LIMIT 50;"
-        )
-        items = matches[0]["result"] if matches else []
+        try:
+            matches = sql(
+                f"SELECT id FROM item WHERE text != NONE AND string::lowercase(text) "
+                f"CONTAINS {jval(name.lower())} LIMIT 50;"
+            )
+        except Exception:
+            continue
+        items = matches[0]["result"] if matches and isinstance(matches[0].get("result"), list) else []
         for it in items:
-            sql(f"RELATE {tid} -> mentions -> {it['id']};")
-            total += 1
+            if not isinstance(it, dict) or not it.get("id"):
+                continue
+            try:
+                sql(f"RELATE {tid} -> mentions -> {it['id']};")
+                total += 1
+            except Exception:
+                pass
     cnt = sql("RETURN count(SELECT id FROM mentions);")
     actual = cnt[0]["result"] if cnt else 0
     print(f"  gap 6: mentions edges = {actual}")
