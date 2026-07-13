@@ -72,12 +72,30 @@ services:
       # (MEDIA_MCP_URL=http://localhost:8101). Sandbox reaches it via
       # host.docker.internal:8101.
       - "8101:8001"
+    # Allow media-mcp (inside container) to reach host ports — needed when
+    # the preprocess pipeline serves audio files via a localhost HTTP server
+    # and media-mcp must fetch them (ASR, voice embeddings, diarization).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       MEDIA_HOST: "0.0.0.0"
       MEDIA_PORT: "8001"
       MEDIA_DEVICE: ${MEDIA_DEVICE:-cpu}
       MEDIA_PROFILE: ${MEDIA_PROFILE:-standard}
       MEDIA_IDLE_TIMEOUT: ${MEDIA_IDLE_TIMEOUT:-1800}
+      # Face detection + embeddings (InsightFace buffalo_l, ~350MB). The
+      # `standard` profile disables these; enable explicitly so DRE's face
+      # pipeline has a working backend. CompreFace is NOT deployed —
+      # media-mcp's InsightFace is the SOTA open-weight replacement that
+      # face_client.py + the DRE agent can reach via MEDIA_MCP_URL.
+      MEDIA_FACE_ENABLED: ${MEDIA_FACE_ENABLED:-true}
+      MEDIA_EMBED_FACES_ENABLED: ${MEDIA_EMBED_FACES_ENABLED:-true}
+      # Voice embeddings (WeSpeaker ResNet34, 256-d) + speaker diarization
+      # (Pyannote 3.1). Both need a HuggingFace token with accepted licenses
+      # for pyannote models. Enabled here so the DRE voice pipeline works.
+      MEDIA_EMBED_VOICE_ENABLED: ${MEDIA_EMBED_VOICE_ENABLED:-true}
+      MEDIA_PYANNOTE_ENABLED: ${MEDIA_PYANNOTE_ENABLED:-true}
+      MEDIA_PYANNOTE_TOKEN: ${HF_TOKEN:-${HUGGING_FACE_HUB_TOKEN:-}}
       # cloud_vlm (MiMo-V2.5 — the MULTIMODAL variant) for video/image/audio
       # understanding. NOTE: MiMo-V2.5-Pro is text-only (reasoning); MiMo-V2.5
       # is multimodal. Pin the model explicitly so it can never regress to Pro

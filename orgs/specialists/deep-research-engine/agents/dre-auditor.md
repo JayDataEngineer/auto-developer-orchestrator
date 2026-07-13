@@ -13,11 +13,17 @@ rubric: |
   is proven from the agent's own query results + written report.
   - The audit_report.md file exists at the path the agent named AND was read
     back to verify (cite the read command + the Overall: line).
-  - Every applicable check (1–7) was actually RUN — for each, the agent
+  - Every applicable check (1–8) was actually RUN — for each, the agent
     cited the SurrealQL query AND its numeric result, not a verdict adjective.
   - Check #7 (embedding coverage) ran if ANY vector column exists in the
     schema — skipping it on a "successful" ingest is the trap this gate exists
     to catch.
+  - COVERAGE CHECKS (9–14) ran for multimodal-ingest tasks. These compare
+    SOURCE file counts on disk vs PROCESSED entries in artifacts/DB. For
+    each, the auditor cited BOTH counts + the ratio. Skipping these on a
+    "successful" ingest is the trap that lets 85% of photos go unanalyzed
+    silently — an automatic gate fail. Each FAIL cites the ratio + ≥3 sample
+    unprocessed source files (e.g. `photo_101.jpg, photo_102.jpg`).
   - Each FAIL cites concrete numbers + ≥3 sample bad-row IDs (e.g.
     `voice_5, voice_6, voice_7`). "12/34 failed" with no IDs is a fail.
   - Each PASS cites the query result that proves the threshold was met
@@ -104,6 +110,84 @@ multimodal tables (e.g. web-only research, PDF-only ingestion).
    failure mode where the report asserts a named entity — an app, weapon model,
    org, or place — that appears in NO source data. The entity may be fabricated
    OR a real entity misattributed to the subject; both are unsupported claims.
+
+### Coverage checks (9–14) — source-vs-processed ratio gates
+
+These checks compare SOURCE file counts on disk against PROCESSED entries in
+artifacts/DB. A pipeline stage that "succeeds" but processes only 15% of
+source data is a FAILED run, not a partial success. These checks exist
+because the difference between "I ran the script" and "I processed all the
+data" is the most common silent failure in multimodal ingest.
+
+For each: count source files, count processed entries, compute ratio. FAIL
+if ratio < 95%. Report exact numbers + sample unprocessed files.
+
+9. **Photo face-analysis coverage** — every source photo was face-analyzed.
+   ```bash
+   # Source count (adjust extensions to match the dataset)
+   find data/ -type f \( -name '*.jpg' -o -name '*.jpeg' -o -name '*.png' \) | wc -l
+   # Processed count
+   python3 -c "import json; print(len(json.load(open('artifacts/<run>/face_analysis.json'))))"
+   ```
+   FAIL if processed/source < 0.95. Sample: list 5 source photos NOT in
+   face_analysis.json. This catches the failure where face_client.py timed
+   out or 429'd mid-batch and silently skipped 85% of the corpus.
+
+10. **Text message ingestion coverage** — every text message in the source
+    export was ingested as an `item` row.
+    ```bash
+    # Source count (Telegram export: messages with non-empty text)
+    python3 -c "import json; d=json.load(open('data/<export>/result.json')); print(sum(1 for m in d['messages'] if isinstance(m,dict) and m.get('text'  ) and str(m.get('text','')).strip()))"
+    # Processed count
+    ```
+    ```sql
+    SELECT count() FROM item WHERE type = 'message' GROUP ALL;
+    ```
+    FAIL if processed/source < 0.95. This catches the failure where the
+    parser only ingested media-bearing messages and dropped plain-text ones.
+
+11. **Video keyframe analysis coverage** — every extracted keyframe has a
+    VLM analysis (not just raw extraction).
+    ```bash
+    # Extracted keyframes on disk
+    ls artifacts/<run>/video_frames/*.jpg | wc -l
+    # Analyzed keyframes
+    python3 -c "import json; print(len(json.load(open('artifacts/<run>/video_frame_analysis.json'))))"
+    ```
+    FAIL if analyzed/extracted < 0.95. This catches the failure where ffmpeg
+    extracted 21 keyframes but the VLM only analyzed 8 (API timeout, crash,
+    or lazy truncation). Unanalyzed keyframes are blind spots.
+
+12. **Video summary coverage** — every source video has a summary.
+    ```bash
+    # Source video count
+    find data/ -type f \( -name '*.mp4' -o -name '*.mov' -o -name '*.m4v' \) | wc -l
+    # Summarized count
+    python3 -c "import json; print(len(json.load(open('artifacts/<run>/entities/video_frames/video_summaries.json'))))"
+    ```
+    FAIL if summarized/source < 0.95.
+
+13. **Ghost URL detection** — no artifact JSON contains dead ephemeral URLs.
+    ```bash
+    grep -rl 'http://172\.\|http://localhost' artifacts/<run>/*.json
+    ```
+    FAIL if ANY match. Ghost URLs (`http://172.17.0.1:PORT/...`) are
+    transient HTTP server references that die when the script exits. They
+    become permanently dead links in the knowledge graph. This check catches
+    incomplete runs of `normalize_artifact_urls.py`.
+
+14. **Entity folder structure** — `entities/` is subject-based, not a
+    modality dump.
+    ```bash
+    # Subject folders should exist (named after entities, not pipeline stages)
+    ls artifacts/<run>/entities/ | grep -vE '^(raw|other)$'
+    # There should be NO top-level modality folders (those go under raw/)
+    ls artifacts/<run>/entities/ | grep -E '^(face_clusters|voice_clusters|text_and_scenes|video_frames)$'
+    ```
+    FAIL if entities/ ONLY contains modality folders (face_clusters,
+    voice_clusters, etc.) with no subject-based entity folders. The raw
+    modality output belongs under `entities/raw/`, not at the top level.
+    Also FAIL if `entities/index.md` does not exist.
 
 ## Reporting
 

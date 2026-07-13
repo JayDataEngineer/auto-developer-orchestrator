@@ -25,38 +25,127 @@ handle) lives in the parser scripts under `sandbox/`, surfaced via `--help`.
 ## Pipeline
 
 ```
-gather → synthesize → audit → publish
+pre-process (deterministic) → gather → synthesize → audit → publish
 ```
+
+### Step 0: Deterministic Pre-Processing (ALREADY DONE)
+
+**Before the agent starts**, run the deterministic pipeline:
+
+```bash
+python3 scripts/preprocess_pipeline.py \
+  --data <data_dir> --run-dir <run_dir> [--step <name>] [--workers N]
+```
+
+This produces structured JSON artifacts that the agent reads directly.
+**The agent should NEVER re-run media processing** — faces, OCR, VLM,
+classification, object detection, and scene detection are ALL pre-computed.
+The agent only does REASONING: entity resolution, dossier building,
+synthesis, audit.
+
+**Pre-processing artifacts (in `$RUN_DIR/`):**
+- `items.json` — parsed chat items (also loaded to SurrealDB as `item` rows)
+- `image_classification.json` — photo categories (text_screenshot,
+  photo_people, document, meme, object)
+- `ocr_results.json` — transcribed text from screenshots/documents
+- `video_frame_analysis.json` — VLM descriptions of video keyframes
+- `object_detection.json` — YOLOv8 detections (labels, confidence, bbox)
+- `face_embeddings.json` + `face_clusters.json` — InsightFace 512-d
+  embeddings + HDBSCAN clusters
+- `voice_embeddings.json` + `voice_clusters.json` — WeSpeaker 256-d
+  (when pyannote.audio is installed in media-mcp)
+- `video_scenes.json` — PySceneDetect scene boundaries
+- `preprocessing_manifest.json` — summary of all artifacts + counts
+
+**Known infrastructure gaps (Dockerfile-level):**
+- ASR: Parakeet ONNX model incompatible with ONNX Runtime 1.27.0.
+  Workaround: use transcripts from prior agent run (`audio_chunks.json`,
+  `all_audio_corpus.json`, `audio_summaries.json`).
+- Voice embeddings: `pyannote.audio` not in media-mcp Docker image.
+  Workaround: face clusters + text co-occurrence for identity resolution.
+- kosmos_ocr: disabled. OCR uses `cloud_vlm` (MiMo-V2.5) instead.
+
+### Agent Pipeline (reasoning only)
 
 1. **Gather** — You do this yourself. Trivial work, no specialist needed.
    - Web research: `python3 sandbox/context_engine.py search "<query>"`.
    - PDF ingest: `python3 sandbox/entity_extract.py --pdf <path>`.
    - Multimodal ingest (GENERIC — works for any chat export or media corpus):
-     1. Parse: `sandbox/telegram_parser.py` (or any parser that produces
-        `item` rows in SurrealDB).
-     2. Face analysis: `sandbox/face_client.py` → voice clustering via
-        `sandbox/voice_embed.py` (resemblyzer, open weights).
-     3. Audio transcription: `sandbox/audio_client.py`.
-     4. Video keyframes: `sandbox/extract_all_video_frames.py`.
-        After extraction, run `sandbox/normalize_artifact_urls.py` to
-        rewrite any transient http URLs in `face_analysis.json` /
-        `video_frame_analysis.json` to relative paths (kills ghost URLs
-        left by the ephemeral HTTP server used during media-mcp calls).
-     5. **Video summaries**: `sandbox/video_summarize.py` (MiMo-V2.5
-        structured analysis + open diarization). See `SUMMARIZE_VIDEOS.md`.
-        Conditional — only runs if videos exist.
-     6. **OCR text screenshots**: `sandbox/ocr_no_face_photos.py`
-        (separates pure-text screenshots from entity-bearing photos).
-     7. Content clustering: `sandbox/content_cluster.py`.
-     8. **Build graph**: `sandbox/close_graph_gaps.py` (entity extraction,
+     1. **READ pre-processed data** from `$RUN_DIR/` JSON files. DO NOT
+        re-run face detection, OCR, VLM, or classification — it's all done.
+     2. Query SurrealDB for items:
+        `mcp__surreal__query(sql="SELECT * FROM item WHERE type='message'")`.
+     3. Build entity dossiers from pre-processed data (see Entity Dossier
+        Spec below).
+     4. **Resolve identities**: link face clusters ↔ voice clusters via
+        video co-occurrence, resolve voice clusters to senders.
+     5. **Build graph**: `sandbox/close_graph_gaps.py` (entity extraction,
         topic→item edges, sender→authored edges).
-     9. **Resolve identities**: `sandbox/resolve_identities.py` (DYNAMIC
-        identity linking — see `INGEST_MULTIMODAL_PERSONS.md`). Links
-        face↔voice clusters via video co-occurrence, resolves voice
-        clusters to senders, creates `same_as` edges.
-     10. **Entity folders**: `sandbox/build_entity_folders.py` (browse
-         index: face clusters, voice clusters, text screenshots, video
-         summaries).
+     6. **Entity dossiers** (SUBJECT-BASED, not modality-based):
+        `sandbox/build_entity_dossiers.py` builds one folder PER ENTITY
+        (subject) with all associated media. See **Entity Dossier Spec**
+        below.
+
+#### Entity Dossier Spec
+
+The `entities/` folder MUST be organized by **SUBJECT**, not by pipeline
+modality. An analyst opens `entities/Christopher_Anthony_Semok/` and finds
+everything about that person in one place — not scattered across
+`face_clusters/`, `voice_clusters/`, `text_and_scenes/`.
+
+**Directory structure (what the DRE MUST produce):**
+
+```
+entities/
+  index.md                              # master index, one table per kind
+  Grady_The_Pagan_of_Montana/           # MAJOR entity (top ~25)
+    Grady_The_Pagan_of_Montana.md       # full dossier: summary, aliases,
+                                        #   attributes, evidence excerpts,
+                                        #   confidence assessment
+    images/                             # symlinked photos (face cluster)
+    videos/                             # symlinked videos mentioning them
+    audio/                              # symlinked audio where they speak
+    text/
+      mentions.md                       # plaintext excerpts about them
+      audio_mentions.md                 # transcript excerpts mentioning them
+  CPUSA/
+    CPUSA.md
+    images/  videos/  audio/  text/
+  ...
+  other/                                # ALL minor entities (not lost, just
+    minor_entities.md                   #   not major). Table: name, kind,
+                                        #   evidence score, mention count.
+                                        #   Keeps the top-level clean.
+  raw/                                  # original modality output preserved
+    face_clusters/                      # for provenance (NOT the primary
+    voice_clusters/                     # browsing surface)
+    text_and_scenes/
+    video_frames/
+```
+
+**Rules:**
+- **Major entities** (top ~25 by evidence score): full dossier folder with
+  `.md` + `images/` + `videos/` + `audio/` + `text/` subfolders. Curated
+  aliases ensure all name variants are found (e.g. "Grady" = "Primary
+  Speaker" = "City Councilor" = "(Grady)The Pagan of Montana").
+- **Minor entities**: everything else goes in `other/minor_entities.md` as a
+  sortable table. Nothing is deleted — minor entities are just not promoted
+  to top-level folders.
+- **Media = symlinks**, not copies. A 1.2 GB dataset must not be duplicated
+  per entity. Symlink to the source file under `data/`.
+- **Per-item metadata**, not giant dumps. Each photo in `images/` can have a
+  companion `.json` sidecar if metadata is needed. NEVER write a single
+  50-page `info.md` that's unreadable for humans and unparseable for AI.
+- **Evidence-grounded dossiers.** Every claim in the `.md` links to a
+  source: `[Audio: New Recording 7.wav]`, `[Item: 2026_03_13T...]`,
+  `[Video: IMG_5795]`. No unsourced assertions.
+- **Identity confidence.** When a voice cluster resolves to a sender, the
+  dossier MUST note the method (sender co-occurrence ≠ voice biometrics)
+  and flag any third-person references that reduce confidence.
+- **Generic.** Reads `RUN_DIR` from env. Works on ANY dataset (Telegram,
+  Discord, scraped web, whatever). No hardcoded export names.
+- **Idempotent.** Re-running wipes `entities/` (preserving `raw/`) and
+  rebuilds cleanly.
    - DB lookup: call `mcp__surreal__query(sql="SELECT ...")`
      before delegating — the answer may already exist. SurrealDB's built-in
      MCP server exposes `query`, `insert`, `upsert`, `relate`, `select`,
@@ -86,6 +175,31 @@ For multimodal ingest:
 - Check #7 (embedding coverage) is the trap detector — a task that reports
   "success" with 4% embedding coverage has silently broken semantic search.
   Re-delegate to close gaps before yielding.
+- **Full coverage REQUIRED** (a run with gaps is a FAILED run, not a partial
+  success):
+  - **Photos**: EVERY source photo (`find data/ -name '*.jpg'`) must be
+    face-analyzed. A run that analyzes 219 of 1,454 photos (15%) has
+    SILENTLY DROPPED 85% of the visual data. Re-run face analysis until
+    coverage = 100% (or every unanalyzed photo is explicitly logged as
+    corrupt/unreadable).
+  - **Audio**: EVERY source audio file must be transcribed. wav+m4a
+    duplicates of the same recording count as ONE — dedupe by stem.
+  - **Videos**: EVERY source video must have keyframes extracted + a
+    summary. If 13 videos exist, 13 summaries must exist.
+  - **Video keyframes**: EVERY extracted keyframe must have a VLM analysis
+    (not just 8 of 21). Unanalyzed keyframes = blind spots.
+  - **Text/plaintext**: EVERY text message in the source export must be
+    ingested as an `item` row. If the Telegram export has 300+ text
+    messages but SurrealDB shows 13 `type=message` rows, the parser
+    DROPPED the text. Re-run the parser.
+  - **OCR**: photos that are screenshots of text (no faces) must be OCR'd
+    — that's where surnames like "Scott Ernest" hide. Missing OCR =
+    missing names.
+- **Identity rigor**: voice-cluster → sender attribution is based on
+  CO-OCCURRENCE, not voice biometrics. The dossier MUST flag this and
+  MUST note any third-person references in transcripts that reduce
+  confidence (e.g. "me and Grady's situation" means the speaker may not
+  BE Grady).
 
 For writer output:
 - Format matches the platform spec (length, structure, tone).

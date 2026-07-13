@@ -14,7 +14,7 @@ ask_user: true
 # subagent's specialized rubric lives on its own agent spec.
 rubric:
   enabled: true
-  max_iterations: 2
+  max_iterations: 3
   default: |
     Grade whether the CTO's pipeline dispatch was actually completed with
     evidence, not just narrated. Read the artifacts the subagents wrote —
@@ -28,6 +28,14 @@ rubric:
     - When the auditor was delegated to, its `overall:` verdict was read +
       acted on — re-dispatched on `fail`, yielded on `pass`. Ignoring an
       auditor fail is an automatic gate fail.
+    - COVERAGE GATES (checks 9–14): if the auditor reports ANY coverage
+      ratio below 95% (photos unanalyzed, text messages uningested, video
+      keyframes blind, ghost URLs in artifacts, entity folder is a modality
+      dump), the CTO MUST re-dispatch the relevant gather sub-pipeline to
+      close the gap BEFORE yielding. Yielding with open coverage gaps is an
+      AUTOMATIC GATE FAIL — no exceptions. A pipeline that analyzes 219 of
+      1,454 photos has not "succeeded partially"; it has FAILED. Cite the
+      re-dispatch call + the post-rerun audit showing the gap closed.
     - SurrealDB was queried for prior work before re-gathering (principle #1
       — query before you delegate). Cite the query + its row count.
     - No `TODO`, `[insert here]`, or "some say / experts believe" hedges in

@@ -77,25 +77,16 @@ credentials:
     - SURREALDB_USER        # alternative: raw user (default root)
     - SURREALDB_PASS        # alternative: raw pass (default root)
 
-jobs:
-  # `when:` is a shell predicate (exit 0 -> run, non-zero -> skip). Each job
-  # only fires when its input is staged in data/, so the org runs cleanly with
-  # OR without pre-provided media — a seamless optional pre-run capability.
-  - name: diarize_audio
-    script: orgs/specialists/deep-research-engine/sandbox/audio_client.py
-    args: [batch, --input, /sandbox/workspace/data, --output, /sandbox/workspace/artifacts/audio]
-    when: "ls /sandbox/workspace/data/*.{mp3,wav,ogg,m4a,flac,webm,aac} 2>/dev/null | head -1"
-    timeout: 7200
-    description: "Diarize + transcribe all audio files via media MCP (Parakeet + Pyannote 3.1)"
-  - name: process_video
-    script: orgs/specialists/deep-research-engine/sandbox/video_frames.py
-    args: [process, --input, /sandbox/workspace/data]
-    when: "ls /sandbox/workspace/data/*.{mp4,mov,mkv,webm,avi,m4v} 2>/dev/null | head -1"
-    timeout: 3600
-    description: "Extract frames + narrate video files"
-  - name: extract_entities
-    script: orgs/specialists/deep-research-engine/sandbox/entity_extract.py
-    args: [--input, /sandbox/workspace/data]
-    when: "ls /sandbox/workspace/data/*.{txt,md,json} 2>/dev/null | head -1"
-    timeout: 1800
-    description: "Extract named entities from all text content"
+jobs: []
+  # Prep jobs REMOVED — they were broken (non-recursive data/ globs, wrong CLI
+  # arg shapes: video_frames.py needs per-file --video/--source-id, entity_extract
+  # wants a subcommand). They failed every run before the agent started, eating
+  # recursion budget and confusing the model with false-fail noise. The CTO
+  # agent owns full pipeline execution via declared pux_sandbox_* tools — it
+  # runs telegram_parser / face_client / audio_client / extract_all_video_frames
+  # / video_summarize / ocr_no_face_photos / normalize_artifact_urls /
+  # content_cluster / close_graph_gaps / resolve_identities / build_entity_dossiers
+  # itself, task-specific, in the right order, with the right per-dataset args.
+  # Re-adding prep jobs requires: (1) recursive find for inputs, (2) correct CLI
+  # arg shapes per script's --help, (3) a when: predicate that actually matches
+  # nested datasets (data/<dataset>/<export>/…, not data/*.<ext>).
