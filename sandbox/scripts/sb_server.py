@@ -964,6 +964,56 @@ def js_str(s):
     return "'" + str(s).replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
+def cookie_to_dict(c):
+    """sb_cdp's get_all_cookies() returns CDP Cookie dataclass instances,
+    not JSON-serializable dicts. Project back to the dict shape callers and
+    json.dumps expect. Used by /cookies (get), /save_session, /uc handoff."""
+    if isinstance(c, dict):
+        return c
+    return {
+        "name": getattr(c, "name", ""),
+        "value": getattr(c, "value", ""),
+        "domain": getattr(c, "domain", ""),
+        "path": getattr(c, "path", ""),
+        "secure": bool(getattr(c, "secure", False)),
+        "expires": getattr(c, "expires", None),
+        "httponly": bool(getattr(c, "http_only", False)),
+    }
+
+
+def dicts_to_cookie_params(dicts):
+    """Convert plain cookie dicts to CDP CookieParam instances.
+    sb_cdp's set_all_cookies() ultimately calls
+    cdp.network.set_cookies([i.to_json() for i in cookies]) — plain dicts
+    lack .to_json() and the call deadlocks. expires is intentionally NOT
+    forwarded (CDP Network.setCookies silently rejects the ENTIRE batch
+    when any cookie carries expires — verified with the twitter payload).
+    Used by /cookies (set), /restore_session, /uc handoff."""
+    from mycdp import network as _net
+    params = []
+    for d in dicts:
+        if not isinstance(d, dict):
+            params.append(d)
+            continue
+        kw = {"name": d.get("name", ""), "value": d.get("value", "")}
+        if d.get("domain") is not None:
+            kw["domain"] = d["domain"]
+        if d.get("path") is not None:
+            kw["path"] = d["path"]
+        if d.get("secure") is not None:
+            kw["secure"] = bool(d["secure"])
+        # Accept both our normalized key (httponly, from cookie_to_dict /
+        # saved-session files) AND Selenium's native key (httpOnly, from
+        # UC mode get_cookies()) so this is a universal drop-in.
+        ho = d.get("httponly")
+        if ho is None:
+            ho = d.get("httpOnly")
+        if ho is not None:
+            kw["http_only"] = bool(ho)
+        params.append(_net.CookieParam(**kw))
+    return params
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # HTTP Handler
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1934,54 +1984,15 @@ class Handler(BaseHTTPRequestHandler):
             action = body.get("action", "get")
 
             def _cookie_to_dict(c):
-                # sb_cdp's get_all_cookies() returns CDP Cookie dataclass
-                # instances, which aren't JSON-serializable. Project back to
-                # the dict shape callers expect.
-                if isinstance(c, dict):
-                    return c
-                return {
-                    "name": getattr(c, "name", ""),
-                    "value": getattr(c, "value", ""),
-                    "domain": getattr(c, "domain", ""),
-                    "path": getattr(c, "path", ""),
-                    "secure": bool(getattr(c, "secure", False)),
-                    "expires": getattr(c, "expires", None),
-                    "httponly": bool(getattr(c, "http_only", False)),
-                }
+                # Thin delegate to the module-level helper (single source of
+                # truth — also used by /save_session and the UC handoff).
+                return cookie_to_dict(c)
 
             def _dicts_to_cookie_params(dicts):
-                # sb_cdp's set_all_cookies() ultimately calls
-                # cdp.network.set_cookies([i.to_json() for i in cookies]).
-                # That requires CDP CookieParam instances — plain dicts lack
-                # .to_json() and the call deadlocks inside the asyncio loop.
-                # Convert each dict to a CookieParam with the fields we have.
-                #
-                # IMPORTANT: `expires` is intentionally NOT forwarded. CDP's
-                # bulk Network.setCookies silently rejects the ENTIRE batch
-                # when any cookie carries an expires field — verified by
-                # bisecting the twitter cookie payload (1 cookie with
-                # expires → whole batch dropped, even cookies that would
-                # otherwise succeed on their own). Session-scoped cookies
-                # are correct for our use case: seed-cookies.sh runs at
-                # sandbox boot, the agent uses them in-session, sandbox
-                # tears down at exit. No persistence needed past that.
-                from mycdp import network as _net
-                params = []
-                for d in dicts:
-                    if not isinstance(d, dict):
-                        params.append(d)
-                        continue
-                    kwargs = {"name": d.get("name", ""), "value": d.get("value", "")}
-                    if d.get("domain") is not None:
-                        kwargs["domain"] = d["domain"]
-                    if d.get("path") is not None:
-                        kwargs["path"] = d["path"]
-                    if d.get("secure") is not None:
-                        kwargs["secure"] = bool(d["secure"])
-                    if d.get("httponly") is not None:
-                        kwargs["http_only"] = bool(d["httponly"])
-                    params.append(_net.CookieParam(**kwargs))
-                return params
+                # Thin delegate to the module-level helper (single source of
+                # truth — also used by /restore_session and the UC handoff).
+                # See dicts_to_cookie_params for the `expires` drop rationale.
+                return dicts_to_cookie_params(dicts)
 
             def _navigate_to_cookie_domain(cookies_list):
                 # CDP Network.setCookies silently drops cookies when the
@@ -2135,7 +2146,10 @@ class Handler(BaseHTTPRequestHandler):
             if sb is None: return self._err("browser not available")
             sess_path = body.get("path", "/tmp/browser-session.json")
             try:
-                cookies = sb.get_all_cookies() or []
+                # sb_cdp's get_all_cookies() returns CDP Cookie dataclass instances
+                # (not JSON-serializable) — project to dicts via cookie_to_dict.
+                raw_cookies = sb.get_all_cookies() or []
+                cookies = [cookie_to_dict(c) for c in raw_cookies]
                 storage = sb.execute_script("return Object.assign({}, localStorage)") or {}
                 payload = {"cookies": cookies, "localStorage": storage,
                            "url": safe(lambda: sb.get_current_url() or "", "")}
@@ -2152,9 +2166,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not os.path.isfile(sess_path):
                     return self._err(f"session file not found: {sess_path}", 404)
                 payload = json.loads(Path(sess_path).read_text())
-                # Restore cookies
+                # Restore cookies. The saved file holds plain dicts;
+                # sb_cdp's set_all_cookies needs CDP CookieParam instances —
+                # dicts_to_cookie_params converts and DROPS expires (CDP
+                # Network.setCookies silently rejects the whole batch if any
+                # cookie carries expires).
                 if payload.get("cookies"):
-                    sb.set_all_cookies(payload["cookies"])
+                    sb.set_all_cookies(dicts_to_cookie_params(payload["cookies"]))
                 # Restore localStorage
                 for k, v in payload.get("localStorage", {}).items():
                     try: sb.set_local_storage_item(str(k), str(v))
