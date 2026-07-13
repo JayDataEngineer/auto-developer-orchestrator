@@ -11,8 +11,12 @@ Usage:
     python3 entity_extract.py batch --input chunks.json --output entities.json
 
 Environment:
-    LLM_API_URL    (default: http://localhost:18080/v1/chat/completions)
-    LLM_MODEL      (default: qwen35-35b-a3b-vision)
+    LLM_API_URL    OpenAI-compatible /v1/chat/completions endpoint. REQUIRED.
+                   The sandbox policy injects this from the harness model tier
+                   (``sandbox.llm: <role>`` in policy.yaml → resolved via
+                   models.yaml); for standalone use, export it yourself.
+    LLM_MODEL      Model id (e.g. "mimo-v2.5"). REQUIRED. Same injection path.
+    LLM_API_KEY    API key. Optional (some local endpoints need none).
 """
 
 import argparse
@@ -38,36 +42,46 @@ Text:
 Respond with ONLY the JSON object, no other text."""
 
 
-def get_llm_url():
-    if os.environ.get("LLM_API_URL"):
-        return os.environ["LLM_API_URL"]
-    if os.environ.get("OPENROUTER_API_KEY"):
-        base = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-        return f"{base}/chat/completions"
-    return "http://localhost:18080/v1/chat/completions"
-
-
-def get_llm_model():
-    return os.environ.get("LLM_MODEL", "deepseek/deepseek-chat")
+def _llm_env_required():
+    """The sandbox policy (``sandbox.llm: <role>``) injects these from the
+    harness model tier (models.yaml). This script is a DUMB CONSUMER — it does
+    not re-resolve the provider, model, or key. Fail loud if the vars are
+    missing so a misconfigured sandbox surfaces immediately, not as a silent
+    fallback to a dead endpoint."""
+    url = os.environ.get("LLM_API_URL", "")
+    model = os.environ.get("LLM_MODEL", "")
+    if not url or not model:
+        print(
+            "ERROR: LLM_API_URL and LLM_MODEL must be set. The sandbox policy\n"
+            "injects them via `sandbox.llm: <role>` (resolved from models.yaml).\n"
+            "For standalone use:\n"
+            '  export LLM_API_URL="https://opencode.ai/zen/go/v1/chat/completions"\n'
+            '  export LLM_MODEL="mimo-v2.5"\n'
+            '  export LLM_API_KEY="<key>"',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return url, model
 
 
 def call_llm(prompt, model=None, temperature=0.1, max_tokens=10000):
     """Call LLM API and return response text."""
     import urllib.request
 
-    url = get_llm_url()
-    headers = {"Content-Type": "application/json"}
-    api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("LLM_API_KEY")
-    if api_key and "openrouter" in url:
-        headers["Authorization"] = f"Bearer {api_key}"
-        headers["HTTP-Referer"] = "https://github.com/deep-research-engine"
-        headers["X-Title"] = "deep-research-engine"
-    elif api_key:
+    url, default_model = _llm_env_required()
+    headers = {
+        "Content-Type": "application/json",
+        # Cloudflare bot-integrity (error 1010) bans the default
+        # ``Python-urllib/3.x`` signature. A neutral identifier passes.
+        "User-Agent": "pux-harness-sandbox/1.0",
+    }
+    api_key = os.environ.get("LLM_API_KEY", "")
+    if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
     data = json.dumps({
         "messages": [{"role": "user", "content": prompt}],
-        "model": model or get_llm_model(),
+        "model": model or default_model,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }).encode()

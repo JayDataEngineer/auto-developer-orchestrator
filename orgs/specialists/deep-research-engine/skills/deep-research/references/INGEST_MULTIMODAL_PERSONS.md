@@ -37,14 +37,14 @@ In single-speaker videos (the 80% case for typical voice-memo / direct-to-camera
 
 ```bash
 # Faces clustered?
-FACE_COUNT=$(curl -sX POST http://localhost:8000/surreal/sql \
+FACE_COUNT=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM face_appearance)" \
     | jq -r '.[0].result')
 
 # Voice turns clustered?
-TURN_COUNT=$(curl -sX POST http://localhost:8000/surreal/sql \
+TURN_COUNT=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM speaker_turn)" \
@@ -60,7 +60,7 @@ If `speaker_turn` records have raw embeddings but no `voice_cluster_id`, cluster
 
 ```bash
 # Extract embeddings
-curl -sX POST http://localhost:8000/surreal/sql \
+curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "SELECT embedding FROM speaker_turn" \
@@ -170,7 +170,7 @@ End-to-end on a tiny dataset:
 # Expected: 1 person node with face_centroid + voice_centroid + appears_in + speaks_in edges
 
 # Verify
-curl -sX POST http://localhost:8000/surreal/sql \
+curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "SELECT *, ->appears_in->item.path AS photos, ->speaks_in->item.id AS videos FROM person WHERE face_centroid != NONE AND voice_centroid != NONE"
@@ -190,21 +190,21 @@ Expected: at least 1 person with non-empty `photos` + `videos` arrays.
 
 ```bash
 # Cross-modal success rate
-LINKED=$(curl -sX POST http://localhost:8000/surreal/sql \
+LINKED=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM person WHERE face_centroid != NONE AND voice_centroid != NONE)" \
     | jq -r '.[0].result')
 
 # Deferred (multi-face) cases
-DEFERRED=$(curl -sX POST http://localhost:8000/surreal/sql \
+DEFERRED=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM pending_link)" \
     | jq -r '.[0].result')
 
 # Off-camera speakers
-VOICE_ONLY=$(curl -sX POST http://localhost:8000/surreal/sql \
+VOICE_ONLY=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM person WHERE face_centroid = NONE AND voice_centroid != NONE)" \

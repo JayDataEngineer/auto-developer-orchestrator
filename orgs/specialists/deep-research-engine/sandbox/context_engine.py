@@ -23,8 +23,11 @@ Usage:
       --work-dir /tmp/context-engine
 
 Env:
-  LLM_API_URL   OpenAI-compatible /v1/chat/completions endpoint
-  LLM_MODEL     Model name for synthesis (default: qwen35-35b-a3b-vision)
+  LLM_API_URL   OpenAI-compatible /v1/chat/completions endpoint. REQUIRED.
+                The sandbox policy injects this from the harness model tier
+                (``sandbox.llm: <role>`` in policy.yaml → models.yaml).
+  LLM_MODEL     Model id (e.g. "mimo-v2.5"). REQUIRED. Same injection path.
+  LLM_API_KEY   API key. Optional (some local endpoints need none).
   MEDIA_MCP_URL Media MCP container (default: http://localhost:8101)
 
 Designed to run autonomously: no agent in the loop, no human prompts.
@@ -450,7 +453,8 @@ def step_synthesize(items, transcripts, entities, work_dir, model=None):
         "{context_json}", json.dumps(context, indent=2, ensure_ascii=False)
     )
 
-    print(f"  calling LLM (model={model or _default_model()})...")
+    _url, _default_model = _llm_env_required()
+    print(f"  calling LLM (model={model or _default_model})...")
     try:
         report = _call_llm(prompt, model=model, max_tokens=8000)
     except Exception as e:
@@ -530,19 +534,25 @@ def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def _default_model():
-    return os.environ.get("LLM_MODEL", "deepseek/deepseek-chat")
-
-
-def _default_llm_url():
-    """Pick an LLM endpoint in priority order: explicit > OpenRouter > local."""
-    if os.environ.get("LLM_API_URL"):
-        return os.environ["LLM_API_URL"]
-    # Auto-detect from .env if OPENROUTER_API_KEY is set
-    if os.environ.get("OPENROUTER_API_KEY"):
-        base = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-        return f"{base}/chat/completions"
-    return "http://localhost:18080/v1/chat/completions"
+def _llm_env_required():
+    """The sandbox policy (``sandbox.llm: <role>``) injects these from the
+    harness model tier (models.yaml). This script is a DUMB CONSUMER — it does
+    not re-resolve the provider, model, or key. Fail loud if the vars are
+    missing so a misconfigured sandbox surfaces immediately."""
+    url = os.environ.get("LLM_API_URL", "")
+    model = os.environ.get("LLM_MODEL", "")
+    if not url or not model:
+        print(
+            "ERROR: LLM_API_URL and LLM_MODEL must be set. The sandbox policy\n"
+            "injects them via `sandbox.llm: <role>` (resolved from models.yaml).\n"
+            "For standalone use:\n"
+            '  export LLM_API_URL="https://opencode.ai/zen/go/v1/chat/completions"\n'
+            '  export LLM_MODEL="mimo-v2.5"\n'
+            '  export LLM_API_KEY="<key>"',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return url, model
 
 
 def _run(cmd, capture=False, check=True):
@@ -560,20 +570,20 @@ def _relate(sc, src, edge, tgt):
 
 
 def _call_llm(prompt, model=None, temperature=0.3, max_tokens=8000):
-    url = _default_llm_url()
-    headers = {"Content-Type": "application/json"}
-    # OpenRouter requires Authorization + recommends HTTP-Referer for ranking
-    api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("LLM_API_KEY")
-    if api_key and "openrouter" in url:
-        headers["Authorization"] = f"Bearer {api_key}"
-        headers["HTTP-Referer"] = "https://github.com/deep-research-engine"
-        headers["X-Title"] = "deep-research-engine"
-    elif api_key:
+    url, default_model = _llm_env_required()
+    headers = {
+        "Content-Type": "application/json",
+        # Cloudflare bot-integrity (error 1010) bans the default
+        # ``Python-urllib/3.x`` signature. A neutral identifier passes.
+        "User-Agent": "pux-harness-sandbox/1.0",
+    }
+    api_key = os.environ.get("LLM_API_KEY", "")
+    if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
     data = json.dumps({
         "messages": [{"role": "user", "content": prompt}],
-        "model": model or _default_model(),
+        "model": model or default_model,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }).encode()

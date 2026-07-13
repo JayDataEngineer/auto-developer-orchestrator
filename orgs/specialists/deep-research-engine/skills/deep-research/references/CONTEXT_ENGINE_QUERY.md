@@ -8,7 +8,7 @@ The SurrealDB context engine persists everything: items, transcripts, face/voice
 
 ```bash
 export SURREAL_PASSWORD=root
-URL=http://localhost:8000/surreal/sql
+URL=http://localhost:8000/sql
 HDR=(-H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main")
 AUTH=-u "root:$SURREAL_PASSWORD"
 ```

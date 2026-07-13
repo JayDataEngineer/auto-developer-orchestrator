@@ -19,7 +19,7 @@ If your task created tables not covered by check 7's hardcoded list (e.g. `pdf_c
 export SURREAL_PASSWORD=root    # matches docker-compose.yml surrealdb service
 ```
 
-All queries go through Caddy on `http://localhost:8000/surreal/sql` with headers `surreal-ns: research` + `surreal-db: main` (SurrealDB v3.1+ requires lowercase header names — the uppercase `NS`/`DB` form was deprecated).
+All queries go directly to SurrealDB on `http://localhost:8000/sql` with headers `surreal-ns: research` + `surreal-db: main` (SurrealDB v3.1+ requires lowercase header names — the uppercase `NS`/`DB` form was deprecated).
 
 ## Check 1 — transcripts_complete
 
@@ -29,13 +29,13 @@ All queries go through Caddy on `http://localhost:8000/surreal/sql` with headers
 # Count voice/video items missing a transcript OR with empty-text transcript.
 # SurrealDB v3 syntax: array::len() on graph-traversed field.
 # ->transcribed_by->transcript.text returns array of text values from linked transcripts.
-MISSING=$(curl -sX POST http://localhost:8000/surreal/sql \
+MISSING=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d 'SELECT count() FROM item WHERE type IN ["voice", "video"] AND (count(->transcribed_by->transcript) = 0 OR array::len(->transcribed_by->transcript.text) = 0) GROUP ALL' \
     | jq -r '.[0].result[0].count')
 
-TOTAL=$(curl -sX POST http://localhost:8000/surreal/sql \
+TOTAL=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d 'SELECT count() FROM item WHERE type IN ["voice", "video"] GROUP ALL' \
@@ -47,7 +47,7 @@ echo "transcripts: $((TOTAL - MISSING))/$TOTAL"
 **Pass:** MISSING = 0.
 **Fail sample:** list first 5 missing IDs:
 ```bash
-curl -sX POST http://localhost:8000/surreal/sql \
+curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d 'SELECT id FROM item WHERE type IN ["voice", "video"] AND (count(->transcribed_by->transcript) = 0 OR array::len(->transcribed_by->transcript.text) = 0) LIMIT 5' \
@@ -61,7 +61,7 @@ curl -sX POST http://localhost:8000/surreal/sql \
 **Silent videos — legitimate edge case:** some videos are recorded with no microphone input (audio measures -91 dB = digital silence). ASR correctly returns empty text. The pipeline writes a transcript with `text="[no speech detected ...]"` and `is_silent: true` so the audit reflects reality rather than masking silence as a failure. The query above counts these as success because `text` is non-empty. If you want to see how many transcripts are silent markers vs real speech:
 
 ```bash
-curl -sX POST http://localhost:8000/surreal/sql \
+curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN { speech: count(SELECT id FROM transcript WHERE is_silent != true), silent: count(SELECT id FROM transcript WHERE is_silent = true) }" \
@@ -75,7 +75,7 @@ curl -sX POST http://localhost:8000/surreal/sql \
 ```bash
 # SurrealDB v3 regex: use string::matches() with double-escaped backslashes.
 # Single quote outside, double backslash inside the SQL literal.
-POLLUTED=$(curl -sX POST http://localhost:8000/surreal/sql \
+POLLUTED=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM item WHERE string::matches(sender, '\\\\d{2}\\\\.\\\\d{2}\\\\.\\\\d{4}'))" \
@@ -90,13 +90,13 @@ POLLUTED=$(curl -sX POST http://localhost:8000/surreal/sql \
 **Goal:** <5% of items have `sender='Unknown'`. Target: rate < 5% of total items.
 
 ```bash
-UNKNOWN=$(curl -sX POST http://localhost:8000/surreal/sql \
+UNKNOWN=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM item WHERE sender = 'Unknown')" \
     | jq -r '.[0].result')
 
-TOTAL=$(curl -sX POST http://localhost:8000/surreal/sql \
+TOTAL=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM item)" \
@@ -113,7 +113,7 @@ echo "unknown rate: $(echo "scale=2; $UNKNOWN * 100 / $TOTAL" | bc)%"
 **Goal:** `topic` table has ≥5 rows. Target: ≥5.
 
 ```bash
-TOPICS=$(curl -sX POST http://localhost:8000/surreal/sql \
+TOPICS=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM topic)" \
@@ -128,7 +128,7 @@ TOPICS=$(curl -sX POST http://localhost:8000/surreal/sql \
 **Goal:** ≥3 distinct `person` clusters from face+voice clustering. Target: ≥3.
 
 ```bash
-PERSONS=$(curl -sX POST http://localhost:8000/surreal/sql \
+PERSONS=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM person)" \
@@ -143,7 +143,7 @@ PERSONS=$(curl -sX POST http://localhost:8000/surreal/sql \
 **Goal:** ≥1 `person` node has BOTH `face_centroid` AND `voice_centroid`. Target: ≥1.
 
 ```bash
-LINKED=$(curl -sX POST http://localhost:8000/surreal/sql \
+LINKED=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM person WHERE face_centroid != NONE AND voice_centroid != NONE)" \
@@ -159,42 +159,42 @@ LINKED=$(curl -sX POST http://localhost:8000/surreal/sql \
 
 ```bash
 # Items without text embeddings
-ITEMS_NO_VEC=$(curl -sX POST http://localhost:8000/surreal/sql \
+ITEMS_NO_VEC=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM item WHERE text_embedding = NONE OR array::len(text_embedding) != 1024)" \
     | jq -r '.[0].result')
 
 # Transcripts without embeddings
-TR_NO_VEC=$(curl -sX POST http://localhost:8000/surreal/sql \
+TR_NO_VEC=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM transcript WHERE embedding = NONE)" \
     | jq -r '.[0].result')
 
 # Face appearances without embeddings (orphan detection vectors)
-FACE_NO_VEC=$(curl -sX POST http://localhost:8000/surreal/sql \
+FACE_NO_VEC=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM face_appearance WHERE embedding = NONE)" \
     | jq -r '.[0].result')
 
 # Topics without centroid embeddings (can't be semantic-search targets)
-TOPIC_NO_VEC=$(curl -sX POST http://localhost:8000/surreal/sql \
+TOPIC_NO_VEC=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM topic WHERE centroid_embedding = NONE)" \
     | jq -r '.[0].result')
 
 # Orphan media (videos registered but never processed through video_frames.py)
-MEDIA_NO_TYPE=$(curl -sX POST http://localhost:8000/surreal/sql \
+MEDIA_NO_TYPE=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM media WHERE type = NONE)" \
     | jq -r '.[0].result')
 
 # Orphan persons (no face or voice evidence linked)
-PERSON_NO_EDGE=$(curl -sX POST http://localhost:8000/surreal/sql \
+PERSON_NO_EDGE=$(curl -sX POST http://localhost:8000/sql \
     -H "Accept: application/json" -H "surreal-ns: research" -H "surreal-db: main" \
     -u "root:$SURREAL_PASSWORD" \
     -d "RETURN count(SELECT id FROM person WHERE count(<-appears_in<-face_appearance) = 0 AND count(<-speaks_in<-speaker_turn) = 0)" \

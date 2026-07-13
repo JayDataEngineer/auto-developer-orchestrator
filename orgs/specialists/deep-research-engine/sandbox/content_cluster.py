@@ -9,9 +9,13 @@ Usage:
     python3 content_cluster.py cluster --input texts.json --existing-topics
 
 Environment:
-    LLM_API_URL       (default: http://localhost:18080/v1/chat/completions)
-    LLM_MODEL         (default: qwen35-35b-a3b-vision)
-    SURREALDB_URL     (default: http://localhost:8000/surreal)
+    LLM_API_URL       OpenAI-compatible /v1/chat/completions endpoint. REQUIRED.
+                      The sandbox policy injects this from the harness model tier
+                      (``sandbox.llm: <role>`` in policy.yaml → resolved via
+                      models.yaml); for standalone use, export it yourself.
+    LLM_MODEL         Model id (e.g. "mimo-v2.5"). REQUIRED. Same injection path.
+    LLM_API_KEY       API key. Optional (some local endpoints need none).
+    SURREALDB_URL     (default: http://localhost:8000)
     SURREALDB_NS      (default: research)
     SURREALDB_DB      (default: main)
     SURREALDB_USER    (default: root)
@@ -56,29 +60,52 @@ CLUSTER_PROMPT = """You are a content clustering specialist. Group the following
 {combined}"""
 
 
-def get_llm_url():
-    return os.environ.get("LLM_API_URL", "http://localhost:18080/v1/chat/completions")
-
-
-def get_llm_model():
-    return os.environ.get("LLM_MODEL", "qwen35-35b-a3b-vision")
+def _llm_env_required():
+    """The sandbox policy (``sandbox.llm: <role>``) injects these from the
+    harness model tier (models.yaml). This script is a DUMB CONSUMER — it does
+    not re-resolve the provider, model, or key."""
+    url = os.environ.get("LLM_API_URL", "")
+    model = os.environ.get("LLM_MODEL", "")
+    if not url or not model:
+        print(
+            "ERROR: LLM_API_URL and LLM_MODEL must be set. The sandbox policy\n"
+            "injects them via `sandbox.llm: <role>` (resolved from models.yaml).\n"
+            "For standalone use:\n"
+            '  export LLM_API_URL="https://opencode.ai/zen/go/v1/chat/completions"\n'
+            '  export LLM_MODEL="mimo-v2.5"\n'
+            '  export LLM_API_KEY="<key>"',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return url, model
 
 
 def call_llm(prompt, model=None, temperature=0.3, max_tokens=16000):
     """Call LLM API and return response text."""
     import urllib.request
 
+    url, default_model = _llm_env_required()
+    api_key = os.environ.get("LLM_API_KEY", "")
+    headers = {
+        "Content-Type": "application/json",
+        # Cloudflare bot-integrity (error 1010) bans the default
+        # ``Python-urllib/3.x`` signature. A neutral identifier passes.
+        "User-Agent": "pux-harness-sandbox/1.0",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
     data = json.dumps({
         "messages": [{"role": "user", "content": prompt}],
-        "model": model or get_llm_model(),
+        "model": model or default_model,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }).encode()
 
     req = urllib.request.Request(
-        get_llm_url(),
+        url,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
 
     try:
@@ -98,7 +125,7 @@ def fetch_existing_topics():
     only need the surface labels. Uses the SurrealDB /sql HTTP endpoint —
     same pattern as surreal_client.py.
     """
-    url = os.environ.get("SURREALDB_URL", "http://localhost:8000/surreal") + "/sql"
+    url = os.environ.get("SURREALDB_URL", "http://localhost:8000") + "/sql"
     ns = os.environ.get("SURREALDB_NS", "research")
     db = os.environ.get("SURREALDB_DB", "main")
     user = os.environ.get("SURREALDB_USER", "root")
