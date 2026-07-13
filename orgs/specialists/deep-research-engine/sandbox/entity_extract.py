@@ -65,7 +65,14 @@ def _llm_env_required():
 
 
 def call_llm(prompt, model=None, temperature=0.1, max_tokens=10000):
-    """Call LLM API and return response text."""
+    """Call LLM API and return response text.
+
+    Handles reasoning models (e.g. mimo-v2.5) that emit chain-of-thought into
+    `reasoning_content` before the final answer. With a low token budget the
+    entire budget is spent on reasoning and `content` returns null. We fall
+    back to `reasoning_content` when `content` is empty, then retry once with
+    a doubled budget if both are empty.
+    """
     import urllib.request
 
     url, default_model = _llm_env_required()
@@ -79,19 +86,33 @@ def call_llm(prompt, model=None, temperature=0.1, max_tokens=10000):
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    data = json.dumps({
-        "messages": [{"role": "user", "content": prompt}],
-        "model": model or default_model,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }).encode()
-
-    req = urllib.request.Request(url, data=data, headers=headers)
+    def _do_request(budget):
+        data = json.dumps({
+            "messages": [{"role": "user", "content": prompt}],
+            "model": model or default_model,
+            "temperature": temperature,
+            "max_tokens": budget,
+        }).encode()
+        req = urllib.request.Request(url, data=data, headers=headers)
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            return json.loads(resp.read())
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            result = json.loads(resp.read())
-            return result["choices"][0]["message"]["content"]
+        result = _do_request(max_tokens)
+        msg = result["choices"][0]["message"]
+        content = msg.get("content")
+        if not content:
+            content = msg.get("reasoning_content") or ""
+        if not content:
+            result = _do_request(max_tokens * 2)
+            msg = result["choices"][0]["message"]
+            content = msg.get("content") or msg.get("reasoning_content") or ""
+        if not content:
+            print("ERROR: LLM returned empty content and reasoning_content "
+                  "(finish_reason={}). Increase max_tokens or use a non-reasoning model."
+                  .format(result["choices"][0].get("finish_reason")), file=sys.stderr)
+            sys.exit(1)
+        return content
     except Exception as e:
         print(f"ERROR: LLM API failed: {e}", file=sys.stderr)
         sys.exit(1)

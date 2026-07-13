@@ -592,25 +592,14 @@ def cmd_backfill(args):
 # ---------------------------------------------------------------------------
 
 def _embed(text: str) -> list[float]:
-    """Embed text via the Ollama embedding API (OpenAI-compatible).
+    """Embed text via the in-sandbox sentence-transformers model.
 
-    Reads EMB_URL + EMB_MODEL from env (injected by policy.yaml sandbox.env).
-    Returns a 1024-dim vector (mxbai-embed-large).
+    Uses sandbox/embed.py which loads microsoft/harrier-oss-v1-0.6b once
+    (module-level cache) and encodes in-process. No HTTP hop, no env URL.
+    Returns a 1024-dim L2-normalized vector.
     """
-    emb_url = os.environ.get("EMB_URL", "http://localhost:11434/v1/embeddings")
-    emb_model = os.environ.get("EMB_MODEL", "mxbai-embed-large")
-    payload = json.dumps({"model": emb_model, "input": text[:8000]}).encode()
-    req = urllib.request.Request(
-        emb_url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read())
-    except Exception as e:
-        raise RuntimeError(f"Embedding API unreachable at {emb_url}: {e}") from e
-    return data["data"][0]["embedding"]
+    from embed import encode
+    return encode(text[:8000])
 
 
 # Default embedding field per table — agents can override with --field.

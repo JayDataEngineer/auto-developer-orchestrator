@@ -18,11 +18,10 @@
 #               infra/media-mcp submodule. CPU by default; GPU override via
 #               MEDIA_DEVICE=cuda TORCH_VARIANT=cu124 (see media-mcp Dockerfile).
 #
-#   tei         HuggingFace Text Embeddings Inference running
-#               microsoft/harrier-oss-v1-0.6b (1024-dim, MTEB v2 69.0, 94 langs).
-#               The SOTA embedding model for SurrealDB vector search. Replaces
-#               Ollama/mxbai-embed-large. Exposed on port 8080; SurrealDB reaches
-#               it at http://tei:80 for in-query embedding via http::post().
+#   (embeddings)  microsoft/harrier-oss-v1-0.6b loads in-process inside the
+#                 sandbox via sentence-transformers (sandbox/embed.py).
+#                 1024-dim, MTEB v2 69.0, 94 langs. No service, no port —
+#                 it's a Python dep of the sandbox, not a container.
 #
 # What does NOT live here (bring your own — game-studio only):
 #   Ray cluster (Tailscale) — LLM, TTS, 3D, music, ComfyUI. That's a GPU box
@@ -96,29 +95,11 @@ services:
       retries: 10
       start_period: 30s
 
-  tei:
-    # HuggingFace Text Embeddings Inference — purpose-built embedding server.
-    # Runs microsoft/harrier-oss-v1-0.6b: 1024-dim, MTEB v2 69.0, 94 languages.
-    # SOTA multilingual embedding model. Replaces Ollama/mxbai-embed-large.
-    #
-    # CPU image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
-    # GPU image: ghcr.io/huggingface/text-embeddings-inference:89-1.5 (change tag)
-    image: ghcr.io/huggingface/text-embeddings-inference:${TEI_VARIANT:-cpu-1.5}
-    container_name: orchestrator-tei
-    command: ["--model-id", "microsoft/harrier-oss-v1-0.6b"]
-    ports:
-      - "8080:80"
-    volumes:
-      - tei-cache:/data
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:80/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 60s
+# No TEI service. Embeddings (microsoft/harrier-oss-v1-0.6b) load in-process
+# via sentence-transformers inside the sandbox (sandbox/embed.py). The model
+# card's canonical path is `SentenceTransformer("microsoft/harrier-oss-v1-0.6b")`,
+# not an HTTP server. First use downloads weights to $HF_HOME=/data/hf-cache.
 
 volumes:
   surrealdb-data:
   media-models:
-  tei-cache:

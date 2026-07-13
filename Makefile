@@ -31,32 +31,25 @@ submodules: ## Init + update git submodules (pux-harness, infra/media-mcp)
 
 # ── Host-side infrastructure ────────────────────────────────────────────────
 
-infra: ## Start SurrealDB + media-mcp + TEI embeddings (everything DRE needs)
-	$(INFRA_COMPOSE) up -d surrealdb media-mcp tei
+infra: ## Start SurrealDB + media-mcp (embeddings load in-sandbox via sentence-transformers)
+	$(INFRA_COMPOSE) up -d surrealdb media-mcp
 	@echo ""
 	@echo "Waiting for SurrealDB to be healthy..."
 	@timeout 30 sh -c 'until curl -sf http://localhost:8000/health >/dev/null 2>&1; do sleep 1; done' \
 		&& echo "SurrealDB healthy" || echo "WARNING: SurrealDB not healthy — check: make infra-logs"
 	@echo "SurrealDB at http://localhost:8000 (root:root, MCP at /mcp)"
 	@echo "media-mcp at http://localhost:8101"
-	@echo "TEI embeddings at http://localhost:8080 (harrier-oss-v1-0.6b)"
+	@echo "embeddings: microsoft/harrier-oss-v1-0.6b loads in-sandbox (sandbox/embed.py)"
 	@echo ""
 	@echo "Infra is up. Run any org: uv run pux direct --org deep-research-engine --task '...'"
 
-infra-core: ## Start SurrealDB only (lighter — skip media-mcp + TEI model load)
+infra-core: ## Start SurrealDB only (lighter — skip media-mcp)
 	$(INFRA_COMPOSE) up -d surrealdb
 	@echo ""
 	@echo "Waiting for SurrealDB to be healthy..."
 	@timeout 30 sh -c 'until curl -sf http://localhost:8000/health >/dev/null 2>&1; do sleep 1; done' \
 		&& echo "SurrealDB healthy" || echo "WARNING: SurrealDB not healthy — check: make infra-logs"
 	@echo "SurrealDB at http://localhost:8000 (root:root)"
-
-infra-embeddings: ## Start TEI embeddings only (harrier-oss-v1-0.6b)
-	$(INFRA_COMPOSE) up -d tei
-	@echo ""
-	@echo "Waiting for TEI to be healthy..."
-	@timeout 120 sh -c 'until curl -sf http://localhost:8080/health >/dev/null 2>&1; do sleep 2; done' \
-		&& echo "TEI healthy (harrier-oss-v1-0.6b)" || echo "WARNING: TEI not healthy — check: make infra-logs"
 
 infra-status: ## Show infra container status
 	$(INFRA_COMPOSE) ps

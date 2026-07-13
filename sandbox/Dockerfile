@@ -45,8 +45,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-venv \
     python3-tk \
-    nodejs \
-    npm \
     build-essential \
     make \
     cmake \
@@ -111,6 +109,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
     && rm -rf /var/lib/apt/lists/*
 
+# Modern Node.js LTS. Ubuntu 22.04's apt ships Node.js v12, which can't run
+# modern web apps (Next.js 14+, Vite, Remix, etc. require v18+). NodeSource
+# provides a current LTS (v22.x) with npm bundled — replaces the removed
+# system nodejs/npm packages.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # Python packages for web scraping, image processing, and stealth browsing.
 # onnxruntime-genai: required by /usr/local/bin/describe_image.py for vision
 # inference against Qwen3.5-2B-ONNX-OPT. The model itself is opt-in — operators
@@ -119,9 +126,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # friendly "run bootstrap-vision.sh" message and the rest of the server is
 # unaffected. numpy comes in via Pillow's transitive deps; explicit here so
 # the describe_image script can rely on it without import-time surprise.
+#
+# sentence-transformers + torch (CPU): required by the DRE embed helper
+# (sandbox/embed.py) which loads microsoft/harrier-oss-v1-0.6b — the SOTA
+# multilingual embedding model (1024-dim, MTEB v2 69.0, 94 languages). torch
+# is pinned to the CPU wheel to avoid pulling ~2GB of CUDA blobs. The model
+# weights download to HF_HOME on first use (~1.2GB).
 RUN python3 -m pip install seleniumbase requests beautifulsoup4 Pillow httpx \
         onnxruntime-genai numpy \
+    && python3 -m pip install --index-url https://download.pytorch.org/whl/cpu torch \
+    && python3 -m pip install sentence-transformers \
     && rm -rf /root/.cache/pip
+ENV HF_HOME=/data/hf-cache
 
 # Chrome
 RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \

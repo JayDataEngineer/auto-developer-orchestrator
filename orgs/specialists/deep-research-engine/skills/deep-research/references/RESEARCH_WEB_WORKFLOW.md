@@ -81,7 +81,7 @@ mcp__surreal__upsert(table="source", data={
 ```
 
 This atomically:
-1. Embeds the content (1024-dim via Ollama mxbai-embed-large)
+1. Embeds the content (1024-dim via microsoft/harrier-oss-v1-0.6b (sandbox/embed.py))
 2. INSERTs a `source` record (idempotent on URL — re-runs UPDATE)
 3. RELATEs each topic_id / person_id via `extracted_from` edge
 4. Returns `source_id` for downstream use

@@ -104,11 +104,15 @@ already flagged it.
 REPORT TEXT:
 {text[:30000]}
 """
+    # Reasoning models (e.g. mimo-v2.5) emit chain-of-thought into
+    # `reasoning_content` BEFORE the final answer. If max_tokens is too low,
+    # the entire budget is consumed by reasoning and `content` comes back null.
+    # Use a generous budget so reasoning finishes AND the answer lands.
     data = json.dumps({
         "messages": [{"role": "user", "content": prompt}],
         "model": model,
         "temperature": 0.0,
-        "max_tokens": 4000,
+        "max_tokens": 16000,
     }).encode()
     headers = {
         "Content-Type": "application/json",
@@ -120,9 +124,22 @@ REPORT TEXT:
 
     try:
         req = urllib.request.Request(url, data=data, headers=headers)
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=180) as resp:
             result = json.loads(resp.read())
-        content = result["choices"][0]["message"]["content"]
+        msg = result["choices"][0]["message"]
+        # Reasoning models return null content when the budget is spent on
+        # chain-of-thought. Fall back to reasoning_content if present, then
+        # retry once with a doubled budget as a last resort.
+        content = msg.get("content")
+        if not content:
+            content = msg.get("reasoning_content") or ""
+            if content:
+                print("[grounding] LLM returned null content; using reasoning_content fallback", file=sys.stderr)
+        if not content:
+            finish = result["choices"][0].get("finish_reason")
+            print(f"[grounding] LLM returned empty content (finish_reason={finish}); "
+                  "increase max_tokens or use a non-reasoning model", file=sys.stderr)
+            return []
         # Parse the JSON array from the response
         # Find the JSON array in the response
         match = re.search(r'\[.*\]', content, re.DOTALL)

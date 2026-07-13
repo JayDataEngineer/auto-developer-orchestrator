@@ -13,10 +13,9 @@ MCP server. The harness holds a persistent connection. You call it by name:
 mcp__surreal__query(sql="<SurrealQL statement>")
 ```
 
-For vector search, embed the query via TEI (harrier-oss-v1-0.6b, 1024-dim),
-then pass the vector into a cosine similarity query. Or define a SurrealQL
-function `fn::embed($text)` that calls TEI via `http::post()` so the embedding
-happens server-side in one query.
+For vector search, embed the query via the in-sandbox embed helper
+(`sandbox/embed.py`, harrier-oss-v1-0.6b, 1024-dim), then pass the vector
+into a cosine similarity query.
 
 ## Layer 1 — Vector search (semantic similarity)
 
@@ -35,21 +34,21 @@ mcp__surreal__query(sql="
 # source.embedding, topic.centroid_embedding, item.text_embedding, face_appearance.embedding
 ```
 
-To get `$query_vec`, call the TEI embedding endpoint (harrier-oss-v1-0.6b,
-1024-dim). Or define a server-side function so it's one call:
+To get `$query_vec`, call the in-sandbox embed helper from a declared tool
+or a make_script. The model loads once via sentence-transformers (cached):
 
-```sql
-DEFINE FUNCTION fn::embed($text::string) -> array<float> {
-  RETURN http::post('http://tei:80/embed', { "inputs": [$text] })[0];
-};
+```python
+# In a make_script or batch job inside the sandbox
+from embed import encode
+query_vec = encode("infiltration confession", prompt_name="web_search_query")
 ```
 
-Then vector search is one tool call:
+Then pass the vector into the MCP query as a parameter:
 ```
 mcp__surreal__query(sql="
-  SELECT id, vector::similarity::cosine(embedding, fn::embed('infiltration confession')) AS score
+  SELECT id, vector::similarity::cosine(embedding, $query_vec) AS score
   FROM transcript WHERE embedding != NONE ORDER BY score DESC LIMIT 5
-")
+", query_vec=query_vec)
 ```
 
 Scores >0.6 are usually relevant; >0.75 are strong matches.

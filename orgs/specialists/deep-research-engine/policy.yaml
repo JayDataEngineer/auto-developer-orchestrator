@@ -46,10 +46,10 @@ sandbox:
     SURREALDB_DB: "main"
     # media-mcp (Parakeet ASR + Pyannote + vision) on host port 8101.
     MEDIA_MCP_URL: "http://host.docker.internal:8101"
-    # TEI (Text Embeddings Inference) running microsoft/harrier-oss-v1-0.6b.
-    # 1024-dim, MTEB v2 69.0, 94 languages. SOTA embedding model.
-    # Used by batch jobs for embedding text before SurrealDB vector insert.
-    EMB_URL: "http://host.docker.internal:8080"
+    # Embeddings: microsoft/harrier-oss-v1-0.6b loads in-process via
+    # sentence-transformers (sandbox/embed.py). No EMB_URL — the model is a
+    # Python dep, not a service. 1024-dim, MTEB v2 69.0, 94 languages.
+    EMBED_MODEL_ID: "microsoft/harrier-oss-v1-0.6b"
 
 egress:
   allow:
@@ -60,9 +60,6 @@ egress:
     # Host-side SurrealDB — the knowledge graph.
     - host: host.docker.internal
       port: 8000
-    # Host-side TEI (harrier-oss-v1-0.6b embeddings).
-    - host: host.docker.internal
-      port: 8080
     # Source pulls for research ingest.
     - host: github.com
       port: 443
