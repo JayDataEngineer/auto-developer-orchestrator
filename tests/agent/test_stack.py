@@ -123,9 +123,14 @@ def stub_factory(monkeypatch):
     monkeypatch.setattr(stack, "ToolRetryMiddleware", lambda **kw: "TOOLRETRY")
     # AnthropicPromptCachingMiddleware is default-on for every scope; stub to a
     # marker so resolved-stack tests observe its presence/position without
-    # constructing a real one. The middleware's own behavior (cache_control
-    # tagging + unsupported-model skip) is unit-tested via langchain_anthropic.
+    # constructing a real one. _FullPrefixCachingMiddleware is our subclass that
+    # also tags the last message (rolling conversation cache); the builder calls
+    # it by name, so stub that too. The caching behavior itself (cache_control
+    # tagging + unsupported-model skip + last-message breakpoint) is unit-tested
+    # via langchain_anthropic + the middleware's own unit tests.
     monkeypatch.setattr(stack, "AnthropicPromptCachingMiddleware",
+                        lambda **kw: "CACHE")
+    monkeypatch.setattr(stack, "_FullPrefixCachingMiddleware",
                         lambda **kw: "CACHE")
 
     def _rubric(**kwargs):

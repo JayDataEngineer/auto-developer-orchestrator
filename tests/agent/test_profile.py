@@ -151,8 +151,11 @@ def captured_build(monkeypatch):
     # routing+session_guide); stub it to the ``"RETRY"`` marker so the no-gate
     # baseline stays a clean list of marker strings (not a raw object).
     monkeypatch.setattr(stack, "ModelRetryMiddleware", lambda *a, **k: "RETRY")
-    # AnthropicPromptCachingMiddleware is default-ON; stub to marker.
+    # AnthropicPromptCachingMiddleware + _FullPrefixCachingMiddleware are
+    # default-ON; stub both to marker (the builder calls the subclass by name).
     monkeypatch.setattr(stack, "AnthropicPromptCachingMiddleware",
+                        lambda **kw: "CACHE")
+    monkeypatch.setattr(stack, "_FullPrefixCachingMiddleware",
                         lambda **kw: "CACHE")
     # driver_strong_orchestrator gates CodeInterpreterMiddleware — stub False
     # so no real middleware object mounts in the baseline.
