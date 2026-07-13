@@ -237,7 +237,7 @@ def cmd_save_transcript(args):
 
     sql = f"UPSERT {rid} SET text = {json.dumps(text)}, source_file = {json.dumps(fname)};"
     if args.item_id:
-        sql += f"\nRELATE item:{args.item_id}->transcribed_by->{rid};"
+        sql += f"\nRELATE item:{args.item_id}->transcribed_by->{rid} SET id = transcribed_by:{args.item_id}_{safe_name};"
     execute_sql(sql, timeout=10)
     print(json.dumps({"status": "ok", "id": rid, "chars": len(text)}))
 
@@ -683,7 +683,9 @@ def cmd_upsert_person(args):
 
     # Optionally link to a source via extracted_from edge
     if args.source_id:
-        edge_sql = f"RELATE {rid}->extracted_from->{args.source_id};"
+        rid_safe = str(rid).replace(":", "_")
+        src_safe = str(args.source_id).replace(":", "_")
+        edge_sql = f"RELATE {rid}->extracted_from->{args.source_id} SET id = extracted_from:{rid_safe}_{src_safe};"
         try:
             execute_sql(edge_sql, timeout=5)
         except Exception:
@@ -701,13 +703,15 @@ def cmd_relate(args):
     """
     # Build edge table name (SurrealDB graph edges are table names)
     edge = args.edge
-    sql = f"RELATE {args.src}->{edge}->{args.tgt}"
+    src_safe = str(args.src).replace(":", "_")
+    tgt_safe = str(args.tgt).replace(":", "_")
+    sql = f"RELATE {args.src}->{edge}->{args.tgt} SET id = {edge}:{src_safe}_{tgt_safe}"
     if args.props:
         # props is a JSON string like '{"role":"speaker"}'
         try:
             props = json.loads(args.props)
             set_clause = ", ".join(f"{k} = {json.dumps(v)}" for k, v in props.items())
-            sql += f" SET {set_clause}"
+            sql += f", {set_clause}"
         except json.JSONDecodeError:
             pass  # ignore malformed props
     sql += ";"
