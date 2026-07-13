@@ -256,19 +256,33 @@ def cluster_face_embeddings(faces_data, min_cluster_size=2):
 
     labels = None
 
-    # Try HDBSCAN first
+    # Try HDBSCAN first — prefer sklearn.cluster.HDBSCAN (already in the
+    # Dockerfile via scikit-learn). Fall back to the standalone hdbscan
+    # package if installed, then DBSCAN as last resort.
     try:
-        import hdbscan
-        clusterer = hdbscan.HDBSCAN(
+        from sklearn.cluster import HDBSCAN
+        clusterer = HDBSCAN(
             min_cluster_size=min_cluster_size,
+            min_samples=1,
             metric="euclidean",
             cluster_selection_epsilon=0.3,
         )
         labels = clusterer.fit_predict(normalized)
     except ImportError:
-        pass
+        try:
+            import hdbscan
+            clusterer = hdbscan.HDBSCAN(
+                min_cluster_size=min_cluster_size,
+                metric="euclidean",
+                cluster_selection_epsilon=0.3,
+            )
+            labels = clusterer.fit_predict(normalized)
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"HDBSCAN failed ({e}), falling back to DBSCAN", file=sys.stderr)
     except Exception as e:
-        print(f"HDBSCAN failed ({e}), falling back to DBSCAN", file=sys.stderr)
+        print(f"sklearn HDBSCAN failed ({e}), falling back to DBSCAN", file=sys.stderr)
 
     # Fallback to DBSCAN
     if labels is None:
