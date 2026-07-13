@@ -36,8 +36,9 @@ def sql(body, timeout=30):
 
 
 def jval(v):
-    """SurrealQL-safe JSON literal."""
-    return json.dumps(v)
+    """SurrealQL-safe JSON literal (ensure_ascii=False: emoji/unicode kept
+    as UTF-8 — SurrealDB rejects surrogate pair escapes like 😂)."""
+    return json.dumps(v, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------

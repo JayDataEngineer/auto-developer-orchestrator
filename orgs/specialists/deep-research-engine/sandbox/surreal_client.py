@@ -200,11 +200,11 @@ def cmd_save_items(args):
         rid = f"item:{safe_ts}_{i}"
         sql = (
             f"UPSERT {rid} SET "
-            f"type = {json.dumps(item.get('type', 'unknown'))}, "
-            f"text = {json.dumps(item.get('text', ''))}, "
-            f"sender = {json.dumps(item.get('sender', 'Unknown'))}, "
-            f"timestamp = {json.dumps(item.get('timestamp', ''))}, "
-            f"path = {json.dumps(item.get('path') or '')}, "
+            f"type = {json.dumps(item.get('type', 'unknown'), ensure_ascii=False)}, "
+            f"text = {json.dumps(item.get('text', ''), ensure_ascii=False)}, "
+            f"sender = {json.dumps(item.get('sender', 'Unknown'), ensure_ascii=False)}, "
+            f"timestamp = {json.dumps(item.get('timestamp', ''), ensure_ascii=False)}, "
+            f"path = {json.dumps(item.get('path') or '', ensure_ascii=False)}, "
             f"forwarded = {json.dumps(bool(item.get('forwarded', False)))};"
         )
         try:
