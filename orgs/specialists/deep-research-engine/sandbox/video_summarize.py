@@ -325,10 +325,11 @@ def main():
 
     # Write a human-readable index
     idx = RUN_DIR / "entities" / "video_frames" / "video_summaries.md"
-    lines = ["# Video summaries (MiMo-V2.5-Pro)", "",
+    lines = ["# Video summaries (MiMo-V2.5-Pro + Open Diarization)", "",
              f"**Videos:** {len(results)}", "",
              "Each video was analyzed end-to-end by the multimodal model (not just keyframes). "
-             "Speaker diarization (Pyannote 3.1) paired where available.", ""]
+             "Speaker diarization via open pipeline (ffmpeg + webrtcvad + resemblyzer + HDBSCAN) "
+             "— non-gated, no HuggingFace token required.", ""]
     for r in results:
         if r.get("error"):
             lines += [f"## {r['video']} — ERROR", f"`{r['error']}`", ""]
