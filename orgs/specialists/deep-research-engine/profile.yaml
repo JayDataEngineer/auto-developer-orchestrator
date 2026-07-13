@@ -1,1 +1,36 @@
 ask_user: true
+
+# Research-quality rubric gate. Each DRE agent (auditor, synthesizer, writer)
+# declares its OWN rubric via frontmatter `rubric:` + `middleware: [rubric]`,
+# which OVERRIDES this default via the _RubricOverride middleware. The gate
+# itself (enabled + max_iterations) is armed here so the per-agent
+# RubricMiddleware actually fires — without `enabled: true` the frontmatter
+# rubric is inert. The agent fails its gate by default; the grader marks
+# `satisfied` only when EVERY clause is proven from the agent's own tool
+# output + the artifact it wrote.
+#
+# The default below is the SUPERVISOR's rubric (the CTO overlay) — it grades
+# the CTO's own dispatch/iteration loop, not the subagents' work. Each
+# subagent's specialized rubric lives on its own agent spec.
+rubric:
+  enabled: true
+  max_iterations: 2
+  default: |
+    Grade whether the CTO's pipeline dispatch was actually completed with
+    evidence, not just narrated. Read the artifacts the subagents wrote —
+    do NOT trust a "done" summary. The CTO fails this gate by default; only
+    mark `satisfied` when EVERY clause is proven.
+    - Every delegate-to-subagent call returned an artifact path that EXISTS
+      and was read back (cite the read command + a salient line from each).
+    - The pipeline stage that was requested (gather / synthesize / audit /
+      publish) actually produced its canonical artifact (brief.md,
+      audit_report.md, article.md / posts/).
+    - When the auditor was delegated to, its `overall:` verdict was read +
+      acted on — re-dispatched on `fail`, yielded on `pass`. Ignoring an
+      auditor fail is an automatic gate fail.
+    - SurrealDB was queried for prior work before re-gathering (principle #1
+      — query before you delegate). Cite the query + its row count.
+    - No `TODO`, `[insert here]`, or "some say / experts believe" hedges in
+      any yielded artifact.
+    - The final yield names the deliverable path(s) + a one-line summary —
+      not a play-by-play.
