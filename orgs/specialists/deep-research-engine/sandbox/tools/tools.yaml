@@ -503,3 +503,245 @@ tools:
         required: false
         default: false
         description: "Skip entity extraction stage"
+
+  # --- surreal_client.py ----------------------------------------------------
+  # The persistence layer. Every derived artifact (items, transcripts, faces,
+  # video captions, briefs) gets written to SurrealDB so runs are resumable
+  # and the knowledge graph is queryable. The agent calls these BY NAME — it
+  # never sees a URL, never constructs curl, never touches SURREALDB_URL.
+  # The script reads SURREALDB_URL from env (injected by policy.yaml
+  # sandbox.env) and resolves the /sql endpoint internally.
+  - name: surreal_init
+    description: >-
+      Define the SurrealDB schema (19 tables + 7 graph edges). Idempotent —
+      safe to re-run. Call once at the start of an ingest pipeline. Does
+      NOT insert any data.
+    script: surreal_client.py
+    subcommand: init
+    invoke: flags
+    returns: json
+    timeout: 30
+
+  - name: surreal_count
+    description: >-
+      Row counts for every SurrealDB table (item, transcript, face_appearance,
+      topic, person, source, mentions, task_run, etc.). Use to verify ingest
+      completeness or check whether a backfill is needed.
+    script: surreal_client.py
+    subcommand: count
+    invoke: flags
+    returns: json
+    timeout: 15
+
+  - name: surreal_query
+    description: >-
+      Run arbitrary SurrealQL against the knowledge graph. Returns JSON
+      results. Use for read queries (SELECT, count, graph traversals) and
+      ad-hoc writes. The agent NEVER needs a URL or curl — this tool handles
+      the connection internally. Example: surreal_query(sql="SELECT * FROM
+      item WHERE type = 'voice' LIMIT 5").
+    script: surreal_client.py
+    subcommand: query
+    invoke: flags
+    returns: json
+    timeout: 30
+    args:
+      - name: sql
+        type: string
+        required: false
+        default: ""
+        description: "SurrealQL query string"
+      - name: file
+        type: string
+        required: false
+        default: ""
+        description: "Read SurrealQL from a file path (overrides --sql)"
+      - name: timeout
+        type: integer
+        required: false
+        default: 30
+        description: "Query timeout in seconds"
+
+  - name: surreal_save_items
+    description: >-
+      Bulk-insert parsed items (from telegram_parser's items.json) into the
+      item table. Each item gets a deterministic id (timestamp + index) so
+      re-running is idempotent (UPSERT). Fields: type, text, sender,
+      timestamp, path, forwarded.
+    script: surreal_client.py
+    subcommand: save-items
+    invoke: flags
+    returns: json
+    timeout: 120
+    args:
+      - name: input
+        type: string
+        required: true
+        description: "Path to items.json (array of {type, text, sender, ...})"
+
+  - name: surreal_save_transcript
+    description: >-
+      Insert a transcript record and optionally link it to its source item
+      via a transcribed_by graph edge. Use after ASR to persist the text so
+      it is queryable and runs are resumable.
+    script: surreal_client.py
+    subcommand: save-transcript
+    invoke: flags
+    returns: json
+    timeout: 30
+    args:
+      - name: input
+        type: string
+        required: false
+        default: ""
+        description: "JSON file with {transcript, file} (overrides --text)"
+      - name: text
+        type: string
+        required: false
+        default: ""
+        description: "Transcript text (if no --input file)"
+      - name: file_name
+        type: string
+        required: false
+        default: ""
+        description: "Source audio/video file name"
+      - name: item_id
+        type: string
+        required: false
+        default: ""
+        description: "Related item id (without item: prefix) to link via transcribed_by"
+
+  - name: surreal_save_source
+    description: >-
+      Insert a source record (intelligence brief, report, web page, PDF).
+      Persists the content so future agents can discover and cite it. Use
+      after the synthesizer writes brief.md or the writer publishes a report.
+    script: surreal_client.py
+    subcommand: save-source
+    invoke: flags
+    returns: json
+    timeout: 30
+    args:
+      - name: kind
+        type: string
+        required: true
+        description: "Source kind: brief / report / web / pdf / note"
+      - name: path
+        type: string
+        required: true
+        description: "File path to the source content"
+      - name: topic
+        type: string
+        required: false
+        default: ""
+        description: "Topic label for the source"
+
+  - name: surreal_save_faces
+    description: >-
+      Bulk-insert face_appearance records from face_analysis.json (output of
+      batch_recognize_faces). Each detected face becomes a row with photo,
+      subject, similarity, bbox, and embedding. Idempotent (UPSERT).
+    script: surreal_client.py
+    subcommand: save-faces
+    invoke: flags
+    returns: json
+    timeout: 120
+    args:
+      - name: input
+        type: string
+        required: true
+        description: "face_analysis.json path"
+
+  - name: surreal_save_video_captions
+    description: >-
+      Bulk-insert video frame captions (output of analyze_video_frames) as
+      media records. Each frame becomes a media row with type='video_frame',
+      frame name, caption, and url. Idempotent (UPSERT).
+    script: surreal_client.py
+    subcommand: save-video-captions
+    invoke: flags
+    returns: json
+    timeout: 60
+    args:
+      - name: input
+        type: string
+        required: true
+        description: "video_frame_analysis.json path"
+
+  - name: surreal_backfill
+    description: >-
+      Backfill ALL artifacts in a run directory into SurrealDB. Detects and
+      loads items.json, audio_chunks.json, face_analysis.json,
+      video_frame_analysis.json, and every *.md report. Use to migrate an
+      ephemeral run's artifacts into the persistent knowledge graph so the
+      data is queryable and the run can be resumed. Idempotent (UPSERT).
+    script: surreal_client.py
+    subcommand: backfill
+    invoke: flags
+    returns: json
+    timeout: 300
+    args:
+      - name: run_dir
+        type: string
+        required: true
+        description: "Run directory (e.g. artifacts/run-2026-07-12)"
+
+  - name: surreal_start_task
+    description: >-
+      Record that a pipeline task started. Creates a task_run row with
+      status='running'. Use surreal_task_status BEFORE starting to check
+      whether the task already completed (resume support — skip work
+      already done).
+    script: surreal_client.py
+    subcommand: start-task
+    invoke: flags
+    returns: json
+    timeout: 15
+    args:
+      - name: task_id
+        type: string
+        required: true
+        description: "Stable task identifier (e.g. 'ingest_audio_run-2026-07-12')"
+      - name: stage
+        type: string
+        required: false
+        default: ""
+        description: "Stage label (e.g. 'transcribe', 'diarize', 'extract')"
+
+  - name: surreal_complete_task
+    description: >-
+      Record that a pipeline task completed successfully. Sets the
+      task_run status to 'completed' with a timestamp. Pair with
+      surreal_start_task for idempotent pipeline runs.
+    script: surreal_client.py
+    subcommand: complete-task
+    invoke: flags
+    returns: json
+    timeout: 15
+    args:
+      - name: task_id
+        type: string
+        required: true
+        description: "Task identifier (must match a start-task call)"
+      - name: result
+        type: string
+        required: false
+        default: ""
+        description: "Result summary (counts, paths, etc.)"
+
+  - name: surreal_task_status
+    description: >-
+      Check whether a task already ran. Returns {status: 'completed' |
+      'running' | 'never_run'}. Call BEFORE starting expensive work (ASR,
+      face recognition, entity extraction) to skip already-done tasks —
+      this is the idempotency gate that makes pipeline runs resumable.
+    script: surreal_client.py
+    subcommand: task-status
+    invoke: flags
+    returns: json
+    timeout: 10
+    args:
+      - name: task_id
+        type: string
+        required: true
+        description: "Task identifier to check"

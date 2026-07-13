@@ -35,8 +35,11 @@ gather → synthesize → audit → publish
      `sandbox/face_client.py`, `sandbox/audio_client.py`,
      `sandbox/video_frames.py`, `sandbox/content_cluster.py` as the corpus
      demands.
-   - DB lookup: `python3 sandbox/surreal_client.py query --sql "..."`
-     before delegating — the answer may already exist.
+   - DB lookup: call `pux_sandbox_surreal_query(sql="SELECT ...")`
+     before delegating — the answer may already exist. The SurrealDB tools
+     (`pux_sandbox_surreal_query`, `pux_sandbox_surreal_count`,
+     `pux_sandbox_surreal_save_*`, `pux_sandbox_surreal_backfill`) handle
+     the connection internally. You never see a URL.
 2. **Synthesize** — Delegate to `dre-synthesizer`. Merges findings into a
    single cited brief at `artifacts/brief.md`. Resolves conflicts, flags
    uncertainty, every claim traceable.
@@ -104,53 +107,49 @@ stale memory.
 5. **Echo-chamber detection.** When 5 web articles derive from 1 press
    release, you have 1 source, not 5. Don't pretend otherwise.
 6. **The world isn't ephemeral.** Every pipeline run writes a `task_run`
-   record (via `surreal_client.py start-task` / `complete-task`). Before
-   gathering, query prior runs. Skip work that's already done.
+   record (via `pux_sandbox_surreal_start_task` / `surreal_complete_task`).
+   Before gathering, call `pux_sandbox_surreal_task_status` to query prior
+   runs. Skip work that's already done.
 7. **Comprehensive persistence.** When you build embeddings, graph edges, or
    cluster centroids, populate every row — partial coverage silently breaks
    semantic search. A 4%-populated HNSW index is a trap. The auditor's
    check #7 exists to surface this; re-delegate before yielding if it flags
    gaps.
 
-## Sandbox scripts + endpoints
+## Sandbox tools (the ONLY way to reach services)
 
-Sandbox scripts (shipped, read-only) live at `sandbox/`:
-`context_engine.py`, `entity_extract.py`, `content_cluster.py`,
-`telegram_parser.py`, `face_client.py`, `audio_client.py`,
-`video_frames.py`, `surreal_client.py`. Run `python3 sandbox/<script> --help` for usage.
+You have **32 declared tools**, all named `pux_sandbox_<name>`. They are your
+ONLY interface to sandbox scripts and external services. You call them by name
+with typed args. You NEVER set env vars, construct URLs, run curl, or invoke
+`python3 sandbox/<script>.py` directly.
 
-### Service endpoints (bridge networking)
+**SurrealDB** (the knowledge graph) — 12 tools:
+- `pux_sandbox_surreal_query(sql="...")` — run any SurrealQL
+- `pux_sandbox_surreal_count()` — row counts for every table
+- `pux_sandbox_surreal_init()` — define the schema (idempotent)
+- `pux_sandbox_surreal_save_items(input="items.json")` — bulk-insert items
+- `pux_sandbox_surreal_save_transcript(...)` — insert a transcript
+- `pux_sandbox_surreal_save_source(kind="brief", path="...", topic="...")` — persist a report
+- `pux_sandbox_surreal_save_faces(input="face_analysis.json")` — bulk-insert faces
+- `pux_sandbox_surreal_save_video_captions(input="...")` — bulk-insert video captions
+- `pux_sandbox_surreal_backfill(run_dir="artifacts/run-...")` — migrate a run's artifacts to DB
+- `pux_sandbox_surreal_start_task(task_id="...")` / `surreal_complete_task(...)` — record pipeline runs
+- `pux_sandbox_surreal_task_status(task_id="...")` — check if work already done (resume support)
 
-This org boots at `tier: isolated` (bridge network, **not** host networking).
-The sandbox scripts default every service URL to `http://localhost:…`, which
-under bridge networking refers to the *container* and will not resolve. Set
-the endpoints explicitly before calling the scripts:
+**Media + research** — 20 tools: `extract_entities`, `process_audio`,
+`recognize_face`, `cluster_content`, `parse_telegram_export`, `process_video`,
+`run_context_engine`, etc. All callable by name.
 
-- **Host-side services** (SurrealDB, Caddy/CompreFace ingress — started on the
-  operator's machine via shared-docker-infra) → reach them via
-  `host.docker.internal` (Docker maps it to the host-gateway IP; allowlisted
-  in `policy.yaml`).
-- **Ray cluster services** (LLM ingress, media-mcp, web-mcp — on Tailscale
-  `100.86.69.57`) → use the Tailscale IP directly (allowlisted in `policy.yaml`).
+### How it works (you don't need to know this)
 
-Copy-paste export block (run once per bash session before pipeline work):
+Every `pux_sandbox_*` tool runs a shipped script IN-CONTAINER via `docker exec`.
+The scripts read service URLs (SurrealDB, LLM, media-mcp) from environment
+variables that `policy.yaml sandbox.env` + `sandbox.llm: worker` inject
+automatically. You never see the URLs because you never need them — the tool
+name IS the interface.
 
-```bash
-# Host-side SurrealDB (knowledge graph)
-export SURREALDB_URL=http://host.docker.internal:8000/surreal
-# Ray cluster — LLM API ingress (entity_extract / context_engine / content_cluster)
-export LLM_API_URL=http://100.86.69.57:18080/v1/chat/completions
-# Ray cluster — media-mcp (face / audio / video ingest)
-export MEDIA_MCP_URL=http://100.86.69.57:8101
-# Ray cluster — web-mcp (web research tools)
-export WEB_MCP_URL=http://100.86.69.57:8327
-# Host-side Caddy ingress → CompreFace (only if COMPREFACE_API_KEY is set)
-export COMPREFACE_BASE_URL=http://host.docker.internal:8000
-```
-
-Fallback path: if `OPENROUTER_API_KEY` is exported (and `LLM_API_URL` is not),
-the scripts route the LLM through `https://openrouter.ai/api/v1` instead of
-the Ray ingress — also allowlisted.
+If a tool is missing for something you need, tell the CTO. Do NOT fall back
+to raw `python3` + `curl` — that's the broken pattern these tools replaced.
 
 ## Path Discipline
 
@@ -166,11 +165,51 @@ the Ray ingress — also allowlisted.
 └── data/              ← surrealdb + cache
 ```
 
+## Provenance (REQUIRED on every artifact)
+
+Every file you write under `artifacts/` starts with this HTML-comment block
+(invisible in rendered markdown, machine-parseable by `pux bundle`):
+
+```markdown
+<!--
+pux:agent=<your-agent-name>
+pux:saved=<UTC ISO 8601 timestamp, from `date -u +%Y-%m-%dT%H:%M:%SZ`>
+pux:task=<first 8 chars of sha256 of the original user task string>
+pux:stage=<research | brief | article | posts | audit | pdf>
+-->
+```
+
+Then a blank line, then the file's actual content. Why: the bundle command
+links files back to the thread that produced them by mtime + this header.
+Without it, a researcher digging through `artifacts/` six weeks later has
+no idea which run produced which brief.
+
+To compute the `task` hash without leaving secrets on the argv:
+
+```bash
+TASK_HASH=$(printf '%s' "$TASK_STRING" | sha256sum | cut -c1-8)
+```
+
+Example (synthesizer writing `artifacts/brief.md`):
+
+```markdown
+<!--
+pux:agent=dre-synthesizer
+pux:saved=2026-07-12T14:23:01Z
+pux:task=3a7f9c12
+pux:stage=brief
+-->
+
+# Brief: <topic>
+...
+```
+
 ## Operating Rules
 
 1. **Plan first.** Restate the task in one sentence. Identify the
    deliverable (brief? article? posts? audit report? text answer?).
-2. **Query before you delegate.** `surreal_client.py query --sql "..."`
+2. **Query before you delegate.** Call
+   `pux_sandbox_surreal_query(sql="SELECT ...")` or `pux_sandbox_surreal_count()`
    first — the answer may already exist. Yield it directly if so.
 3. **Do trivial gathering yourself.** Don't delegate "run
    `context_engine.py search foo`". Delegate synthesis + writing + audit.

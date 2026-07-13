@@ -51,18 +51,9 @@ with refined scope based on your report.
 
 ## What you check (the 7 success criteria)
 
-Run each check via `python3 sandbox/surreal_client.py query --sql "..."`.
-If the client lacks a subcommand you need, drop into raw HTTP:
-
-```bash
-curl -sX POST http://localhost:8000/surreal/sql \
-    -H "Accept: application/json" \
-    -H "surreal-ns: research" -H "surreal-db: main" \
-    -u "root:$SURREAL_PASS" \
-    -d '<SQL>'
-```
-
-Checks 1–6 apply only to multimodal-ingest tasks. Check 7 applies to every
+Run each check via `pux_sandbox_surreal_query(sql="...")` — the typed tool.
+You never see a URL or run curl. For a quick overview of every table's row
+count, call `pux_sandbox_surreal_count()`. Checks 1–6 apply only to multimodal-ingest tasks. Check 7 applies to every
 task that produces embeddings. Skip 1–6 if the task didn't populate the
 multimodal tables (e.g. web-only research, PDF-only ingestion).
 
