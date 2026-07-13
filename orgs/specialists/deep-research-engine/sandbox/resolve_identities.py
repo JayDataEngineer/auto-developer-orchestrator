@@ -134,12 +134,14 @@ def create_voice_cluster_nodes():
                     if not isinstance(it, dict) or not it.get("id"):
                         continue
                     iid = it["id"]
+                    iid_safe = str(iid).replace(":", "_")
                     # Upsert voice cluster person + speak edge
                     sql(f"UPSERT person:voice_cluster_{cid} SET "
                         f"role = 'speaker', voice_cluster_id = {cid}, "
                         f"voice_count = {len(files)};")
                     try:
-                        sql(f"RELATE person:voice_cluster_{cid} -> speaks_in -> {iid};")
+                        sql(f"RELATE person:voice_cluster_{cid} -> speaks_in -> {iid} "
+                            f"SET id = speaks_in:vc{cid}_{iid_safe};")
                         linked += 1
                     except Exception:
                         pass
@@ -185,7 +187,8 @@ def cross_link_voice_to_identity(voice_resolved):
             f"notes = 'Identity resolved from voice-cluster + sender co-occurrence.';")
         for cid in groups["voice"]:
             try:
-                sql(f"RELATE person:voice_cluster_{cid} -> same_as -> person:resolved_{sid};")
+                sql(f"RELATE person:voice_cluster_{cid} -> same_as -> person:resolved_{sid} "
+                    f"SET id = same_as:vc{cid}_resolved_{sid};")
                 edges += 1
             except Exception:
                 pass
@@ -194,8 +197,13 @@ def cross_link_voice_to_identity(voice_resolved):
                       f"AND string::starts_with(id, 'person:sender_');")
             for e in (ent[0].get("result", []) if ent and isinstance(ent[0].get("result"), list) else []):
                 if isinstance(e, dict) and e.get("id"):
-                    sql(f"RELATE {e['id']} -> same_as -> person:resolved_{sid};")
-                    edges += 1
+                    eid_safe = str(e["id"]).replace(":", "_")
+                    try:
+                        sql(f"RELATE {e['id']} -> same_as -> person:resolved_{sid} "
+                            f"SET id = same_as:{eid_safe}_resolved_{sid};")
+                        edges += 1
+                    except Exception:
+                        pass
         except Exception:
             pass
     return edges, by_name
@@ -246,7 +254,9 @@ def link_video_audio_to_voice_clusters():
                 # Ensure the voice cluster person node exists
                 sql(f"UPSERT person:voice_cluster_{label} SET "
                     f"role = 'speaker', voice_cluster_id = {label};")
-                sql(f"RELATE person:voice_cluster_{label} -> speaks_in -> {iid};")
+                iid_safe = str(iid).replace(":", "_")
+                sql(f"RELATE person:voice_cluster_{label} -> speaks_in -> {iid} "
+                    f"SET id = speaks_in:vc{label}_{iid_safe};")
                 edges += 1
                 linked.setdefault(src_stem, []).append(label)
             except Exception:
@@ -320,9 +330,11 @@ def detect_faces_in_video_keyframes():
         if iid in linked_videos:
             continue  # one edge per video is enough for the heuristic
         # Link top face clusters to this video
+        iid_safe = str(iid).replace(":", "_")
         for cid in top_clusters[:3]:
             try:
-                sql(f"RELATE person:face_cluster_{cid} -> appears_in -> {iid};")
+                sql(f"RELATE person:face_cluster_{cid} -> appears_in -> {iid} "
+                    f"SET id = appears_in:fc{cid}_{iid_safe};")
                 edges += 1
             except Exception:
                 pass
@@ -412,8 +424,11 @@ def cross_link_face_voice_via_video():
     edges = 0
     for (fc, vc), n in co.items():
         try:
+            # Deterministic edge ID for idempotency — re-running doesn't
+            # create duplicate same_as edges.
             sql(f"RELATE person:face_cluster_{fc} -> same_as -> person:voice_cluster_{vc} "
-                f"SET evidence = 'video co-occurrence', co_occurrence_count = {n};")
+                f"SET id = same_as:fc{fc}_vc{vc}, "
+                f"evidence = 'video co-occurrence', co_occurrence_count = {n};")
             edges += 1
         except Exception:
             pass
