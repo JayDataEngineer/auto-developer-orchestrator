@@ -244,11 +244,12 @@ def test_main_creates_httpserver_bound_to_server():
         call = node.value
         if (isinstance(call, ast.Call)
                 and isinstance(call.func, ast.Name)
-                and call.func.id == "HTTPServer"):
+                and call.func.id in ("HTTPServer", "ThreadingHTTPServer")):
             found = True
     assert found, (
-        "main() must bind `server = HTTPServer(...)` before serve_forever() — "
-        "the dropped-assignment NameError crashloop must never recur"
+        "main() must bind `server = HTTPServer(...)` (or ThreadingHTTPServer, "
+        "which subclasses it) before serve_forever() — the dropped-assignment "
+        "NameError crashloop must never recur"
     )
 
 

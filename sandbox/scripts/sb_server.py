@@ -69,6 +69,11 @@ API — POST unless noted:
     /save_session       {"path":"..."}                   → save cookies + localStorage to file
     /restore_session    {"path":"..."}                   → restore from saved session file
     /reset              {}                               → kill and recreate browser
+    /solve_captcha      {}                               → honest best-effort captcha click + VERIFY
+    /uc                 {"action":"open|click|type|read|evaluate|cookies|close", ...}
+                                                        → SB(uc=True) Cloudflare/Turnstile/hCaptcha bypass
+    /accept_cookies     {}                               → GDPR/CCPA banner dismissal (curated selectors)
+    /warmup_history     {"urls":[...]?, "dwell":3.0}     → visit benign sites to build fingerprint legitimacy
     GET /status         {}                               → browser alive check
     GET /file/<path>    {}                               → serve local file as base64 data URI
 """
@@ -88,7 +93,7 @@ import base64
 import random
 import socket
 import tempfile
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 os.environ["SB_NO_BORING_RC"] = "1"
@@ -597,6 +602,13 @@ class BrowserState:
         self._last_fingerprint = ""
         self._chrome_process = None
         self._user_data_dir = None
+        # UC-mode session (SeleniumBase SB(uc=True)) — a SEPARATE patched
+        # undetected-chromedriver Chrome used to bypass Cloudflare Turnstile /
+        # hCaptcha / reCAPTCHA that the persistent sb_cdp browser can't click.
+        # Held open across calls so the agent can open→click_captcha→type on
+        # the same CF-cleared page. Closed by _close_uc() / reset() / close().
+        self.uc_sb = None
+        self._uc_stack = None
         os.makedirs(self._download_dir, exist_ok=True)
         self._init_browser()
 
@@ -794,6 +806,7 @@ class BrowserState:
 
     def reset(self):
         with self._lock:
+            self._close_uc()
             self._init_browser()
             self._last_element_map = []
             self._last_fingerprint = ""
@@ -805,7 +818,53 @@ class BrowserState:
         return self.sb is not None
 
     def close(self):
+        self._close_uc()
         self._close_browser()
+
+    # ── UC mode: dedicated SB(uc=True) for captcha-protected pages ──────────
+    def open_uc(self):
+        """Spin up a dedicated SB(uc=True) session. Separate Chrome instance
+        (patched undetected-chromedriver) from the persistent sb_cdp browser.
+        Used by /uc to bypass Cloudflare Turnstile / hCaptcha / reCAPTCHA via
+        sb.uc_gui_click_captcha() — physical pyautogui clicks the sb_cdp CDP
+        path structurally cannot make.
+
+        Verified working in-container (SeleniumBase 4.50.6): sb.open() +
+        sb.uc_gui_click_captcha() pass nowsecure.nl cleanly. The
+        uc_open_with_reconnect() path is intentionally AVOIDED — its
+        disconnect/reconnect cycle loses chromedriver in this container's
+        64 MiB /dev/shm + multi-Chrome environment (port 42419 dies after
+        the 4s reconnect window). sb.open() on the UC driver is sufficient.
+
+        Held open for follow-up /uc actions until _close_uc()/reset()/close().
+        Returns the BaseCase instance (self.uc_sb) or raises on failure. """
+        if self.uc_sb is not None:
+            return self.uc_sb
+        os.environ.setdefault("DISPLAY", ":99")
+        import contextlib
+        from seleniumbase import SB
+        stack = contextlib.ExitStack()
+        try:
+            sb = stack.enter_context(
+                SB(uc=True, test=True, xvfb=False, headed=True, locale_code="en")
+            )
+        except Exception as e:
+            try: stack.close()
+            except Exception: pass
+            print(f"[sb_server] UC session open failed: {e}", file=sys.stderr)
+            raise
+        self._uc_stack = stack
+        self.uc_sb = sb
+        print("[sb_server] UC session ready (SB uc=True)", file=sys.stderr)
+        return sb
+
+    def _close_uc(self):
+        if self._uc_stack is not None:
+            try: self._uc_stack.close()
+            except Exception as e:
+                print(f"[sb_server] UC close error (non-fatal): {e}", file=sys.stderr)
+            self._uc_stack = None
+            self.uc_sb = None
 
     @property
     def has_browser(self):
@@ -969,6 +1028,89 @@ class Handler(BaseHTTPRequestHandler):
             "page_changed": page_changed,
         }
 
+    def _capture_uc(self, ucsb):
+        """Capture from a UC-mode BaseCase instance (not the persistent sb_cdp).
+        Mirrors _capture_with_fingerprint but without the persistent-state
+        fingerprint comparison (the UC session has its own page state)."""
+        element_map = safe(lambda: run_labeler(ucsb, self.state), []) or []
+        stats = safe(lambda: run_page_stats(ucsb), {}) or {}
+        page_data = {}
+        try:
+            page_data = extract_page_data(ucsb)
+        except Exception as e:
+            page_data = {"error": str(e), "title": "", "url": "", "text": "", "images": [], "links": []}
+        spath = screenshot_path()
+        safe(lambda: ucsb.save_screenshot(spath), None)
+        # Honest challenge-status read — the UC path's whole point is bypass.
+        challenge_state = safe(lambda: ucsb.execute_script("""
+            (() => {
+                const body = (document.body && document.body.innerText) || '';
+                const markers = ['just a moment', 'checking your browser', 'cloudflare',
+                                 'verify you are human', 'hcaptcha', 'enable javascript and cookies'];
+                return JSON.stringify({markers: markers.filter(m => body.toLowerCase().includes(m))});
+            })()
+        """), '{"markers":[]}')
+        try: challenge_state = json.loads(challenge_state)
+        except Exception: challenge_state = {"markers": []}
+        return {
+            "page_data": page_data,
+            "element_map": element_map,
+            "screenshot_path": spath,
+            "page_stats": stats,
+            "challenge_state": challenge_state,
+            "cf_cleared": not bool(challenge_state.get("markers")),
+        }
+
+    def _uc_handoff_cookies(self, ucsb, url):
+        """Copy cookies from the UC session into the persistent sb_cdp browser
+        so a subsequent /navigate to the same domain inherits cf_clearance /
+        session cookies. Navigate persistent to the domain first (CDP needs a
+        scope), then inject each cookie via the /cookies set path.
+
+        Returns a summary dict. Best-effort: cf_clearance is fingerprint-bound
+        so handoff isn't guaranteed, but session cookies (auth_token, csrf,
+        account cookies) reliably transfer."""
+        import urllib.parse as _up
+        psb = self.state.sb
+        if psb is None: return {"ok": False, "reason": "persistent browser not available"}
+        try:
+            cookies = ucsb.get_cookies() or []
+        except Exception as e:
+            return {"ok": False, "reason": f"uc get_cookies failed: {e}"}
+        if not cookies: return {"ok": True, "injected": 0, "reason": "no cookies to hand off"}
+        domain = ""
+        try:
+            host = _up.urlparse(url).hostname or ""
+            domain = "." + host.split(".", 1)[-1] if host.count(".") >= 1 else host
+        except Exception: pass
+        # Navigate persistent browser to the cookie domain so CDP can bind them.
+        if domain:
+            try: psb.get(f"https://{domain.lstrip('.')}")
+            except Exception: pass
+        # Build CookieParam list (drop expires — CDP silently rejects batches
+        # when ANY cookie carries expires; see /cookies set comment).
+        try:
+            from mycdp import network as _net
+            params = []
+            for c in cookies:
+                if not isinstance(c, dict): continue
+                kw = {"name": c.get("name", ""), "value": c.get("value", "")}
+                cd = c.get("domain") or domain
+                if cd: kw["domain"] = cd
+                if c.get("path"): kw["path"] = c["path"]
+                if c.get("secure") is not None: kw["secure"] = bool(c["secure"])
+                if c.get("httpOnly") is not None: kw["http_only"] = bool(c["httpOnly"])
+                params.append(_net.CookieParam(**kw))
+            if params:
+                # Use the same proven API as /cookies set (sb.set_all_cookies
+                # takes CookieParam instances — see _dicts_to_cookie_params).
+                psb.set_all_cookies(params)
+            return {"ok": True, "injected": len(params),
+                    "names": [c.get("name") for c in cookies if isinstance(c, dict)][:12],
+                    "domain": domain}
+        except Exception as e:
+            return {"ok": False, "reason": f"inject failed: {e}", "injected": 0}
+
     def _capture_tabs_info(self, sb):
         """Get current tab count and handle info."""
         try:
@@ -1056,46 +1198,294 @@ class Handler(BaseHTTPRequestHandler):
             self._ok({"message": "browser reset"})
 
         elif path == "/solve_captcha":
+            # HONEST best-effort captcha click on the persistent sb_cdp browser.
+            # The CDP path structurally CANNOT click cross-origin CF Turnstile /
+            # hCaptcha checkboxes (SOP blocks contentDocument access, and even
+            # if reached, .click() lacks the isTrusted=true signal anti-bot
+            # scripts require). So we attempt the JS click, then VERIFY whether
+            # a challenge is still visible — and report captcha_solved=False
+            # honestly when it is, pointing the agent at /uc (the real
+            # SB(uc=True) + uc_gui_click_captcha path) instead of falsely
+            # claiming success and letting the agent walk into a wall.
             if sb is None: return self._err("browser not available")
             self.state.snapshot_before()
             try:
-                if hasattr(sb, "solve_captcha"):
-                    sb.solve_captcha()
-                    sb.sleep(2)
-                    capture = self._capture_with_fingerprint(sb, self.state)
-                    capture["captcha_solved"] = True
-                    self._ok(capture)
-                else:
-                    # sb_cdp.Chrome may not expose solve_captcha — try JS approach
-                    # Click common CAPTCHA checkbox selectors inside iframes
-                    import json as _json
-                    result = safe(lambda: sb.execute_script("""
-                        (() => {
-                            const frames = document.querySelectorAll('iframe');
-                            for (const f of frames) {
-                                try {
-                                    const doc = f.contentDocument || f.contentWindow?.document;
-                                    if (!doc) continue;
-                                    const cb = doc.querySelector('.recaptcha-checkbox-border, ' +
-                                        '[role="checkbox"], #checkbox, .cf-turnstile-checkbox, ' +
-                                        '[data-action="challenge"], .challenge-button');
-                                    if (cb) { cb.click(); return 'clicked captcha in iframe'; }
-                                } catch(e) {}
-                            }
-                            // Also try top-level
-                            const top = document.querySelector('.recaptcha-checkbox-border, ' +
-                                '[role="checkbox"], #checkbox, .cf-turnstile-checkbox');
-                            if (top) { top.click(); return 'clicked top-level captcha'; }
-                            return 'no captcha element found';
-                        })()
-                    """), "no captcha element found")
-                    sb.sleep(2)
-                    capture = self._capture_with_fingerprint(sb, self.state)
-                    capture["captcha_solved"] = True
-                    capture["captcha_result"] = result
-                    self._ok(capture)
+                # 1. JS click attempt on any captcha-like element (best effort)
+                js_result = safe(lambda: sb.execute_script("""
+                    (() => {
+                        const sels = '.recaptcha-checkbox-border, [role="checkbox"], #checkbox, '
+                                   + '.cf-turnstile-checkbox, [data-action="challenge"], '
+                                   + '.challenge-button, .hcaptcha-checkbox';
+                        const frames = document.querySelectorAll('iframe');
+                        for (const f of frames) {
+                            try {
+                                const doc = f.contentDocument || f.contentWindow?.document;
+                                if (!doc) continue;
+                                const cb = doc.querySelector(sels);
+                                if (cb) { cb.click(); return 'clicked in iframe'; }
+                            } catch(e) {}  // cross-origin — expected for CF/hCaptcha
+                        }
+                        const top = document.querySelector(sels);
+                        if (top) { top.click(); return 'clicked top-level'; }
+                        return 'no captcha element reachable';
+                    })()
+                """), "no captcha element reachable")
+
+                sb.sleep(2)
+                # 2. VERIFY: is a challenge still on screen? This is the honesty fix.
+                challenge_state = safe(lambda: sb.execute_script("""
+                    (() => {
+                        const body = (document.body && document.body.innerText) || '';
+                        const markers = ['just a moment', 'checking your browser',
+                                         'cloudflare', 'ray id', 'verify you are human',
+                                         'hcaptcha', 'recaptcha', 'enable javascript and cookies'];
+                        const found = markers.filter(m => body.toLowerCase().includes(m));
+                        const ifr = document.querySelectorAll(
+                            'iframe[src*="challenges.cloudflare.com"], '
+                            + 'iframe[src*="hcaptcha"], iframe[src*="recaptcha"], '
+                            + 'iframe[src*="turnstile"]').length;
+                        return JSON.stringify({markers: found, captcha_iframes: ifr});
+                    })()
+                """), '{"markers":[],"captcha_iframes":0}')
+                try: challenge_state = json.loads(challenge_state)
+                except Exception: challenge_state = {"markers": [], "captcha_iframes": 0}
+
+                still_blocked = bool(challenge_state.get("markers")) or \
+                                bool(challenge_state.get("captcha_iframes"))
+                capture = self._capture_with_fingerprint(sb, self.state)
+                capture["captcha_solved"] = not still_blocked      # HONEST verdict
+                capture["captcha_attempt"] = js_result
+                capture["challenge_state"] = challenge_state
+                if still_blocked:
+                    capture["hint"] = ("Persistent CDP browser cannot click this cross-origin "
+                                       "captcha. Call POST /uc {action:'open', url:<same url>, "
+                                       "click_captcha:true} to use SB(uc=True) + "
+                                       "uc_gui_click_captcha (real pyautogui click).")
+                self._ok(capture)
             except Exception as e:
                 return self._err(f"solve_captcha failed: {e}")
+
+        elif path == "/uc":
+            # The REAL captcha bypass: SB(uc=True) dedicated Chrome +
+            # uc_gui_click_captcha (pyautogui physically clicks the checkbox).
+            # See BrowserState.open_uc for why uc_open_with_reconnect is avoided.
+            # Multi-action: one persistent UC session so the agent can
+            # open→click_captcha→type→submit on the SAME CF-cleared page.
+            action = body.get("action", "open")
+            try:
+                if action == "open":
+                    url = body.get("url", "")
+                    if not url: return self._err("uc open requires url", 400)
+                    click_captcha = body.get("click_captcha", True)
+                    do_handoff = body.get("handoff", True)
+                    ucsb = self.state.open_uc()
+                    ucsb.open(url)
+                    ucsb.sleep(2)
+                    captcha_clicked = False
+                    if click_captcha:
+                        try:
+                            ucsb.uc_gui_click_captcha()
+                            captcha_clicked = True
+                            ucsb.sleep(3)
+                        except Exception as e:
+                            # uc_gui_click_captcha raises if no captcha found —
+                            # that's fine, means the page has no challenge.
+                            pass
+                    capture = self._capture_uc(ucsb)
+                    capture["captcha_clicked"] = captcha_clicked
+                    capture["uc_session_open"] = True
+                    # Cookie handoff to the persistent browser so subsequent
+                    # /navigate calls (same domain) inherit cf_clearance etc.
+                    handoff_result = None
+                    if do_handoff:
+                        handoff_result = self._uc_handoff_cookies(ucsb, url)
+                        capture["cookie_handoff"] = handoff_result
+                    self._ok(capture)
+
+                elif action == "click":
+                    ucsb = self.state.uc_sb
+                    if ucsb is None: return self._err("no open UC session — call action:open first", 400)
+                    selector = body.get("selector", "")
+                    by = body.get("by", "css")  # css | text | xpath
+                    text = body.get("text", "")
+                    self.state.snapshot_before()
+                    if text:
+                        ucsb.click_text(text)
+                    elif selector:
+                        ucsb.click(selector, by=by)
+                    else:
+                        return self._err("uc click requires selector or text", 400)
+                    ucsb.sleep(1)
+                    self._ok(self._capture_uc(ucsb))
+
+                elif action == "type":
+                    ucsb = self.state.uc_sb
+                    if ucsb is None: return self._err("no open UC session", 400)
+                    selector = body.get("selector", "")
+                    text = body.get("text", "")
+                    submit = body.get("submit", False)
+                    clear = body.get("clear", True)
+                    if not selector or text is None:
+                        return self._err("uc type requires selector + text", 400)
+                    if clear:
+                        try: ucsb.clear(selector)
+                        except Exception: pass
+                    ucsb.type(selector, text)
+                    if submit:
+                        try: ucsb.submit(selector)
+                        except Exception: ucsb.press_keys("Enter")
+                    ucsb.sleep(1)
+                    self._ok(self._capture_uc(ucsb))
+
+                elif action == "read":
+                    ucsb = self.state.uc_sb
+                    if ucsb is None: return self._err("no open UC session", 400)
+                    self._ok(self._capture_uc(ucsb))
+
+                elif action == "evaluate":
+                    ucsb = self.state.uc_sb
+                    if ucsb is None: return self._err("no open UC session", 400)
+                    code = body.get("code", "")
+                    if not code: return self._err("uc evaluate requires code", 400)
+                    if code.startswith("return "): code = code[7:]
+                    res = safe(lambda: ucsb.execute_script(code), None)
+                    self._ok({"result": res, "type": type(res).__name__})
+
+                elif action == "cookies":
+                    ucsb = self.state.uc_sb
+                    if ucsb is None: return self._err("no open UC session", 400)
+                    cact = body.get("cookie_action", "get")
+                    if cact == "get":
+                        self._ok({"cookies": ucsb.get_cookies() or []})
+                    elif cact == "inject_persistent":
+                        self._ok({"cookie_handoff": self._uc_handoff_cookies(ucsb, body.get("url", ""))})
+                    else:
+                        return self._err(f"unknown cookie_action: {cact}", 400)
+
+                elif action == "close":
+                    self.state._close_uc()
+                    self._ok({"uc_session_open": False})
+
+                else:
+                    return self._err(f"unknown uc action: {action}. Use open|click|type|read|evaluate|cookies|close", 400)
+            except Exception as e:
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                return self._err(f"uc {action} failed: {e}")
+
+        elif path == "/accept_cookies":
+            # GDPR/CCPA cookie-consent banner dismissal. Curated selector list
+            # covering the major consent platforms (OneTrust, TrustArc, CookieBot,
+            # Quantcast, Didomi, BBC/REMODEGG) + text-based fallback for custom
+            # banners. More reliable than SoM-guessing: BBC's banner produces
+            # ZERO candidates in the SoM element map (the banner renders inside a
+            # trust-elevated container the labeler skips), but this endpoint finds
+            # it via CSS id/class patterns the SoM path ignores.
+            if sb is None: return self._err("browser not available")
+            # Ordered most-specific → generic. The first match wins.
+            CONSENT_SELECTORS = [
+                "#onetrust-accept-btn-handler",              # OneTrust (LinkedIn, many enterprise)
+                "#truste-consent-button", ".truste-button2", # TrustArc
+                "#CybotCookiebotDialogBodyLevelButtonAcceptAll",  # CookieBot
+                "#CybotCookiebotDialogBodyButtonAccept",
+                ".qc-cmp2-summary-buttons button[mode='primary']",  # Quantcast
+                "#qcm-accept-all",
+                "#didomi-notice-agree-button",              # Didomi
+                ".tcfcp", ".tcfcp-btn",                      # misc TCF
+                "[data-testid='cookie-policy-dialog-accept-button']",  # React apps
+                "button[data-testid='accept-all-cookies']",
+                "button#accept-recommended-btn-handler",     # OneTrust variant
+                ".cc-accept", ".cookie-accept",              # generic
+                "#ccc-notify-accept",                        # BBC legacy
+                "button.sp_choice_type_11",                  # SourcePoint
+            ]
+            ACCEPT_TEXTS = ["accept all", "accept all & close", "accept all cookies",
+                            "i agree", "agree to all", "allow all", "got it",
+                            "accept & close", "accept the use of cookies",
+                            "agree", "ok", "accept", "allow cookies", "consent"]
+            try:
+                # 1. Curated CSS selectors (fast path)
+                clicked = None
+                for sel in CONSENT_SELECTORS:
+                    visible = safe(lambda s=sel: sb.execute_script(
+                        "(() => { const el = document.querySelector(" + js_str(s) + "); "
+                        "if (!el) return false; const r = el.getBoundingClientRect(); "
+                        "return !!(r.width && r.height); })()"), False)
+                    if visible:
+                        safe(lambda s=sel: sb.execute_script(
+                            "document.querySelector(" + js_str(s) + ").click()"), None)
+                        clicked = sel
+                        break
+                # 2. Text-based fallback (buttons/links whose text matches)
+                if not clicked:
+                    import json as _json
+                    res = safe(lambda: sb.execute_script(
+                        "(() => {"
+                        "  const textRe = /^(accept all.*|i agree.*|agree to all.*|allow all.*|"
+                        "got it.*|accept & close.*|accept.*|agree.*|allow cookies.*|ok|consent.*)$/i;"
+                        "  const els = Array.from(document.querySelectorAll("
+                        "    'button, a, input[type=button], input[type=submit], div[role=button]'));"
+                        "  for (const el of els) {"
+                        "    const t = (el.innerText || el.value || '').trim();"
+                        "    if (t.length > 0 && t.length < 40 && textRe.test(t)) {"
+                        "      const r = el.getBoundingClientRect();"
+                        "      if (r.width && r.height) { el.click(); return t; }"
+                        "    }"
+                        "  }"
+                        "  return null;"
+                        "})()"), None)
+                    if res:
+                        clicked = "text:" + res[:40]
+                sb.sleep(1.2)
+                capture = self._capture_with_fingerprint(sb, self.state)
+                capture["cookies_accepted"] = bool(clicked)
+                capture["accept_method"] = clicked or "no-banner-found"
+                self._ok(capture)
+            except Exception as e:
+                return self._err(f"accept_cookies failed: {e}")
+
+        elif path == "/warmup_history":
+            # Build fingerprint legitimacy: visit benign high-traffic sites with
+            # realistic dwell times + scroll, so the browser's history + cookie
+            # jar + TLS fingerprint look like a real user before the real task.
+            # Combats "fresh automation" heuristics on job sites (Workday,
+            # Greenhouse CF rules) and Twitter that flag a Chrome whose only
+            # navigation is about:blank → their-domain.
+            if sb is None:
+                if not self.state.ensure(): return self._err("browser not available")
+                sb = self.state.sb
+            DEFAULT_SITES = [
+                "https://en.wikipedia.org/wiki/Web_browser",
+                "https://www.bbc.com/news",
+                "https://github.com/",
+                "https://stackoverflow.com/",
+                "https://news.ycombinator.com/",
+                "https://www.google.com/",
+            ]
+            urls = body.get("urls") or DEFAULT_SITES
+            dwell = float(body.get("dwell", 3.0))   # seconds per site
+            scroll = body.get("scroll", True)
+            visited = []
+            import random as _r
+            for u in urls:
+                t0 = time.time()
+                try:
+                    sb.get(u)
+                    sb.sleep(dwell + _r.uniform(-0.6, 1.4))
+                    if scroll:
+                        safe(lambda: sb.execute_script(
+                            "window.scrollBy(0, window.innerHeight * "
+                            "(0.3 + 0.5*Math.random()))"), None)
+                        sb.sleep(0.6)
+                    title = safe(lambda: sb.get_title() or "", "")
+                    url_now = safe(lambda: sb.get_current_url() or "", "")
+                    visited.append({"url": u, "final_url": url_now,
+                                    "title": title[:80],
+                                    "ok": True, "ms": int((time.time() - t0) * 1000)})
+                except Exception as e:
+                    visited.append({"url": u, "ok": False, "error": str(e)[:120]})
+            self._ok({"visited": visited, "count": len(visited),
+                      "history_built": len([v for v in visited if v.get("ok")])})
 
         elif path == "/navigate":
             url = body.get("url", "")
@@ -1358,30 +1748,40 @@ class Handler(BaseHTTPRequestHandler):
                 self._ok(self._capture_with_fingerprint(sb, self.state))
 
         elif path == "/tabs":
+            # sb_cdp native: sb.get_tabs() returns Tab objects. The old
+            # Selenium-style sb.driver.window_handles path is GONE in sb_cdp
+            # (sb.driver is a Browser, not a WebDriver) — using it raised
+            # "'Browser' object has no attribute 'window_handles'" on every call.
             if sb is None: return self._err("browser not available")
-            tabs = []
             try:
-                handles = sb.driver.window_handles
-                current = sb.driver.current_window_handle
-                for i, h in enumerate(handles):
-                    sb.driver.switch_to.window(h)
-                    tabs.append({"index": i,
-                                 "url": safe(lambda: sb.get_current_url() or "", ""),
-                                 "title": safe(lambda: sb.get_title() or "", ""),
-                                 "active": h == current})
-                sb.driver.switch_to.window(current)
+                raw_tabs = sb.get_tabs() or []
+                active = safe(lambda: sb.get_active_tab(), None)
+                tabs = []
+                for i, t in enumerate(raw_tabs):
+                    tabs.append({
+                        "index": i,
+                        "url": safe(lambda t=t: getattr(t, "url", "") or "", ""),
+                        "title": "",  # title requires switching; skip for cheapness
+                        "tab_id": safe(lambda t=t: getattr(t, "tab_id", "") or str(t), "")[:32],
+                        "active": t is active,
+                    })
+                self._ok({"tabs": tabs})
             except Exception as e:
                 return self._err(f"tab listing failed: {e}")
-            self._ok({"tabs": tabs})
 
         elif path == "/new_tab":
             url = body.get("url", "about:blank")
             if sb is None: return self._err("browser not available")
             try:
-                escaped = url.replace("'", "\\'")
-                sb.driver.execute_script(f"window.open('{escaped}', '_blank');")
-                handles = sb.driver.window_handles
-                sb.driver.switch_to.window(handles[-1])
+                # window.open via sb.execute_script (NOT sb.driver — that's a
+                # Browser object without execute_script, the old bug). We avoid
+                # sb.open_new_tab(url) because it creates a DUPLICATE target in
+                # sb_cdp 4.50.6 (3 tabs after one open — verified). window.open
+                # creates exactly one tab; switch_to_newest_tab() makes it active.
+                target = url if url and url != "about:blank" else "about:blank"
+                escaped = target.replace("\\", "\\\\").replace("'", "\\'")
+                sb.execute_script(f"window.open('{escaped}', '_blank');")
+                sb.switch_to_newest_tab()
                 sb.sleep(2)
                 self._ok(self._capture_with_fingerprint(sb, self.state))
             except Exception as e:
@@ -1391,24 +1791,26 @@ class Handler(BaseHTTPRequestHandler):
             index = body.get("index", 0)
             if sb is None: return self._err("browser not available")
             try:
-                handles = sb.driver.window_handles
-                if 0 <= index < len(handles):
-                    sb.driver.switch_to.window(handles[index])
-                    sb.sleep(1)
-                    self._ok(self._capture_with_fingerprint(sb, self.state))
-                else:
-                    self._err(f"tab index {index} out of range (0-{len(handles)-1})")
+                tabs = sb.get_tabs() or []
+                if not (0 <= index < len(tabs)):
+                    return self._err(f"tab index {index} out of range (0-{len(tabs)-1})", 400)
+                # sb_cdp native: switch_to_tab takes a Tab object (from get_tabs).
+                sb.switch_to_tab(tabs[index])
+                sb.sleep(1)
+                self._ok(self._capture_with_fingerprint(sb, self.state))
             except Exception as e:
                 self._err(f"switch tab failed: {e}")
 
         elif path == "/close_tab":
             if sb is None: return self._err("browser not available")
             try:
-                handles = sb.driver.window_handles
-                if len(handles) <= 1: return self._err("can't close last tab")
-                sb.driver.close()
-                handles = sb.driver.window_handles
-                sb.driver.switch_to.window(handles[-1])
+                tabs = sb.get_tabs() or []
+                if len(tabs) <= 1: return self._err("can't close last tab")
+                # sb_cdp native: close_active_tab() closes the current tab and
+                # the harness auto-selects another; switch_to_newest_tab() makes
+                # the remaining tab canonical for subsequent calls.
+                sb.close_active_tab()
+                sb.switch_to_newest_tab()
                 sb.sleep(1)
                 self._ok(self._capture_with_fingerprint(sb, self.state))
             except Exception as e:
@@ -2045,7 +2447,15 @@ def main():
     use_chromium = "--use-chromium" in sys.argv
     state = BrowserState(stealth=stealth, use_chromium=use_chromium)
     Handler.state = state
-    server = HTTPServer(("127.0.0.1", port), Handler)
+    # ThreadingHTTPServer (not single-threaded HTTPServer): a stuck sb.get() in
+    # one POST handler must NOT block /status or concurrent requests. With the
+    # single-threaded server, a page that hangs on load ("Timeout loading …")
+    # held the only accept-loop slot and made the whole org unresponsive —
+    # /status returned empty, the agent couldn't recover. ThreadingHTTPServer
+    # handles each request in its own daemon thread; BrowserState._lock still
+    # serializes browser access so concurrent POSTs are safe. daemon_threads=True
+    # (the class default since 3.7) prevents threads from blocking shutdown.
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     details = []
     if stealth: details.append("stealth")
     if use_chromium: details.append("chromium")
