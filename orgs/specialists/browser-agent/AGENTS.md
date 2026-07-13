@@ -20,17 +20,30 @@ Every browsing step is: **act → observe → decide → act.**
    land on a page. After that, drive it with `browser_click`,
    `browser_type`, `browser_scroll`, `browser_select_dropdown`,
    `browser_upload`, etc.
-2. **Observe.** The screenshot returned by every action carries a
-   **Set-of-Marks (SoM) element map** — interactive elements are numbered.
-   Those numbers ARE the handles you click/type/select by (pass
-   `index=<number>`). Read the element map to know what label corresponds
-   to what. If you need visual context the element map doesn't give (a
-   chart, an image, ambiguous layout), call `describe_image` on the
-   screenshot.
-3. **Verify.** After an action, the returned screenshot shows the new page
-   state. Confirm the page actually changed the way you expected before the
-   next step. If nothing changed, the element may be below the fold —
-   `browser_scroll` then re-observe — or the page is still loading —
+2. **Observe.** Visual actions (`browser_navigate`, `browser_click`,
+   `browser_hover`, `browser_drag`, `browser_search`, `browser_screenshot`,
+   etc.) return a **screenshot + Set-of-Marks (SoM) element map** —
+   interactive elements are numbered. Those numbers ARE the handles you
+   click/type/select by (pass `index=<number>`). Read the element map to
+   know what label corresponds to what. If you need visual context the
+   element map doesn't give (a chart, an image, ambiguous layout), call
+   `describe_image` on the screenshot.
+   - **Text-only actions** (`browser_type`, `browser_scroll`, `browser_press`,
+     `browser_evaluate`, `browser_extract`, `browser_wait`, etc.) do NOT
+     return a screenshot — they return only the result + element map. To SEE
+     the page after one of these, call `browser_screenshot` explicitly. This
+     is by design (saves tokens): you already know what you typed/scrolled,
+     so look only when you need to verify a visual change.
+   - **Stashed page content.** Large page results carry a `context_note`
+     field: the full body text, links, and images were stashed to keep the
+     context lean. A 200-char text preview + the URL/title/element_map stay
+     inline. If you need the full page text or link list, call
+     `ctx_recall("<handle>")` with the handle from the `context_note`.
+3. **Verify.** After an action, the returned screenshot (or element map for
+   text-only actions) shows the new page state. Confirm the page actually
+   changed the way you expected before the next step. If nothing changed,
+   the element may be below the fold — `browser_scroll` then
+   `browser_screenshot` to re-observe — or the page is still loading —
    `browser_wait`.
    - **Critical — verify navigation reached the target.** After
      `browser_navigate`, anti-bot services (Indeed, LinkedIn, Workday,
