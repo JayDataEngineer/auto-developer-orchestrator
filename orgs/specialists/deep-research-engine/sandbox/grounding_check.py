@@ -176,6 +176,176 @@ def _generate_variants(entity: str) -> list[str]:
     return list(set(variants))
 
 
+# ---------------------------------------------------------------------------
+# Phonetic ASR resolution
+#
+# ASR routinely garbles proper nouns: "Threema" → "Thrima", "Meshtastic" →
+# "fishastic", "Belmont" → "Bellmont". The exact-match + variant generators
+# above can't catch these because the edit distance is too high for simple
+# substitution. We need PHONETIC matching: do the entity and a corpus word
+# sound the same when spoken?
+#
+# Two strategies, both required:
+#   1. Levenshtein distance ≤ threshold (catches vowel swaps: Threema→Thrima)
+#   2. Soundex code match (catches consonant swaps: Meshtastic→fishastic-ish)
+# The combination catches real-world ASR garbling that would otherwise produce
+# false UNGROUND verdicts — accusing the DRE of hallucination when the entity
+# IS in the source data, just phonetically distorted.
+# ---------------------------------------------------------------------------
+
+def _levenshtein(s1: str, s2: str) -> int:
+    """Edit distance — minimum single-char inserts/deletes/substitutions."""
+    if len(s1) < len(s2):
+        s1, s2 = s2, s1
+    if len(s2) == 0:
+        return len(s1)
+    prev_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        curr_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = prev_row[j + 1] + 1
+            deletions = curr_row[j] + 1
+            substitutions = prev_row[j] + (c1 != c2)
+            curr_row.append(min(insertions, deletions, substitutions))
+        prev_row = curr_row
+    return prev_row[-1]
+
+
+def _soundex(word: str) -> str:
+    """Standard 4-char Soundex code. Words that sound similar get the same code."""
+    word = re.sub(r"[^A-Za-z]", "", word).upper()
+    if not word:
+        return ""
+    # Soundex digit mapping
+    codes = {
+        "B": "1", "F": "1", "P": "1", "V": "1",
+        "C": "2", "G": "2", "J": "2", "K": "2", "Q": "2", "S": "2", "X": "2", "Z": "2",
+        "D": "3", "T": "3",
+        "L": "4",
+        "M": "5", "N": "5",
+        "R": "6",
+    }
+    # First letter is kept
+    result = word[0]
+    prev_code = codes.get(word[0], "")
+    for ch in word[1:]:
+        code = codes.get(ch, "")
+        if code and code != prev_code:
+            result += code
+            if len(result) == 4:
+                break
+        prev_code = code
+    return (result + "000")[:4]
+
+
+def _corpus_word_index(corpus_lower: str) -> dict[str, list[str]]:
+    """Build a Soundex → [words] index from the corpus for phonetic lookup.
+
+    Only call once per check (expensive). Returns a dict mapping each Soundex
+    code to the list of unique corpus words with that code. Used by the
+    phonetic matcher to find words that sound like the entity.
+    """
+    words = set(re.findall(r"[a-z]{3,}", corpus_lower))
+    index: dict[str, list[str]] = {}
+    for w in words:
+        code = _soundex(w)
+        if code:
+            index.setdefault(code, []).append(w)
+    return index
+
+
+# Module-level cache so we only build the phonetic index once per check() call
+_PHONETIC_INDEX: dict[str, list[str]] | None = None
+
+
+def _check_phonetic(entity: str, corpus_lower: str) -> tuple[str, str] | None:
+    """Phonetic ASR matching — catches Threema→Thrima, Meshtastic→fishastic.
+
+    Returns (status, evidence) if a phonetic match is found, None otherwise.
+    Uses three strategies:
+      1. Soundex code match + Levenshtein verify (catches Threema→Thrima:
+         both Soundex T650, Levenshtein 2)
+      2. Substring overlap: entity + corpus word share a 4+ char substring,
+         verified by Levenshtein (catches Meshtastic→fishastic: share "astic",
+         Levenshtein 3, but different Soundex codes M230 vs F230)
+      3. Levenshtein scan of similar-length words (catches vowel-only swaps
+         that Soundex misses and substring overlap doesn't trigger on)
+    """
+    global _PHONETIC_INDEX
+    if _PHONETIC_INDEX is None:
+        _PHONETIC_INDEX = _corpus_word_index(corpus_lower)
+
+    entity_lower = entity.lower()
+    # Extract the distinctive part of the entity (strip stopwords/state codes)
+    tokens = re.findall(r"[a-z]{3,}", entity_lower)
+    _STOP = {"the", "and", "for", "ma", "fl", "tx", "ny", "ct", "co", "ca"}
+    distinctive = [t for t in tokens if t not in _STOP]
+    if not distinctive:
+        distinctive = tokens
+
+    # Build the set of all unique corpus words once for strategies 2+3
+    all_corpus_words: set[str] | None = None
+
+    for token in distinctive:
+        if len(token) < 4:
+            continue  # too short for reliable phonetic matching
+
+        # Strategy 1: Soundex match — find corpus words with same phonetic code
+        token_code = _soundex(token)
+        if token_code and token_code in _PHONETIC_INDEX:
+            max_dist_sdx = max(1, len(token) // 3)
+            for candidate in _PHONETIC_INDEX[token_code]:
+                if candidate == token:
+                    continue
+                dist = _levenshtein(token, candidate)
+                if dist <= max_dist_sdx:
+                    return ("ASR_VARIANT",
+                            f"phonetic match: '{token}' ≈ '{candidate}' in corpus "
+                            f"(Soundex {token_code}, Levenshtein {dist})")
+
+        # Strategy 2: Substring overlap — extract 4-char substrings from the
+        # token, find corpus words sharing any, verify with Levenshtein.
+        # This catches Meshtastic→fishastic (share "astic") where Soundex
+        # fails because the first letters differ (M vs F).
+        if len(token) >= 6:
+            substrings = {token[i:i+4] for i in range(len(token) - 3)}
+            # Scan corpus words of similar length (±2)
+            if all_corpus_words is None:
+                all_corpus_words = set(re.findall(r"[a-z]{4,}", corpus_lower))
+            max_dist_substr = max(2, len(token) // 3)
+            for candidate in all_corpus_words:
+                if candidate == token:
+                    continue
+                if abs(len(candidate) - len(token)) > 3:
+                    continue
+                # Quick check: does the candidate share a 4-char substring?
+                cand_subs = {candidate[i:i+4] for i in range(len(candidate) - 3)}
+                if substrings & cand_subs:
+                    dist = _levenshtein(token, candidate)
+                    if 0 < dist <= max_dist_substr:
+                        return ("ASR_VARIANT",
+                                f"phonetic match: '{token}' ≈ '{candidate}' in corpus "
+                                f"(substring overlap, Levenshtein {dist})")
+
+        # Strategy 3: Direct Levenshtein scan for short entities (≤7 chars).
+        # Only for very short words where strategies 1+2 might miss due to
+        # different first letter + no 4-char substring overlap.
+        if len(token) <= 7 and all_corpus_words is not None:
+            max_dist_lev = max(1, len(token) // 4)
+            for candidate in all_corpus_words:
+                if candidate == token:
+                    continue
+                if abs(len(candidate) - len(token)) > 2:
+                    continue
+                dist = _levenshtein(token, candidate)
+                if 0 < dist <= max_dist_lev:
+                    return ("ASR_VARIANT",
+                            f"phonetic match: '{token}' ≈ '{candidate}' in corpus "
+                            f"(Levenshtein {dist})")
+
+    return None
+
+
 def _check_entity(entity: str, corpus_lower: str, category: str = "") -> tuple[str, str]:
     """Check if entity appears in corpus. Returns (status, evidence).
 
@@ -189,6 +359,10 @@ def _check_entity(entity: str, corpus_lower: str, category: str = "") -> tuple[s
          "Belmont, MA" → "Belmont". This catches cases where first/last name
          appear separately in the corpus but never as a bigram.
       4. For locations "City, ST": check "City" alone (the state is implied).
+      5. Phonetic ASR matching (Threema→Thrima, Meshtastic→fishastic).
+         Catches ASR garbling that exact/variant/token matching misses.
+         This is the defense against false-positive UNGROUND verdicts for
+         entities the DRE correctly identified from phonetically-garbled ASR.
     """
     # 1. Direct match
     if entity.lower() in corpus_lower:
@@ -221,7 +395,16 @@ def _check_entity(entity: str, corpus_lower: str, category: str = "") -> tuple[s
             if len(tok) >= 4 and tok.lower() in corpus_lower:
                 return ("GROUNDED", f"token match: '{tok}' (from '{entity}')")
 
-    return ("UNGROUND", f"'{entity}' not found in corpus (phrase, variant, or token)")
+    # 4. Phonetic ASR matching — the Threema→Thrima, Meshtastic→fishastic fix.
+    #    ASR garbles proper nouns phonetically. Exact/variant/token matching
+    #    can't catch this. Soundex + Levenshtein can. This runs AFTER the
+    #    above checks to avoid false positives on entities that ARE in the
+    #    corpus in a non-phonetic form.
+    phonetic = _check_phonetic(entity, corpus_lower)
+    if phonetic:
+        return phonetic
+
+    return ("UNGROUND", f"'{entity}' not found in corpus (phrase, variant, token, or phonetic)")
 
 
 def _extract_strings_from_json(obj, min_len: int = 3) -> list[str]:
@@ -306,6 +489,10 @@ def check(report_path: Path, corpus_dirs: list[Path]) -> dict:
         corpus_parts.append(_load_corpus(d, exclude=_exclude))
     corpus_text = "\n".join(corpus_parts)
     corpus_lower = corpus_text.lower()
+
+    # Reset the phonetic index cache — it's corpus-specific
+    global _PHONETIC_INDEX
+    _PHONETIC_INDEX = None
 
     print(f"[grounding] report: {report_path} ({len(report_text)} chars)", file=sys.stderr)
     print(f"[grounding] corpus: {len(corpus_dirs)} dirs ({len(corpus_text)} chars, {len(corpus_text.split())} words)", file=sys.stderr)
