@@ -132,10 +132,21 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # multilingual embedding model (1024-dim, MTEB v2 69.0, 94 languages). torch
 # is pinned to the CPU wheel to avoid pulling ~2GB of CUDA blobs. The model
 # weights download to HF_HOME on first use (~1.2GB).
+#
+# resemblyzer + librosa + soundfile + scikit-learn: required by the DRE voice
+# clustering helper (sandbox/voice_embed.py). resemblyzer's VoiceEncoder is a
+# WeSpeaker-style ResNet trained on VoxCeleb — 256-d L2-normalized speaker
+# embeddings, open weights (NOT gated, unlike pyannote). librosa resamples
+# 48kHz Telegram voice notes to the 16kHz the encoder expects. scikit-learn
+# provides HDBSCAN for clustering. python3-dev lets the webrtcvad C extension
+# build at install time (resemblyzer uses it for VAD trimming).
+RUN apt-get update && apt-get install -y --no-install-recommends python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 RUN python3 -m pip install seleniumbase requests beautifulsoup4 Pillow httpx \
         onnxruntime-genai numpy \
     && python3 -m pip install --index-url https://download.pytorch.org/whl/cpu torch \
     && python3 -m pip install sentence-transformers \
+    && python3 -m pip install resemblyzer librosa soundfile scikit-learn \
     && rm -rf /root/.cache/pip
 ENV HF_HOME=/data/hf-cache
 
