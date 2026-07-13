@@ -186,3 +186,47 @@ def test_browser_vision_enabled_default_on(monkeypatch):
 def test_browser_vision_enabled_opt_out(monkeypatch):
     monkeypatch.setenv("PUX_BROWSER_VISION", "0")
     assert browser_vision_enabled() is False
+
+
+# --- per-action screenshot policy --------------------------------------------
+# Only tools whose slug is in _SCREENSHOT_SLUGS get a screenshot; everything
+# else returns text-only (the return value / SoM map is ground truth, the
+# agent calls browser_screenshot explicitly when it wants to look). This cuts
+# ~60% of vision tokens (type/scroll/evaluate/extract are high-frequency).
+
+@pytest.mark.parametrize("slug", [
+    "type", "press", "wait", "scroll", "scroll_into_view",
+    "evaluate", "extract", "find_text", "upload", "download",
+    "save_session", "restore_session", "a11y", "dropdown_options",
+    "iframe", "tabs", "close_tab", "save_screenshot", "warmup_history",
+    "solve_captcha",
+])
+def test_text_only_slugs_skip_screenshot(slug):
+    """High-frequency non-visual slugs must NOT attach a screenshot — the result
+    passes through as the raw text ToolMessage (no Command, no image fetch)."""
+    exec_client = _FakeExec()
+    mw = BrowserVisionMiddleware(exec_client)
+    name = f"pux_sandbox_browser_{slug}"
+    tm = _text_tm({"ok": True, "screenshot_path": "/tmp/shot.png"}, name=name)
+    out = mw.wrap_tool_call(_req(name), _handler_returning(tm))
+    assert out is tm  # passthrough — no enrichment, no fetch
+    assert exec_client.calls == []  # zero base64 fetches
+
+
+@pytest.mark.parametrize("slug", [
+    "navigate", "search", "go_back", "new_tab", "switch_tab",
+    "click", "click_at", "hover", "drag", "select_dropdown",
+    "accept_cookies", "uc", "screenshot",
+])
+def test_visual_slugs_attach_screenshot(slug):
+    """Slugs in the screenshot policy set DO attach the image (Command with the
+    companion HumanMessage)."""
+    mw = BrowserVisionMiddleware(_FakeExec())
+    name = f"pux_sandbox_browser_{slug}"
+    tm = _text_tm({"ok": True, "screenshot_path": "/tmp/shot.png"}, name=name)
+    out = mw.wrap_tool_call(_req(name), _handler_returning(tm))
+    assert isinstance(out, Command)  # enriched
+    msgs = out.update["messages"]
+    assert len(msgs) == 2
+    assert isinstance(msgs[1], HumanMessage)
+    assert [b["type"] for b in msgs[1].content] == ["text", "image"]

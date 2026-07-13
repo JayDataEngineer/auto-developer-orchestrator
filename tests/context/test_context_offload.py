@@ -200,6 +200,116 @@ def test_non_retrieval_tool_with_same_size_does_offload(tmp_path):
     assert store.recall_blob(_extract_handle(out.content)) == BIG
 
 
+# --- browser structural offload (cooperation with BrowserVisionMiddleware) ----
+
+
+import json as _json
+from langchain_core.messages import HumanMessage as _HumanMessage
+from langgraph.types import Command as _Command
+
+
+def _browser_payload(*, text="x" * 5000, links=None, images=None, url="https://x"):
+    """A realistic browser page-result payload over the 8000-char threshold."""
+    links = links or [{"text": f"link {i}", "url": f"https://x/{i}"} for i in range(30)]
+    images = images or [{"src": f"https://x/{i}.png", "alt": ""} for i in range(50)]
+    return {
+        "ok": True,
+        "page_data": {"title": "Some Page", "url": url, "text": text,
+                       "links": links, "images": images},
+        "element_map": [{"index": 1, "selector": "button#go"}],
+        "screenshot_path": "/tmp/shot.png",
+    }
+
+
+def test_offload_trims_browser_payload_heavy_fields(tmp_path):
+    """A browser ToolMessage over threshold gets its page_data.{text,links,images}
+    stashed; the skeleton (ok, url, title, element_map, screenshot_path) stays
+    inline so the agent can verify navigation + click by index without a recall."""
+    store = EventStore(tmp_path / "events.db")
+    payload = _browser_payload()
+    full = _json.dumps(payload)
+    assert len(full) > 8000  # over threshold
+    out = _offload(
+        _tm(full, name="pux_sandbox_browser_navigate"), store,
+        "pux_sandbox_browser_navigate", threshold=8000, preview=500,
+    )
+    assert isinstance(out, ToolMessage)
+    slim = _json.loads(out.content)
+    # skeleton kept inline
+    assert slim["ok"] is True
+    assert slim["page_data"]["url"] == "https://x"
+    assert slim["page_data"]["title"] == "Some Page"
+    assert slim["element_map"] == payload["element_map"]
+    assert slim["screenshot_path"] == "/tmp/shot.png"
+    # heavy fields gone from inline view
+    assert "links" not in slim["page_data"]
+    assert "images" not in slim["page_data"]
+    # 200-char text preview kept for orientation
+    assert len(slim["page_data"]["text"]) <= 201
+    # note + handle present
+    assert "context_note" in slim
+    handle = slim["context_note"].split("ctx_recall(")[1].split(")")[0].strip("'\"")
+    # full payload recoverable
+    assert _json.loads(store.recall_blob(handle)) == payload
+    # slim is dramatically smaller
+    assert len(out.content) < len(full) / 2
+
+
+def test_offload_passes_small_browser_result_through(tmp_path):
+    """A browser result under threshold (small page) stays inline — no stash
+    friction for tiny pages where the body text is cheap enough to keep."""
+    store = EventStore(tmp_path / "events.db")
+    payload = {"ok": True, "page_data": {"title": "tiny", "url": "https://x", "text": "hi"},
+               "element_map": [], "screenshot_path": "/tmp/s.png"}
+    original = _tm(_json.dumps(payload), name="pux_sandbox_browser_navigate")
+    out = _offload(original, store, "pux_sandbox_browser_navigate",
+                   threshold=8000, preview=500)
+    assert out is original  # untouched — under threshold
+
+
+def test_offload_command_trims_text_keeps_image(tmp_path):
+    """The real production path: BrowserVisionMiddleware (innermost) wraps the
+    result as Command([text_tm, image_human]) BEFORE ContextMiddleware sees it.
+    _offload must reach inside, trim the text TM, and rebuild the Command with
+    the image HumanMessage PRESERVED."""
+    store = EventStore(tmp_path / "events.db")
+    payload = _browser_payload()
+    tm = _tm(_json.dumps(payload), name="pux_sandbox_browser_navigate")
+    # the companion image HumanMessage the vision middleware attached
+    img_human = _HumanMessage(content=[
+        {"type": "text", "text": "[screenshot result for call_1]"},
+        {"type": "image", "base64": "iVBOR", "mime_type": "image/png"},
+    ])
+    command = _Command(update={"messages": [tm, img_human]})
+    out = _offload(command, store, "pux_sandbox_browser_navigate",
+                   threshold=8000, preview=500)
+    assert isinstance(out, _Command)
+    msgs = out.update["messages"]
+    assert len(msgs) == 2
+    # text TM was trimmed (slim JSON, heavy fields gone)
+    slim = _json.loads(msgs[0].content)
+    assert "links" not in slim["page_data"]
+    assert "images" not in slim["page_data"]
+    assert slim["ok"] is True
+    # image HumanMessage is PRESERVED byte-for-byte (same object)
+    assert msgs[1] is img_human
+    assert msgs[1].content[1]["base64"] == "iVBOR"
+    # tool_call_id preserved so the reducer still pairs it
+    assert msgs[0].tool_call_id == "call_1"
+
+
+def test_offload_command_unchanged_when_nothing_to_trim(tmp_path):
+    """A Command whose text TM is under threshold passes through unchanged —
+    no needless rebuild."""
+    store = EventStore(tmp_path / "events.db")
+    tm = _tm("small result", name="pux_sandbox_browser_type")
+    img_human = _HumanMessage(content=[{"type": "text", "text": "x"}])
+    command = _Command(update={"messages": [tm, img_human]})
+    out = _offload(command, store, "pux_sandbox_browser_type",
+                   threshold=8000, preview=500)
+    assert out is command  # identity — nothing trimmed
+
+
 # --- helper ------------------------------------------------------------------
 
 
