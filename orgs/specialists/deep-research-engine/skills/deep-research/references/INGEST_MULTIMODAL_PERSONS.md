@@ -222,5 +222,37 @@ voice segment). Review them manually and resolve or leave deferred.
   co-occurrence, not vector similarity, to bridge modalities.
 - **Empty clusters are noise.** `cluster_id = -1` is HDBSCAN noise — never
   link or resolve it.
+
+## Implementation
+
+The strategies above are implemented in `sandbox/resolve_identities.py`. Run it
+after `close_graph_gaps.py`:
+
+```bash
+python3 sandbox/resolve_identities.py
+```
+
+It executes all 6 steps automatically: face distributor recording, voice
+cluster node creation + sender resolution, video audio → voice cluster linking,
+video keyframe → face cluster linking (heuristic), voice → identity same_as
+edges, and face ↔ voice cross-linking via video co-occurrence.
+
+### Prerequisites
+
+This script assumes these have already run:
+1. `face_client.py` — face detection + embeddings
+2. `voice_embed.py` — voice clustering (resemblyzer)
+3. `close_graph_gaps.py` — entity extraction, person nodes, appears_in edges
+4. `video_summarize.py` — (optional) video summaries + diarization.
+   See `SUMMARIZE_VIDEOS.md`. Not required for identity linking, but video
+   summaries enrich the graph with `video_summary` fields on item records.
+
+### Video audio in voice clusters
+
+Voice clustering (`voice_embed.py`) processes ALL audio files, including
+video audio tracks extracted as `IMG_XXXX.wav`. This means video items
+automatically get voice cluster assignments. `resolve_identities.py` creates
+`speaks_in` edges from voice cluster person nodes to video items based on
+these assignments — no separate video audio processing needed.
 - **One good signal beats three weak ones.** A single video co-occurrence
   (strategy B) is stronger evidence than sender attribution alone (C+F).
