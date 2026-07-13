@@ -123,8 +123,10 @@ def gap3_4_person_nodes_and_appears_in():
         )
         item_ids = [r["item_id"] for r in (items_res[0]["result"] if items_res else []) if r.get("item_id")]
         for iid in item_ids:
+            iid_safe = str(iid).replace(":", "_")
             try:
-                sql(f"RELATE person:face_cluster_{cid} -> appears_in -> {iid};")
+                sql(f"RELATE person:face_cluster_{cid} -> appears_in -> {iid} "
+                    f"SET id = appears_in:fc{cid}_{iid_safe};")
                 edges += 1
             except Exception:
                 pass
@@ -178,7 +180,8 @@ def gap5_extracted_from_edges():
             continue
         sql(f"UPSERT person:ent_{sid} SET canonical_name = {jval(p)}, "
             f"role = 'mentioned', notes = 'Extracted from audio intel summaries.';")
-        sql(f"RELATE source:audio_intel -> extracted_from -> person:ent_{sid};")
+        sql(f"RELATE source:audio_intel -> extracted_from -> person:ent_{sid} "
+            f"SET id = extracted_from:person_ent_{sid};")
         linked += 1
     for o in all_orgs:
         if not o or len(o) < 3:
@@ -187,7 +190,8 @@ def gap5_extracted_from_edges():
         if not sid:
             continue
         sql(f"UPSERT organization:ent_{sid} SET name = {jval(o)};")
-        sql(f"RELATE source:audio_intel -> extracted_from -> organization:ent_{sid};")
+        sql(f"RELATE source:audio_intel -> extracted_from -> organization:ent_{sid} "
+            f"SET id = extracted_from:org_ent_{sid};")
         linked += 1
     for t in all_topics:
         if not t or len(t) < 3:
@@ -197,7 +201,8 @@ def gap5_extracted_from_edges():
             continue
         sql(f"UPSERT topic:ent_{sid} SET name = {jval(t)}, "
             f"summary = 'Extracted from audio intel summaries.';")
-        sql(f"RELATE source:audio_intel -> extracted_from -> topic:ent_{sid};")
+        sql(f"RELATE source:audio_intel -> extracted_from -> topic:ent_{sid} "
+            f"SET id = extracted_from:topic_ent_{sid};")
         linked += 1
     for l in all_locs:
         if not l or len(l) < 3:
@@ -206,7 +211,8 @@ def gap5_extracted_from_edges():
         if not sid:
             continue
         sql(f"UPSERT location:ent_{sid} SET name = {jval(l)};")
-        sql(f"RELATE source:audio_intel -> extracted_from -> location:ent_{sid};")
+        sql(f"RELATE source:audio_intel -> extracted_from -> location:ent_{sid} "
+            f"SET id = extracted_from:location_ent_{sid};")
         linked += 1
     print(f"  gap 5: extracted people={len(all_people)} orgs={len(all_orgs)} "
           f"topics={len(all_topics)} locs={len(all_locs)}; {linked} edges created")
@@ -238,8 +244,11 @@ def gap6_mentions_edges():
         for it in items:
             if not isinstance(it, dict) or not it.get("id"):
                 continue
+            tid_safe = str(tid).replace(":", "_")
+            iid_safe = str(it["id"]).replace(":", "_")
             try:
-                sql(f"RELATE {tid} -> mentions -> {it['id']};")
+                sql(f"RELATE {tid} -> mentions -> {it['id']} "
+                    f"SET id = mentions:{tid_safe}_{iid_safe};")
                 total += 1
             except Exception:
                 pass
@@ -269,8 +278,10 @@ def gap7_sender_authored_edges():
         # WHERE-filtered RELATE target).
         items_res = sql(f"SELECT id FROM item WHERE sender = {jval(name)};")
         for it in (items_res[0]["result"] if items_res else []):
+            iid_safe = str(it["id"]).replace(":", "_")
             try:
-                sql(f"RELATE person:sender_{sid} -> authored -> {it['id']};")
+                sql(f"RELATE person:sender_{sid} -> authored -> {it['id']} "
+                    f"SET id = authored:sender_{sid}_{iid_safe};")
                 total += 1
             except Exception:
                 pass
