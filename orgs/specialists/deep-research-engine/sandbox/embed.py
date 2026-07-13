@@ -54,7 +54,11 @@ def encode(texts, prompt_name: str | None = None):
 
 def dim() -> int:
     """Return the embedding dimension (1024 for harrier-oss-v1-0.6b)."""
-    return _model().get_sentence_embedding_dimension()
+    m = _model()
+    # sentence-transformers 5.x renamed the method; support both.
+    if hasattr(m, "get_embedding_dimension"):
+        return m.get_embedding_dimension()
+    return m.get_sentence_embedding_dimension()
 
 
 if __name__ == "__main__":
