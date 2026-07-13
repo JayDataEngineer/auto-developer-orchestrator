@@ -78,6 +78,9 @@ services:
       MEDIA_DEVICE: ${MEDIA_DEVICE:-cpu}
       MEDIA_PROFILE: ${MEDIA_PROFILE:-standard}
       MEDIA_IDLE_TIMEOUT: ${MEDIA_IDLE_TIMEOUT:-1800}
+      # cloud_vlm (MiMo-V2.5-Pro video/image/audio understanding) needs the
+      # OpenCode Go API key. Reuses the same key as the LLM provider.
+      MEDIA_CLOUD_VLM_API_KEY: ${OPENCODE_API_KEY:-}
     volumes:
       - media-models:/app/models
     healthcheck:

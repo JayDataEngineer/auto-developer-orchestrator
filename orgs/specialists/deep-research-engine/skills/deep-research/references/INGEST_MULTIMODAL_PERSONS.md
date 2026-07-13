@@ -1,183 +1,226 @@
 # INGEST_MULTIMODAL_PERSONS
 
-Cross-modal person linking. After face clustering (`INGEST_FACE_CLUSTERING_V2`) and voice diarization (`INGEST_AUDIO_DIARIZATION`) have populated `face_appearance` and `speaker_turn` records, this skill links them into unified `person` nodes.
+**Dynamic cross-modal identity linking.** This is the skill that turns separate
+face clusters + voice clusters + extracted names into unified `person` identities.
 
-This is the **second half** of identity resolution. The output is what makes the context engine actually useful — a `person` node with both `face_centroid` AND `voice_centroid` populated can be queried for photos, voice minutes, transcripts, and topics in one shot.
+**Read this AFTER face clustering, voice clustering, and entity extraction have
+run.** You are linking signals they produced — you do NOT cluster or extract here.
 
-Run AFTER `INGEST_FACE_CLUSTERING_V2` and `INGEST_AUDIO_DIARIZATION` (which now uses `embed_voice` per segment).
+## The core principle: DYNAMIC, not hardcoded
 
-## The lip-sync heuristic (v1)
+Every dataset is different. Some have photos + voice notes. Some have only
+video. Some have text only. Some have forwarded photos (sender ≠ subject).
+**You cannot hardcode one linking pipeline.** Instead:
 
-Cross-modal linking uses **temporal co-occurrence**, not vector similarity. Face embeddings (MobileFaceNet, 512-d) and voice embeddings (WeSpeaker, 256-d) don't share a metric space — you can't cosine-compare them. The right signal is **temporal**: who's on camera when this person is speaking?
+1. **INSPECT** what signals exist in THIS dataset
+2. **CHOOSE** which linking strategies apply (table below)
+3. **EXECUTE** them via SurrealQL
+4. **REASON** about ambiguous cases with LLM judgment
 
-### The rule
+Never assume a modality is present. Always query first.
 
-For each `speaker_turn` (segment of voice with `start_sec` + `end_sec` in a video):
+## Step 1 — Inspect what signals exist
 
-1. **Query face_appearances in the same time window:**
-   ```sql
-   SELECT * FROM face_appearance
-   WHERE item_id = $video_id
-     AND frame_sec >= $start_sec
-     AND frame_sec <= $end_sec
+Run these counts. The answers determine which strategies are available:
+
+```
+mcp__surreal__query(sql="
+  RETURN count(SELECT id FROM face_appearance);              -- faces detected?
+  RETURN count(SELECT id FROM face_appearance WHERE cluster_id != -1);  -- face clusters?
+  RETURN count(SELECT id FROM person WHERE voice_cluster_id != NONE);   -- voice clusters?
+  RETURN count(SELECT id FROM speaker_turn);                 -- diarized turns (with timestamps)?
+  RETURN count(SELECT id FROM item WHERE type = 'video');    -- videos present?
+  RETURN count(SELECT id FROM item WHERE type = 'voice');    -- audio-only items?
+  RETURN count(SELECT id FROM item WHERE sender != NONE AND sender != 'Unknown');  -- sender attribution?
+  RETURN count(SELECT id FROM person WHERE role = 'mentioned');  -- entity-extracted names?
+  RETURN count(SELECT id FROM appears_in);                   -- face→item links?
+  RETURN count(SELECT id FROM speaks_in);                    -- voice→item links?
+")
+```
+
+**Decision table** — match signals to strategies:
+
+| Signal present | Strategy | Strength | Section |
+|---|---|---|---|
+| Videos with both face + voice turns (timestamped) | **A. Temporal co-occurrence** (lip-sync) | Very strong | Step 2A |
+| Videos with face_appearance + speaks_in edges | **B. Video item co-occurrence** | Strong | Step 2B |
+| Voice items with sender attribution | **C. Voice → sender** | Strong | Step 2C |
+| Transcripts/captions mention names | **D. Name → cluster** (LLM) | Medium | Step 2D |
+| Photos with multiple faces | **E. Face co-occurrence graph** | Relationship (not identity) | Step 2E |
+| Photos with sender | **F. Face → sender** | WEAK — hint only | Step 2F |
+
+**You choose which to run.** If a dataset has no video, skip A and B entirely.
+If no sender metadata, skip C and F. If no transcript text, skip D.
+
+## Step 2 — Execute the applicable strategies
+
+### 2A. Temporal co-occurrence (lip-sync) — strongest
+
+**Only if:** `speaker_turn` table is non-empty AND face_appearance has `frame_sec`
+timestamps AND videos exist.
+
+For each `speaker_turn` (a voice segment with start/end seconds in a video):
+
+```
+# Find faces on screen during this voice segment
+mcp__surreal__query(sql="
+  SELECT cluster_id, item_id FROM face_appearance
+  WHERE item_id = $video_id
+    AND frame_sec >= $start_sec
+    AND frame_sec <= $end_sec
+    AND cluster_id != -1
+  GROUP BY cluster_id
+")
+```
+
+Decision:
+- **1 face cluster** → this voice cluster and this face cluster are the same identity. RELATE `person:voice_cluster_X -> same_as -> person:face_cluster_Y`.
+- **0 faces** → off-camera speaker. Create `person:voice_only_X`.
+- **2+ faces** → ambiguous. Write a `pending_link` record, defer.
+
+### 2B. Video item co-occurrence — strong (no timestamps needed)
+
+**Only if:** videos exist with both `appears_in` (face) and `speaks_in` (voice) edges.
+
+```
+# Videos where a face cluster and voice cluster both appear
+mcp__surreal__query(sql="
+  SELECT id,
+    ->appears_in->person.face_cluster_id AS face_clusters,
+    <-speaks_in<-person.voice_cluster_id AS voice_clusters
+  FROM item WHERE type = 'video'
+")
+```
+
+For each video: every (face_cluster, voice_cluster) pair that co-occur are
+candidate same-identities. Create `same_as` edges with `evidence: 'video co-occurrence'`.
+If a face+voice pair co-occur in 2+ videos, confidence is high.
+
+### 2C. Voice → sender attribution — strong
+
+**Only if:** voice/audio items have a `sender` field. This is generic — works
+for any messaging dataset (Telegram, WhatsApp, Slack, email).
+
+You send your own voice. So the sender of a voice item IS the speaker:
+
+```
+# Which sender does each voice cluster belong to?
+mcp__surreal__query(sql="
+  SELECT voice_cluster_id,
+         <-speaks_in<-item.sender AS senders,
+         count() AS n
+  FROM person
+  WHERE voice_cluster_id != NONE
+  SPLIT senders
+  GROUP BY voice_cluster_id, senders
+")
+```
+
+If a voice cluster's items are predominantly (≥80%) from one sender, resolve:
+`UPSERT person:resolved_<sender> ...` + `RELATE voice_cluster -> same_as -> resolved`.
+
+**Caveat:** forwarded voice messages break this (the forwarder isn't the
+speaker). Check the `forwarded` field on items — if true, skip.
+
+### 2D. Name → cluster via LLM reasoning — medium
+
+**Only if:** transcripts or captions contain names (entity extraction produced
+`person:ent_*` nodes).
+
+This is where YOU (the LLM) add value a script can't. Reason about context:
+
+1. Query which names appear in which transcripts:
    ```
+   mcp__surreal__query(sql="
+     SELECT <-extracted_from<-source.text AS context
+     FROM person:ent_grady
+   ")
+   ```
+2. Query the transcripts where each voice cluster speaks:
+   ```
+   mcp__surreal__query(sql="
+     SELECT ->speaks_in->item.text AS said_by_cluster
+     FROM person:voice_cluster_5
+   ")
+   ```
+3. **Reason:** if transcript text says "Grady" while cluster 5 is speaking,
+   cluster 5 is probably Grady. Create the `same_as` edge.
 
-2. **Apply the rule:**
-   - **1 face** → the face's cluster and this voice's cluster are the same identity. Link them.
-   - **N faces (N ≥ 2)** → ambiguous. Write a `pending_link` record. v2 will resolve.
-   - **0 faces** → off-camera speaker. Write a `voice_only_person` node.
+This requires judgment — do it yourself, don't try to script it.
 
-### Why "1 face = link" is acceptable for v1
+### 2E. Face co-occurrence graph — relationship, not identity
 
-In single-speaker videos (the 80% case for typical voice-memo / direct-to-camera clips), there's exactly one person on camera while they talk. The heuristic assumes no cutaways. For multi-speaker videos, we defer rather than guess wrong.
+**Only if:** photos contain 2+ detected faces.
 
-## Pipeline
-
-### Step 1 — Verify upstream
-
-```
-# Faces clustered?
-mcp__surreal__query(sql="RETURN count(SELECT id FROM face_appearance)")
-
-# Voice turns clustered?
-mcp__surreal__query(sql="RETURN count(SELECT id FROM speaker_turn)")
-```
-
-If either count is 0, upstream ingestion (face clustering / diarization) hasn't run yet. Stop and re-delegate to the ingest pipeline.
-
-### Step 2 — Build voice clusters (if not already)
-
-If `speaker_turn` records have raw embeddings but no `voice_cluster_id`, cluster them now:
+Faces appearing together across multiple photos are RELATED (friends,
+associates) — not the same identity. Build a social graph:
 
 ```
-# Extract embeddings
-mcp__surreal__query(sql="SELECT embedding FROM speaker_turn")
-
-# Cluster via media-mcp tool
-mcp__media__cluster_embeddings(embeddings=[...])
-
-# Write voice_cluster_id back to each speaker_turn
-mcp__surreal__query(sql="UPDATE speaker_turn:<id> SET voice_cluster_id = <label>")
+# For each photo, which face clusters appear together?
+mcp__surreal__query(sql="
+  SELECT item_id, cluster_id FROM face_appearance
+  WHERE cluster_id != -1 ORDER BY item_id
+")
 ```
 
-### Step 3 — Walk every speaker_turn
+For each photo with faces [A, B, C]: create `associated_with` edges between
+every pair. This is a relationship graph, not an identity claim.
 
-For each video with speaker_turns:
+### 2F. Face → sender — WEAK, hint only
 
-```python
-# Pseudocode — write as make_script
-for video_id in all_videos_with_turns:
-    turns = surreal_query(f"SELECT * FROM speaker_turn WHERE item_id = {video_id} ORDER BY start_sec")
-    for turn in turns:
-        # Find faces in the same time window
-        faces = surreal_query(f"""
-            SELECT * FROM face_appearance
-            WHERE item_id = {video_id}
-              AND frame_sec >= {turn.start_sec}
-              AND frame_sec <= {turn.end_sec}
-        """)
+**Only if:** photos have sender attribution.
 
-        unique_face_clusters = set(f.cluster_id for f in faces if f.cluster_id != -1)
-
-        if len(unique_face_clusters) == 1:
-            # LINK: face cluster == voice cluster
-            face_cluster = unique_face_clusters.pop()
-            voice_cluster = turn.voice_cluster_id
-
-            # Upsert unified person node
-            person_id = f"person_{face_cluster}"  # reuse face cluster ID
-            surreal_upsert_person(person_id, voice_centroid=turn.embedding)
-
-            # Edges
-            surreal_relate(f"person:{person_id}", "speaks_in", f"item:{video_id}",
-                          {"role": "speaker", "voice_minutes": turn.duration_sec / 60})
-
-        elif len(unique_face_clusters) >= 2:
-            # DEFER: write pending_link
-            surreal_insert("pending_link", {
-                "video_id": video_id,
-                "start_sec": turn.start_sec,
-                "end_sec": turn.end_sec,
-                "face_cluster_ids": list(unique_face_clusters),
-                "voice_cluster_id": turn.voice_cluster_id,
-                "reason": "ambiguous_multi_face"
-            })
-
-        else:
-            # 0 faces: off-camera speaker
-            voice_only_id = f"voice_only_{turn.voice_cluster_id}"
-            surreal_upsert_person(voice_only_id, voice_centroid=turn.embedding)
-            surreal_relate(f"person:{voice_only_id}", "speaks_in", f"item:{video_id}",
-                          {"role": "off_camera_speaker"})
-```
-
-### Step 4 — Cross-modal merge pass
-
-After the per-video walk, you have:
-- `person_0`, `person_1`, ... from face clustering (face_centroid only)
-- `voice_only_N` from off-camera speakers (voice_centroid only)
-- Linked `person_X` nodes from successful lip-sync (BOTH centroids)
-
-For `pending_link` records where the voice_cluster_id matches a successfully linked person in another video, resolve the link:
-
-```python
-for pending in pending_links:
-    # Did this voice_cluster_id get resolved elsewhere?
-    resolved = surreal_query(f"""
-        SELECT id, face_centroid FROM person
-        WHERE voice_centroid IS NOT NONE
-          AND id IN (SELECT VALUE ->speaks_in<-person FROM item
-                     WHERE voice_cluster_id = {pending.voice_cluster_id})
-    """)
-    if resolved:
-        # The voice cluster = this face cluster; resolve pending
-        surreal_delete("pending_link", pending.id)
-        # Update face cluster's person to add voice_centroid
-```
-
-### Step 5 — Final person rollup
-
-After all linking, every `person` should have at least one of `face_centroid` / `voice_centroid`. Compute aggregate fields:
-
-```bash
-for person in persons:
-    face_count = count(face_appearance where cluster_id == person.face_cluster_id)
-    voice_minutes = sum(speaker_turn.duration_sec where voice_cluster_id == person.voice_cluster_id) / 60
-    update person set face_count = $face_count, voice_minutes = $voice_minutes
-```
-
-## Smoke test
-
-End-to-end on a tiny dataset:
-```bash
-# 1 video, 1 speaker, 30 seconds
-# Expected: 1 person node with face_centroid + voice_centroid + appears_in + speaks_in edges
-
-# Verify
-mcp__surreal__query(sql="SELECT *, ->appears_in->item.path AS photos, ->speaks_in->item.id AS videos FROM person WHERE face_centroid != NONE AND voice_centroid != NONE")
-```
-
-Expected: at least 1 person with non-empty `photos` + `videos` arrays.
-
-## Pitfalls
-
-1. **Frame_sec vs message timestamp.** `face_appearance.frame_sec` is seconds from start of video. `speaker_turn.start_sec` is also seconds from start of video. Don't confuse either with the source-format message timestamp (which is wall-clock).
-2. **Cluster ID collision.** Face cluster IDs (`person_0`, `person_1`) and voice cluster IDs (`voice_cluster_0`, `voice_cluster_1`) come from independent HDBSCAN runs. The ID space collides if you reuse integers. Disambiguate via prefix (`person_fc_0` vs `person_vc_0`) or via separate tables until linking is complete.
-3. **Don't pad voice embeddings to face dim.** 256-d voice + 512-d face — leave them in separate fields. The `person` node has `face_centroid[512]` and `voice_centroid[256]` as separate optional fields.
-4. **`pending_link` is not a failure.** v1 defers multi-face cases by design. The auditor counts these as `ambiguous_deferred` and they're expected for any video with cutaways.
-5. **Embeddings must be saved.** Re-running this skill on existing `face_appearance` records requires their `embedding` field to be intact. If you wiped embeddings after clustering (to save space), re-run `INGEST_FACE_CLUSTERING_V2` from step 2.
-
-## Verification
+The sender of a photo MIGHT be the subject, but forwarding breaks this
+(people forward others' photos). Record the distributor, do NOT claim identity:
 
 ```
-# Cross-modal success rate
-mcp__surreal__query(sql="RETURN count(SELECT id FROM person WHERE face_centroid != NONE AND voice_centroid != NONE)")
-
-# Deferred (multi-face) cases
-mcp__surreal__query(sql="RETURN count(SELECT id FROM pending_link)")
-
-# Off-camera speakers
-mcp__surreal__query(sql="RETURN count(SELECT id FROM person WHERE face_centroid = NONE AND voice_centroid != NONE)")
+UPDATE person:face_cluster_X SET distributed_by = $sender,
+  notes = 'Photos of this face were distributed by ' + $sender +
+          '. Sender is the distributor, NOT necessarily the subject.'
 ```
 
-For a typical multimodal corpus, expect roughly: linked ≥ 1 (criteria #6), deferred depends on video count, voice_only depends on off-camera speech.
+Never create a `same_as` edge from this signal alone.
+
+## Step 3 — Create unified identity nodes
+
+After linking, group clusters that are `same_as`-connected into canonical
+identity nodes:
+
+```
+UPSERT person:resolved_<name> SET
+  canonical_name = $name,
+  role = 'resolved_identity',
+  face_cluster_ids = $linked_face_clusters,
+  voice_cluster_ids = $linked_voice_clusters;
+```
+
+Then everything connects: a photo → `appears_in` → face_cluster → `same_as` →
+resolved identity ← `same_as` ← voice_cluster ← `speaks_in` ← audio clip.
+One query surfaces all media for a person across all modalities.
+
+## Step 4 — Audit
+
+```
+mcp__surreal__query(sql="
+  RETURN count(SELECT id FROM same_as);
+  RETURN count(SELECT id FROM person WHERE role = 'resolved_identity');
+  RETURN count(SELECT id FROM pending_link);
+")
+```
+
+If `pending_link` is non-empty, there are AMBIGUOUS cases (2+ faces during one
+voice segment). Review them manually and resolve or leave deferred.
+
+## Common pitfalls
+
+- **Don't assume video exists.** Most messaging datasets are photos + voice
+  notes, no video. Skip strategies A and B if `count(video items) = 0`.
+- **Don't assume sender = subject for photos.** Forwarded photos, news
+  clippings, and screenshots break face→sender attribution.
+- **Don't link across metric spaces.** Face embeddings (512-d MobileFaceNet)
+  and voice embeddings (256-d WeSpeaker) can't be cosine-compared. Use
+  co-occurrence, not vector similarity, to bridge modalities.
+- **Empty clusters are noise.** `cluster_id = -1` is HDBSCAN noise — never
+  link or resolve it.
+- **One good signal beats three weak ones.** A single video co-occurrence
+  (strategy B) is stronger evidence than sender attribution alone (C+F).
