@@ -246,9 +246,11 @@ def link_to_db(stem, summary, segments):
         iid = items[0]["id"]
         # Truncate BEFORE json.dumps — cutting after encoding can split a
         # multi-byte escape (e.g. \u00e) and produce invalid SurrealQL.
-        safe_summary = json.dumps(summary[:7500])
+        # ensure_ascii=False keeps emoji/unicode as UTF-8 instead of surrogate
+        # pairs (😂) which SurrealDB rejects.
+        safe_summary = json.dumps(summary[:7500], ensure_ascii=False)
         sql(f"UPDATE {iid} SET video_summary = {safe_summary}, "
-            f"speaker_turns = {json.dumps(segments[:200])};")
+            f"speaker_turns = {json.dumps(segments[:200], ensure_ascii=False)};")
     except Exception as e:
         print(f"  DB link failed for {stem}: {e}", file=sys.stderr)
 
