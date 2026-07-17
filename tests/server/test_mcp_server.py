@@ -568,3 +568,116 @@ def test_deploy_browser_agent_uses_browser_agent_org(mock_pool):
     # _get_org is called with exactly "browser-agent" (captured by the mock
     # fixture, which sets mock_pool.org from the arg).
     assert mock_pool.org == "browser-agent"
+
+
+# ---------------------------------------------------------------------------
+# web-research proxy (web_search / web_fetch / web_research)
+# ---------------------------------------------------------------------------
+
+import shutil as _shutil
+import socket as _socket
+from mcp.types import TextContent as _MText, ImageContent as _MImg
+
+
+class _FakeResult:
+    """Stand-in for an MCP CallToolResult — content list + is_error flag."""
+    def __init__(self, content, is_error=False):
+        self.content = content
+        self.is_error = is_error
+
+
+def _patch_forward(monkeypatch, captor, content=None, is_error=False, exc=None):
+    """Monkeypatch the single forward seam _forward_to_research_mcp."""
+    import pux_harness.mcp_server as ms
+    async def _fake(url, tool, args):
+        captor["tool"] = tool
+        captor["args"] = dict(args)
+        captor["url"] = url
+        if exc is not None:
+            raise exc
+        return _FakeResult(content or [_MText(type="text", text="ok")], is_error=is_error)
+    monkeypatch.setattr(ms, "_forward_to_research_mcp", _fake)
+
+
+def test_web_search_forwards_query_and_optionals(mock_pool, monkeypatch):
+    cap = {}
+    _patch_forward(monkeypatch, cap, [_MText(type="text", text="result: langgraph is a graph framework")])
+    r = run(_call("web_search", query="langgraph", top_k=5))
+    assert cap["tool"] == "search"
+    assert cap["args"] == {"query": "langgraph", "top_k": 5}
+    assert "langgraph is" in r.content[0].text
+
+
+def test_web_search_omits_none_optionals(mock_pool, monkeypatch):
+    cap = {}
+    _patch_forward(monkeypatch, cap)
+    run(_call("web_search", query="just a query"))
+    assert cap["args"] == {"query": "just a query"}, "None optionals must NOT be forwarded"
+
+
+def test_web_fetch_passes_through_images_inline(mock_pool, monkeypatch):
+    cap = {}
+    _patch_forward(monkeypatch, cap, [
+        _MText(type="text", text="# Page\nhello"),
+        _MImg(type="image", data="ABC==", mimeType="image/png"),
+    ])
+    r = run(_call("web_fetch", url="https://example.com", text_only=True))
+    assert cap["tool"] == "fetch"
+    assert cap["args"]["url"] == "https://example.com"
+    assert cap["args"]["text_only"] is True
+    types = [b.type for b in r.content]
+    assert "text" in types and "image" in types, "fetch image must flow through inline"
+    img = next(b for b in r.content if b.type == "image")
+    assert img.data == "ABC=="
+
+
+def test_web_research_defaults_forwarded(mock_pool, monkeypatch):
+    cap = {}
+    _patch_forward(monkeypatch, cap)
+    run(_call("web_research", query="model context protocol"))
+    assert cap["tool"] == "research"
+    assert cap["args"] == {"query": "model context protocol", "max_results": 3, "depth": "quick"}
+
+
+def test_web_proxy_unreachable_returns_error_string(mock_pool, monkeypatch):
+    cap = {}
+    _patch_forward(monkeypatch, cap, exc=ConnectionRefusedError("connection refused"))
+    r = run(_call("web_search", query="anything"))
+    txt = r.content[0].text
+    assert "Error" in txt
+    assert "unreachable" in txt
+    assert "connection refused" in txt
+
+
+def test_web_proxy_upstream_is_error_surfaced(mock_pool, monkeypatch):
+    cap = {}
+    _patch_forward(monkeypatch, cap,
+                   [_MText(type="text", text="boom: invalid query syntax")], is_error=True)
+    r = run(_call("web_search", query="x"))
+    txt = r.content[0].text
+    assert "Error from web-research-mcp search" in txt
+    assert "boom: invalid query syntax" in txt
+
+
+def _research_mcp_up() -> bool:
+    s = _socket.socket(); s.settimeout(1.0)
+    try:
+        s.connect(("127.0.0.1", 41827))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+@pytest.mark.skipif(not _research_mcp_up(), reason="web-research-mcp not running on :41827")
+def test_web_search_live_integration(mock_pool):
+    """Live: the real web-research-mcp. Proves the proxy wiring end-to-end
+    (connect → initialize → call_tool → coerce → return). Skipped if the
+    server is down so the suite stays hermetic in CI."""
+    r = run(_call("web_search", query="model context protocol anthropic", top_k=3))
+    # Don't assert on result content (the web is non-deterministic); only that
+    # we got a real response back, not an infrastructure error.
+    assert r.is_error is False
+    txt = r.content[0].text if r.content else ""
+    assert "unreachable" not in txt, f"proxy should have reached the live server: {txt[:120]}"
