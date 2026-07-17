@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "pux": {
+      "command": "pux",
+      "args": ["mcp", "--transport", "stdio"],
+      "env": {}
+    }
+  }
+}

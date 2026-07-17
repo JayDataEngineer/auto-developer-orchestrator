@@ -488,3 +488,83 @@ def test_reload_profiles_empty_pool_is_noop(mock_pool):
     r = run(_call("reload_profiles"))
     assert r.is_error is False
     assert "No active orgs" in r.content[0].text
+
+
+# ---------------------------------------------------------------------------
+# deploy_browser_agent
+# ---------------------------------------------------------------------------
+
+_PNG_1X1 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ"
+    "xIsAAAAASUVORK5CYII="
+)
+
+
+def test_deploy_browser_agent_happy_path(mock_pool):
+    """One-shot: new_session on browser-agent + prompt with the task, returns
+    the agent text + stop reason. No session-id leaks to the caller."""
+    mock_pool.org = "browser-agent"
+    mock_pool._prompt_result = ("Page says: Welcome to Example", "", "end_turn", [])
+
+    r = run(_call("deploy_browser_agent", task="Go to https://example.com and summarize"))
+
+    assert r.is_error is False
+    txt = r.content[0].text
+    assert "Welcome to Example" in txt
+    assert "[end_turn]" in txt
+    # new_session + prompt were both called on the browser-agent org
+    assert mock_pool.calls[0][0] == "new_session"
+    assert mock_pool.calls[1][0] == "prompt"
+    assert mock_pool.calls[1][1] is not None  # the generated session id
+
+
+def test_deploy_browser_agent_returns_images_inline(mock_pool, temp_staged):
+    """When the agent produces screenshots, they come back as native MCP
+    ImageContent blocks (so the client SEES them) AND persist to staged/."""
+    mock_pool.org = "browser-agent"
+    mock_pool._prompt_result = (
+        "Here is the screenshot.", "", "end_turn",
+        [{"data": _PNG_1X1, "mime_type": "image/png"}],
+    )
+
+    r = run(_call("deploy_browser_agent", task="screenshot https://example.com"))
+
+    assert r.is_error is False
+    # text block + image block
+    types = [b.type for b in r.content]
+    assert "text" in types and "image" in types
+    img_block = next(b for b in r.content if b.type == "image")
+    assert img_block.data == _PNG_1X1
+    assert img_block.mimeType == "image/png"
+    # persisted to staged/ (temp_staged is the data/ dir; files land in staged/)
+    staged = list((temp_staged / "staged").glob("browser_agent_*.png"))
+    assert len(staged) == 1
+
+
+def test_deploy_browser_agent_infra_error_is_surfaced(mock_pool):
+    """If the browser-agent org fails to boot, the error is returned as text
+    (not raised) so the MCP client gets a usable message."""
+    async def _boom(org):
+        raise RuntimeError("sandbox refused to start")
+    # mock_pool patches _get_org; override it to raise
+    import pux_harness.mcp_server as ms
+    ms._get_org = _boom  # noqa: SLF001
+
+    r = run(_call("deploy_browser_agent", task="anything"))
+
+    assert r.is_error is False
+    assert "Error deploying browser-agent" in r.content[0].text
+    assert "sandbox refused to start" in r.content[0].text
+
+
+def test_deploy_browser_agent_uses_browser_agent_org(mock_pool):
+    """The tool always targets the browser-agent org — the caller cannot
+    redirect it to another org (scoped by design)."""
+    mock_pool.org = "browser-agent"
+    mock_pool._prompt_result = ("ok", "", "end_turn", [])
+
+    run(_call("deploy_browser_agent", task="do something"))
+
+    # _get_org is called with exactly "browser-agent" (captured by the mock
+    # fixture, which sets mock_pool.org from the arg).
+    assert mock_pool.org == "browser-agent"

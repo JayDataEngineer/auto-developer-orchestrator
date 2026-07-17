@@ -1,15 +1,22 @@
 {
   "agent_servers": {
-    "Pux (general)": {
+    "Pux (coder)": {
       "type": "custom",
-      "command": "/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator/scripts/acp-zed.sh",
-      "args": ["--org", "general"],
+      "command": "pux",
+      "args": ["acp", "--org", "coder"],
       "env": {}
     },
-    "Pux (dev-bot)": {
+    "Pux (general)": {
       "type": "custom",
-      "command": "/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator/scripts/acp-zed.sh",
-      "args": ["--org", "dev-bot"],
+      "command": "pux",
+      "args": ["acp", "--org", "general"],
+      "env": {}
+    }
+  },
+  "mcp_servers": {
+    "pux": {
+      "command": "pux",
+      "args": ["mcp", "--transport", "stdio"],
       "env": {}
     }
   }
