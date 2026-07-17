@@ -33,8 +33,8 @@ class MockOrgConnection:
         self.alive = True
         self.calls: list[tuple] = []
         self._next_session_id = "sess-abc123"
-        self._prompt_result: tuple[str, str, str] = (
-            "hello from agent", "thinking...", "end_turn",
+        self._prompt_result: tuple[str, str, str, list] = (
+            "hello from agent", "thinking...", "end_turn", [],
         )
         self._sessions: list[dict] = []
         self._load_result = True
@@ -45,7 +45,8 @@ class MockOrgConnection:
         return self._next_session_id
 
     async def prompt(self, session_id: str,
-                     message: str) -> tuple[str, str, str]:
+                     message: str,
+                     images: list | None = None) -> tuple[str, str, str, list]:
         self.calls.append(("prompt", session_id, message))
         return self._prompt_result
 
@@ -62,6 +63,13 @@ class MockOrgConnection:
 
     async def set_model_raw(self, session_id: str, model: str) -> None:
         self.calls.append(("set_model_raw", session_id, model))
+
+    async def stop(self) -> None:
+        """Stand-in for OrgConnection.stop() — kills the cached ACP subprocess.
+        reload_profiles() calls this to force a fresh process (that re-reads
+        profile yaml) on the next new_session()."""
+        self.calls.append(("stop",))
+        self.alive = False
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +112,21 @@ def no_connection(monkeypatch):
     monkeypatch.setattr(
         mcp_server, "_find_org_for_session", lambda sid: None,
     )
+
+
+@pytest.fixture
+def temp_staged(monkeypatch, tmp_path):
+    """Redirect _STAGED_HOST_DIR and _DATA_HOST_DIR to a temp directory so
+    tests don't pollute the real shared filesystem (data/staged/ is visible
+    to Hermes via the workspace bind mount — test artifacts there show up as
+    phantom images in production)."""
+    fake_data = tmp_path / "data"
+    fake_staged = fake_data / "staged"
+    fake_staged.mkdir(parents=True)
+    monkeypatch.setattr(mcp_server, "_STAGED_HOST_DIR", fake_staged)
+    monkeypatch.setattr(mcp_server, "_DATA_HOST_DIR", fake_data)
+    monkeypatch.setattr(mcp_server, "_STAGED_CONTAINER_DIR", "/tmp/fake_staged")
+    return fake_data
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +201,7 @@ def test_prompt_no_connection(no_connection):
 
 
 def test_prompt_cancelled_stop_reason(mock_pool):
-    mock_pool._prompt_result = ("partial", "", "cancelled")
+    mock_pool._prompt_result = ("partial", "", "cancelled", [])
     mcp_server._session_org["sess-1"] = "general"
     r = run(_call("prompt", session_id="sess-1", message="go"))
     assert "cancelled" in r.content[0].text
@@ -186,10 +209,36 @@ def test_prompt_cancelled_stop_reason(mock_pool):
 
 
 def test_prompt_no_response_text(mock_pool):
-    mock_pool._prompt_result = ("", "", "end_turn")
+    mock_pool._prompt_result = ("", "", "end_turn", [])
     mcp_server._session_org["sess-1"] = "general"
     r = run(_call("prompt", session_id="sess-1", message="go"))
     assert "(no response)" in r.content[0].text
+
+
+def test_prompt_returns_agent_images_inline(mock_pool, temp_staged):
+    """When the agent emits image content blocks, the MCP tool returns them
+    as native ImageContent alongside the text — Hermes sees them inline."""
+    # 1x1 red PNG
+    png_b64 = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAE"
+        "hQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    mock_pool._prompt_result = (
+        "Here's the screenshot", "", "end_turn",
+        [{"data": png_b64, "mime_type": "image/png"}],
+    )
+    mcp_server._session_org["sess-1"] = "general"
+    r = run(_call("prompt", session_id="sess-1", message="take screenshot"))
+    assert r.is_error is False
+    # First content block is text
+    assert "Here's the screenshot" in r.content[0].text
+    assert "end_turn" in r.content[0].text
+    assert "📸" in r.content[0].text  # image saved notification
+    # Second content block is the image
+    assert len(r.content) >= 2
+    assert r.content[1].type == "image"
+    assert r.content[1].data == png_b64
+    assert r.content[1].mimeType == "image/png"
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +314,43 @@ def test_cancel_session_no_connection(no_connection):
 
 
 # ---------------------------------------------------------------------------
+# reset_session
+# ---------------------------------------------------------------------------
+
+def test_reset_session_resets_sandbox(mock_pool, monkeypatch):
+    """Happy path: cancel the in-flight task, then force-reset the org's
+    sandbox container. Patches SandboxContainer so no Docker is touched."""
+    mock_pool.org = "coder"
+    import pux_harness.sandbox.container as container_mod
+
+    reset_called = {"v": False}
+
+    class _FakeSB:
+        def __init__(self, **kw):  # noqa: ANN204
+            self.kw = kw
+
+        def reset(self):  # noqa: ANN201
+            reset_called["v"] = True
+
+    monkeypatch.setattr(container_mod, "SandboxContainer", _FakeSB)
+
+    r = run(_call("reset_session", session_id="sess-1"))
+
+    assert r.is_error is False
+    assert "reset" in r.content[0].text.lower()
+    assert "coder" in r.content[0].text
+    assert reset_called["v"] is True
+    # cancel was issued first (hygiene before the force-remove)
+    assert ("cancel", "sess-1") in mock_pool.calls
+
+
+def test_reset_session_no_connection(no_connection):
+    r = run(_call("reset_session", session_id="orphan"))
+    assert "Error" in r.content[0].text
+    assert "no active connection" in r.content[0].text
+
+
+# ---------------------------------------------------------------------------
 # set_model
 # ---------------------------------------------------------------------------
 
@@ -281,3 +367,124 @@ def test_set_model_no_connection(no_connection):
     r = run(_call("set_model", session_id="orphan", model="x"))
     assert "Error" in r.content[0].text
     assert "no active connection" in r.content[0].text
+
+
+# ---------------------------------------------------------------------------
+# stage_file + read_file (file round-trip — no org connection needed)
+# ---------------------------------------------------------------------------
+
+# A 1x1 red PNG.
+_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAE"
+    "hQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+def test_stage_file_then_read_file_roundtrip(temp_staged):
+    """stage_file writes bytes → read_file recovers them → base64 matches."""
+    r = run(_call("stage_file", filename="rt.png", content_b64=_PNG_B64))
+    assert r.is_error is False
+    assert "Staged" in r.content[0].text
+    assert "/tmp/fake_staged/rt.png" in r.content[0].text
+
+    r2 = run(_call("read_file", path="staged/rt.png"))
+    assert r2.is_error is False
+    text = r2.content[0].text
+    assert "Read" in text
+    assert "image/png" in text
+    assert _PNG_B64 in text  # the base64 payload is present
+
+
+def test_stage_file_bad_filename(temp_staged):
+    """Filenames with path separators or .. are rejected."""
+    r = run(_call("stage_file", filename="../escape.png", content_b64=_PNG_B64))
+    assert "Error" in r.content[0].text
+    assert "unsafe filename" in r.content[0].text
+
+
+def test_stage_file_bad_base64(temp_staged):
+    r = run(_call("stage_file", filename="ok.png", content_b64="!!!not-b64!!!"))
+    assert "Error" in r.content[0].text
+    assert "invalid base64" in r.content[0].text
+
+
+def test_read_file_path_traversal_blocked(temp_staged):
+    r = run(_call("read_file", path="../../../etc/passwd"))
+    assert "Error" in r.content[0].text
+    assert "unsafe path" in r.content[0].text
+
+
+def test_read_file_absolute_path_blocked(temp_staged):
+    r = run(_call("read_file", path="/etc/passwd"))
+    assert "Error" in r.content[0].text
+    assert "unsafe path" in r.content[0].text
+
+
+def test_read_file_nonexistent(temp_staged):
+    r = run(_call("read_file", path="images/does-not-exist.jpg"))
+    assert "Error" in r.content[0].text
+    assert "not found" in r.content[0].text
+
+
+# ---------------------------------------------------------------------------
+# reload_profiles
+# ---------------------------------------------------------------------------
+
+def test_reload_profiles_single_org_bounces_only_that_subprocess(mock_pool):
+    """reload_profiles(org=X) stops X's cached ACP subprocess so the next
+    new_session re-reads profile.yaml/profile.local.yaml, and leaves other
+    orgs' subprocesses untouched (isolation)."""
+    coder_conn = MockOrgConnection("coder")
+    twitter_conn = MockOrgConnection("twitter-agent")
+    mcp_server._pool["coder"] = coder_conn
+    mcp_server._pool["twitter-agent"] = twitter_conn
+
+    r = run(_call("reload_profiles", org="coder"))
+
+    assert r.is_error is False
+    txt = r.content[0].text
+    assert "coder" in txt
+    assert "Reloaded profiles" in txt
+    # coder bounced
+    assert ("stop",) in coder_conn.calls
+    assert coder_conn.alive is False
+    # twitter-agent left alone
+    assert ("stop",) not in twitter_conn.calls
+    assert twitter_conn.alive is True
+
+
+def test_reload_profiles_all_active_orgs_when_no_org_arg(mock_pool):
+    """reload_profiles() with no arg bounces EVERY active org in the pool —
+    the equivalent of a full server restart, scoped to the profile layer."""
+    a = MockOrgConnection("coder")
+    b = MockOrgConnection("twitter-agent")
+    mcp_server._pool["coder"] = a
+    mcp_server._pool["twitter-agent"] = b
+
+    r = run(_call("reload_profiles"))
+
+    assert r.is_error is False
+    txt = r.content[0].text
+    assert "coder" in txt
+    assert "twitter-agent" in txt
+    assert ("stop",) in a.calls
+    assert ("stop",) in b.calls
+
+
+def test_reload_profiles_unknown_org_reported_not_raised(mock_pool):
+    """An org not in the pool is reported as skipped, not a hard error —
+    operators can call reload_profiles speculatively without crashing."""
+    mcp_server._pool["coder"] = MockOrgConnection("coder")
+
+    r = run(_call("reload_profiles", org="nonexistent"))
+
+    assert r.is_error is False
+    txt = r.content[0].text.lower()
+    assert "nonexistent" in txt or "not active" in txt
+
+
+def test_reload_profiles_empty_pool_is_noop(mock_pool):
+    """No active orgs → helpful 'No active orgs' message, no crash."""
+    r = run(_call("reload_profiles"))
+    assert r.is_error is False
+    assert "No active orgs" in r.content[0].text
