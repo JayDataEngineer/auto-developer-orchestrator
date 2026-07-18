@@ -735,3 +735,125 @@ def test_orgconnection_prompt_passes_args_in_acp_order(monkeypatch):
     )
     assert recorded["prompt_arg"][0].text == "hello"
     assert stop == "end_turn"
+
+
+# ---------------------------------------------------------------------------
+# Resilience: transient errors retried, deterministic errors surfaced, and
+# deploy_browser_agent never swallows the session id on failure (the fix for
+# "it breaks the subagent, then I lose the entire conversation").
+# ---------------------------------------------------------------------------
+def test_is_transient_provider_error_classification():
+    from pux_harness.mcp_server import _is_transient_provider_error
+
+    class APIConnectionError(Exception): pass
+    class InternalServerError(Exception): pass
+    class RateLimitError(Exception): pass
+    class BadRequestError(Exception): pass
+    class ValidationError(Exception): pass
+
+    # transient — retried
+    assert _is_transient_provider_error(ConnectionError("model stream stalled"))
+    assert _is_transient_provider_error(TimeoutError("operation timed out"))
+    assert _is_transient_provider_error(APIConnectionError("conn refused"))
+    assert _is_transient_provider_error(InternalServerError("service 503"))
+    assert _is_transient_provider_error(RateLimitError("rate limit hit"))
+    # BadRequestError retried ONLY when the message implies stream/timeout
+    assert _is_transient_provider_error(BadRequestError("model stream stalled"))
+    assert _is_transient_provider_error(BadRequestError("upstream timeout"))
+    assert not _is_transient_provider_error(BadRequestError("invalid model id"))
+    # deterministic — NOT retried
+    assert not _is_transient_provider_error(ValueError("invalid input"))
+    assert not _is_transient_provider_error(KeyError("missing"))
+    assert not _is_transient_provider_error(ValidationError("2 validation errors"))
+    assert not _is_transient_provider_error(AttributeError("no attr"))
+
+
+def test_orgconnection_prompt_retries_transient_then_succeeds(monkeypatch):
+    """A transient provider error is retried; second attempt succeeds and the
+    caller never sees the hiccup."""
+    from pux_harness.mcp_server import OrgConnection
+
+    calls = {"n": 0}
+    class _Resp: stop_reason = "end_turn"
+    class FakeConn:
+        async def prompt(self, prompt, session_id, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ConnectionError("model stream stalled: connection reset by peer")
+            return _Resp()
+    class FakeClient:
+        def reset(self, sid): pass
+        def messages(self, sid): return ["ok-after-retry"]
+        def thoughts(self, sid): return []
+        def images(self, sid): return []
+
+    oc = OrgConnection(org="general")
+    oc.conn = FakeConn()
+    oc.client = FakeClient()
+    async def _noop(): return oc
+    oc.ensure = _noop  # type: ignore[assignment]
+    async def _fast_sleep(_d): return None
+    monkeypatch.setattr("asyncio.sleep", _fast_sleep)
+
+    text, _thoughts, stop, _imgs = run(oc.prompt("SID", "hi"))
+    assert calls["n"] == 2, f"should retry once after transient: {calls}"
+    assert stop == "end_turn"
+    assert text == "ok-after-retry"
+
+
+def test_orgconnection_prompt_does_not_retry_deterministic_errors(monkeypatch):
+    """A real code bug surfaces immediately — no wasted retries."""
+    from pux_harness.mcp_server import OrgConnection
+
+    calls = {"n": 0}
+    class FakeConn:
+        async def prompt(self, prompt, session_id, **kw):
+            calls["n"] += 1
+            raise ValueError("invalid input")
+    class FakeClient:
+        def reset(self, sid): pass
+        def messages(self, sid): return []
+        def thoughts(self, sid): return []
+        def images(self, sid): return []
+
+    oc = OrgConnection(org="general")
+    oc.conn = FakeConn()
+    oc.client = FakeClient()
+    async def _noop(): return oc
+    oc.ensure = _noop  # type: ignore[assignment]
+    async def _fast_sleep(_d): return None
+    monkeypatch.setattr("asyncio.sleep", _fast_sleep)
+
+    with pytest.raises(ValueError):
+        run(oc.prompt("SID", "hi"))
+    assert calls["n"] == 1, f"deterministic error must not retry: {calls}"
+
+
+def test_deploy_browser_agent_surfaces_sid_on_error_for_resume(mock_pool, monkeypatch):
+    """Transient mid-turn failure must NOT cost the whole conversation. The
+    session was created; deploy_browser_agent must return its id + a resume
+    path so the caller can recover via load_session + prompt."""
+    # new_session on the mock returns "sess-abc123" by default.
+    async def _raising_prompt(session_id, message, images=None):
+        raise ConnectionError("model stream stalled: provider dropped the stream")
+    monkeypatch.setattr(mock_pool, "prompt", _raising_prompt)
+
+    r = run(_call("deploy_browser_agent", task="go to example.com"))
+    txt = r.content[0].text if r.content else ""
+    assert "sess-abc123" in txt, f"sid must be surfaced: {txt[:200]}"
+    assert "RECOVERABLE" in txt
+    assert "load_session" in txt
+    assert "model stream stalled" in txt  # original error preserved
+
+
+def test_deploy_browser_agent_no_session_created_path(mock_pool, monkeypatch):
+    """If new_session itself fails (before a sid exists), the error says so
+    honestly — no fake sid, no resume promise."""
+    async def _raising_new_session(model=None, cwd=None):
+        raise RuntimeError("sandbox refused to start")
+    monkeypatch.setattr(mock_pool, "new_session", _raising_new_session)
+
+    r = run(_call("deploy_browser_agent", task="go to example.com"))
+    txt = r.content[0].text if r.content else ""
+    assert "no session was created" in txt
+    assert "sandbox refused to start" in txt
