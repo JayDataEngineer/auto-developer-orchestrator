@@ -681,3 +681,57 @@ def test_web_search_live_integration(mock_pool):
     assert r.is_error is False
     txt = r.content[0].text if r.content else ""
     assert "unreachable" not in txt, f"proxy should have reached the live server: {txt[:120]}"
+
+
+# ---------------------------------------------------------------------------
+# Regression: OrgConnection.prompt must pass args in acp.py's order —
+#   acp.py:prompt(self, prompt, session_id, ...)  →  prompt FIRST, session_id SECOND.
+# A prior build transposed these in the internal conn.prompt(...) call, which
+# raised a deterministic 2-error PromptRequest ValidationError on EVERY prompt
+# (prompt got the session_id string; session_id got the content-block list).
+# The MCP-layer tests above masked it because they swap in MockOrgConnection at
+# the wrapper boundary and never exercise the real OrgConnection.prompt body.
+# ---------------------------------------------------------------------------
+def test_orgconnection_prompt_passes_args_in_acp_order(monkeypatch):
+    from pux_harness.mcp_server import OrgConnection
+
+    recorded: dict[str, Any] = {}
+
+    class _Resp:
+        stop_reason = "end_turn"
+
+    class FakeConn:
+        async def prompt(self, prompt, session_id, **kw):
+            # acp.py signature: prompt is the content-block list, session_id is the str.
+            recorded["prompt_arg"] = prompt
+            recorded["session_id_arg"] = session_id
+            return _Resp()
+
+    class FakeClient:
+        def reset(self, sid): pass
+        def messages(self, sid): return []
+        def thoughts(self, sid): return []
+        def images(self, sid): return []
+
+    oc = OrgConnection(org="general")
+    oc.conn = FakeConn()
+    oc.client = FakeClient()
+
+    async def _noop_ensure():
+        return oc
+    oc.ensure = _noop_ensure  # type: ignore[assignment]
+
+    text, thoughts, stop, agent_images = run(oc.prompt("SID-123", "hello"))
+
+    # The content-block list must be the FIRST positional arg passed to
+    # conn.prompt, and the session_id string the SECOND. If these are
+    # transposed, acp.py builds PromptRequest(prompt=<sid str>,
+    # session_id=<block list>) → pydantic ValidationError on every call.
+    assert recorded["session_id_arg"] == "SID-123", (
+        "session_id must be the 2nd arg to conn.prompt (acp.py order)"
+    )
+    assert isinstance(recorded["prompt_arg"], list), (
+        "prompt (content blocks) must be the 1st arg to conn.prompt (acp.py order)"
+    )
+    assert recorded["prompt_arg"][0].text == "hello"
+    assert stop == "end_turn"
