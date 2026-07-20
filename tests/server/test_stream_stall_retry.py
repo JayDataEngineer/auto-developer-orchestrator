@@ -172,3 +172,127 @@ def test_attach_skips_missing_nodes_silently():
     g = _NoModelGraph()
     # Must not raise.
     attach_stream_stall_retry(g)
+
+
+# ---------------------------------------------------------------------------
+# END-TO-END — real graph + real checkpointer + real ACP entrypoint
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def _e2e_sqlite(tmp_path):
+    """Real on-disk sqlite checkpointer (the production class)."""
+    import aiosqlite
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    db_path = tmp_path / "e2e.sqlite"
+
+    async def _setup():
+        conn = await aiosqlite.connect(str(db_path))
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA busy_timeout=5000")
+        saver = AsyncSqliteSaver(conn)
+        await saver.setup()
+        return conn, saver
+    return _setup
+
+
+class _StallingModel(BaseChatModel):
+    """Real BaseChatModel that raises asyncio.TimeoutError (the parent of
+    langchain-openai's StreamChunkTimeoutError) on the first 2 calls, then
+    succeeds. Counts every call so the test can prove retries fired."""
+    state: dict = {"calls": 0}
+
+    @property
+    def _llm_type(self) -> str: return "stalling-e2e"
+
+    def bind_tools(self, tools, **kwargs): return self
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        self.state["calls"] += 1
+        if self.state["calls"] < 3:
+            raise asyncio.TimeoutError(
+                "No streaming chunk received for 120.0s (chunks_received=0)"
+            )
+        return ChatResult(generations=[
+            ChatGeneration(message=AIMessage(content="Recovered after retry."))
+        ])
+
+
+def test_e2e_real_stall_through_real_acp_entrypoint(tmp_path):
+    """THE headline e2e test.
+
+    Builds a real deepagents graph (same wiring as build_graph), uses a real
+    on-disk AsyncSqliteSaver (the production class), injects a model that
+    raises asyncio.TimeoutError twice then succeeds, then pushes a real
+    prompt through _RegisteringAgentServerACP.prompt() — the production ACP
+    entrypoint that calls super().prompt() internally.
+
+    Asserts:
+      1. The model retried past the stall (3+ calls).
+      2. No stall-notice TEXT was emitted across all _log_text calls.
+      3. prompt() returned normally (no exception propagated).
+      4. Work persisted on disk.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from deepagents import create_deep_agent
+    from acp.schema import TextContentBlock
+    from pux_harness.acp import _RegisteringAgentServerACP
+
+    async def _run():
+        import aiosqlite
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+        db_path = tmp_path / "e2e.sqlite"
+        conn = await aiosqlite.connect(str(db_path))
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA busy_timeout=5000")
+        saver = AsyncSqliteSaver(conn); await saver.setup()
+
+        model = _StallingModel()
+        graph = create_deep_agent(
+            model=model, system_prompt="test", tools=[], checkpointer=saver,
+        )
+        attach_stream_stall_retry(graph)  # *** production wiring ***
+
+        # Real production ACP entrypoint.
+        server = _RegisteringAgentServerACP(agent=graph, store=MagicMock(), org="test")
+        server._log_text = AsyncMock()
+        server._agent = graph
+        server._maybe_warmup_browser = lambda: None
+
+        prompt_blocks = [TextContentBlock(type="text", text="hello")]
+        result = await server.prompt(prompt_blocks, "session-e2e")
+
+        # Disk check
+        cur = await conn.execute("SELECT COUNT(*) FROM checkpoints WHERE thread_id = ?", ("session-e2e",))
+        n_cp = (await cur.fetchone())[0]
+        cur = await conn.execute("SELECT COUNT(*) FROM writes WHERE thread_id = ?", ("session-e2e",))
+        n_w = (await cur.fetchone())[0]
+        await conn.close()
+        return result, model.state["calls"], server._log_text.call_args_list, n_cp, n_w
+
+    result, model_calls, log_calls, n_cp, n_w = asyncio.run(_run())
+
+    # 1. Model retried past the stall.
+    assert model_calls >= 3, (
+        f"retry did not fire — model only called {model_calls}x. Expected ≥3 "
+        "(2 stalls + success)."
+    )
+
+    # 2. No stall-notice text in any _log_text call.
+    stall_markers = ("ended early", "stream stalled", "didn't recover", "Re-send")
+    for call in log_calls:
+        text = (call.kwargs or {}).get("text", "")
+        for marker in stall_markers:
+            assert marker not in text, (
+                f"stall notice was emitted: {text!r} (marker {marker!r}). "
+                "The retry should have made the stall transparent."
+            )
+
+    # 3. prompt() returned a PromptResponse (not raised).
+    assert result is not None
+    assert hasattr(result, "stop_reason")
+
+    # 4. Work persisted on disk.
+    assert n_cp > 0 and n_w > 0, (
+        f"nothing persisted on disk (cp={n_cp}, writes={n_w})"
+    )
