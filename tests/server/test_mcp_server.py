@@ -245,35 +245,12 @@ def test_prompt_returns_agent_images_inline(mock_pool, temp_staged):
 # list_sessions
 # ---------------------------------------------------------------------------
 
-def test_list_sessions_empty_pool(mock_pool):
-    r = run(_call("list_sessions"))
-    assert "No subagent sessions" in r.content[0].text
-
-
-def test_list_sessions_with_data(mock_pool):
-    mock_pool._sessions = [
-        {"session_id": "s1", "org": "general", "title": "test",
-         "updated_at": "2026-07-11T12:00:00Z"},
-    ]
-    # list_sessions iterates _pool; inject a fake entry.
-    mcp_server._pool["general"] = mock_pool
-    r = run(_call("list_sessions"))
-    assert "1 session" in r.content[0].text
-    assert "s1" in r.content[0].text
-    assert "general" in r.content[0].text
-
-
-def test_list_sessions_org_filter(mock_pool):
-    mock_pool._sessions = [
-        {"session_id": "s1", "org": "general", "title": None,
-         "updated_at": None},
-    ]
-    mcp_server._pool["general"] = mock_pool
-    r = run(_call("list_sessions", org="general"))
-    assert "s1" in r.content[0].text
-    # Filtering by a different org returns empty.
-    r2 = run(_call("list_sessions", org="invest"))
-    assert "No active" in r2.content[0].text
+# list_sessions behavior (store-backed, not pool-walking) is covered below by:
+#   test_list_sessions_reads_store_not_pool
+#   test_list_sessions_org_filter
+#   test_list_sessions_empty_store_says_so_honestly
+# The legacy versions of these walked the in-memory _pool, which lied ("No
+# subagent sessions") on any fresh server despite 1000+ threads on disk.
 
 
 # ---------------------------------------------------------------------------
@@ -857,3 +834,84 @@ def test_deploy_browser_agent_no_session_created_path(mock_pool, monkeypatch):
     txt = r.content[0].text if r.content else ""
     assert "no session was created" in txt
     assert "sandbox refused to start" in txt
+
+
+# ---------------------------------------------------------------------------
+# list_sessions reads the persistent thread store (not the in-memory _pool).
+# The fix for the silent "No subagent sessions" lie that made persisted work
+# look lost — a fresh server has an empty _pool but the store has every thread.
+# ---------------------------------------------------------------------------
+def test_list_sessions_reads_store_not_pool(monkeypatch):
+    from contextlib import asynccontextmanager
+    from pux_harness import threads as threads_mod
+
+    class _FakeStore:
+        async def list_threads(self, org=None):
+            rows = [
+                {"thread_id": "abc123", "org": "browser-agent",
+                 "metadata": '{"title": "evaluate pose studio"}',
+                 "created_at": "2026-07-20T17:56:54+00:00"},
+                {"thread_id": "def456", "org": "coder",
+                 "metadata": "{}", "created_at": "2026-07-20T08:34:25+00:00"},
+            ]
+            return [r for r in rows if org is None or r["org"] == org]
+
+    @asynccontextmanager
+    async def _fake_open():
+        yield _FakeStore()
+
+    monkeypatch.setattr(threads_mod, "open_thread_store", _fake_open)
+    mcp_server._pool.clear()  # fresh server — empty pool
+
+    r = run(_call("list_sessions"))
+    txt = r.content[0].text if r.content else ""
+    assert "abc123" in txt, f"thread must appear: {txt[:300]}"
+    assert "def456" in txt
+    assert "browser-agent" in txt and "coder" in txt
+    assert "2 of 2 session(s)" in txt
+    assert "load_session" in txt  # resume recipe surfaced
+    assert "No subagent sessions" not in txt
+    # title parsed out of json metadata
+    assert "evaluate pose studio" in txt
+
+
+def test_list_sessions_org_filter(monkeypatch):
+    from contextlib import asynccontextmanager
+    from pux_harness import threads as threads_mod
+
+    class _FakeStore:
+        async def list_threads(self, org=None):
+            rows = [
+                {"thread_id": "abc", "org": "browser-agent", "metadata": "{}", "created_at": "t1"},
+                {"thread_id": "def", "org": "coder", "metadata": "{}", "created_at": "t2"},
+            ]
+            return [r for r in rows if org is None or r["org"] == org]
+
+    @asynccontextmanager
+    async def _fake_open():
+        yield _FakeStore()
+
+    monkeypatch.setattr(threads_mod, "open_thread_store", _fake_open)
+    mcp_server._pool.clear()
+    r = run(_call("list_sessions", org="browser-agent"))
+    txt = r.content[0].text if r.content else ""
+    assert "abc" in txt and "def" not in txt
+    assert "org=browser-agent" in txt
+
+
+def test_list_sessions_empty_store_says_so_honestly(monkeypatch):
+    from contextlib import asynccontextmanager
+    from pux_harness import threads as threads_mod
+
+    class _FakeStore:
+        async def list_threads(self, org=None): return []
+
+    @asynccontextmanager
+    async def _fake_open():
+        yield _FakeStore()
+
+    monkeypatch.setattr(threads_mod, "open_thread_store", _fake_open)
+    mcp_server._pool.clear()
+    r = run(_call("list_sessions"))
+    txt = r.content[0].text if r.content else ""
+    assert "No subagent sessions" in txt  # honest only when the STORE is empty
