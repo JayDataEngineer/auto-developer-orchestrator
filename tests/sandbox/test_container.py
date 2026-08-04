@@ -180,9 +180,18 @@ def test_build_env_no_policy_defaults():
 def test_build_env_no_policy_has_no_creds():
     sb = C.SandboxContainer(org="", project_path="/proj")
     env = sb._build_env(None)
-    # No policy → only the 5 base vars (SANDBOX_POLICY, DOCKER_HOST,
-    # HOST_GATEWAY, PUX_API_HOST, PUX_API_PORT), no injected creds/cookies.
-    assert len(env) == 5
+    # No policy → only the 7 base vars (SANDBOX_POLICY, DOCKER_HOST,
+    # HOST_GATEWAY, PUX_API_HOST, PUX_API_PORT, UV_PROJECT_ENVIRONMENT,
+    # UV_CACHE_DIR), no injected creds/cookies. The two UV_* vars redirect
+    # in-sandbox uv invocations to container-local paths so the host .venv
+    # cannot be clobbered — see _build_env docstring.
+    assert len(env) == 7
+    assert any(x.startswith("UV_PROJECT_ENVIRONMENT=/sandbox/") for x in env), (
+        "UV_PROJECT_ENVIRONMENT must point inside /sandbox/ (container-local), "
+        "not /sandbox/workspace/ (the bind-mount) — else uv sync inside the "
+        "sandbox clobbers the host .venv"
+    )
+    assert any(x.startswith("UV_CACHE_DIR=/sandbox/") for x in env)
     # positively: no API key / cookie / token vars leak in without a policy
     assert not any(
         any(tok in x for tok in ("API_KEY", "TOKEN", "COOKIE", "SECRET", "PASSWORD"))
@@ -761,3 +770,185 @@ def test_ensure_creates_when_no_running_container(monkeypatch):
 
     with pytest.raises(_AbortBeforeDocker):
         sb.ensure()
+
+
+# --- ensure() network-health self-healing ------------------------------------
+# A reused container can look healthy (Status=running, all processes up) but
+# have broken networking — a docker-daemon veth-attachment race where packets
+# never reach the bridge. The agent experiences this as "browser unavailable"
+# because sb_server can't load any page. ensure() must detect this via the
+# gateway reachability probe and AUTO-RECREATE before the agent sees the
+# failure — this is the "browser must NEVER fail to launch" contract.
+
+
+def test_network_healthy_returns_true_when_gateway_unreachable_in_attrs():
+    """If the container attrs lack a gateway, the probe can't run. Return
+    True (assume healthy) — we only act on POSITIVE evidence of breakage,
+    never on missing data. This also covers old test stubs whose fake
+    containers don't carry NetworkSettings."""
+    sb = C.SandboxContainer(org="x", project_path="/proj",
+                            client=_ReuseClient(cap_add=None))
+    # _FakeReuseContainer.attrs has only HostConfig — no NetworkSettings →
+    # no gateway → _network_healthy returns True.
+    assert sb._network_healthy("orchestrator-sandbox-test") is True
+
+
+def test_network_healthy_returns_true_when_exec_unsupported(monkeypatch):
+    """If exec_run raises (mock without it, daemon unreachable, etc.) we
+    treat the container as healthy — false-negative is far better than
+    false-positive here (a false broken verdict churns a good container)."""
+    sb = C.SandboxContainer(org="x", project_path="/proj",
+                            client=_ReuseClient(cap_add=None))
+
+    class _FakeCWithGateway:
+        attrs = {
+            "NetworkSettings": {
+                "Networks": {"shared-infra": {"Gateway": "10.100.23.1"}}
+            }
+        }
+        # No exec_run attribute → AttributeError on call.
+
+    monkeypatch.setattr(sb.client.containers, "get", lambda name: _FakeCWithGateway())
+    assert sb._network_healthy("orchestrator-sandbox-test") is True
+
+
+def test_network_healthy_returns_false_on_probe_timeout(monkeypatch):
+    """The DEFINITIVE breakage signal: the gateway TCP probe times out
+    (exit 124 from `timeout`). This is exactly the docker veth race symptom
+    — packets leave eth0 but never appear on the bridge."""
+    sb = C.SandboxContainer(org="x", project_path="/proj",
+                            client=_ReuseClient(cap_add=None))
+
+    class _R:
+        exit_code = 124  # timeout(1) killed the probe
+        output = b""
+
+    class _FakeCWithGateway:
+        attrs = {
+            "NetworkSettings": {
+                "Networks": {"shared-infra": {"Gateway": "10.100.23.1"}}
+            }
+        }
+        def exec_run(self, cmd, **kw):
+            return _R()
+
+    monkeypatch.setattr(sb.client.containers, "get", lambda name: _FakeCWithGateway())
+    assert sb._network_healthy("orchestrator-sandbox-test") is False
+
+
+def test_network_healthy_returns_true_on_connection_refused(monkeypatch):
+    """Gateway probe gets 'connection refused' (exit 1) — the TCP SYN reached
+    the gateway and got a RST back. Networking is FINE; nothing listens on
+    :53. This must NOT trigger a recreate."""
+    sb = C.SandboxContainer(org="x", project_path="/proj",
+                            client=_ReuseClient(cap_add=None))
+
+    class _R:
+        exit_code = 1  # connection refused — network works
+        output = b""
+
+    class _FakeCWithGateway:
+        attrs = {
+            "NetworkSettings": {
+                "Networks": {"shared-infra": {"Gateway": "10.100.23.1"}}
+            }
+        }
+        def exec_run(self, cmd, **kw):
+            return _R()
+
+    monkeypatch.setattr(sb.client.containers, "get", lambda name: _FakeCWithGateway())
+    assert sb._network_healthy("orchestrator-sandbox-test") is True
+
+
+def test_ensure_force_removes_reused_container_with_broken_network(monkeypatch):
+    """THE CORE CONTRACT: a reused container whose gateway probe times out
+    is force-removed and a fresh one is created. The agent never sees
+    "browser unavailable" — the harness self-heals before any tool call
+    reaches the broken container."""
+    sb = C.SandboxContainer(org="x", project_path="/proj",
+                            client=_ReuseClient(cap_add=None))
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (None, "isolated"))
+
+    # Network probe: reused container (name from _FakeReuseContainer) is
+    # broken; the fresh one create() returns is healthy.
+    def _health(name):
+        return name != "orchestrator-sandbox-test"
+    monkeypatch.setattr(sb, "_network_healthy", _health)
+
+    removed: list[str] = []
+    monkeypatch.setattr(sb, "_force_remove_unhealthy",
+                        lambda name: removed.append(name))
+
+    def _fake_create():
+        return "orchestrator-sandbox-fresh"
+    monkeypatch.setattr(sb, "create", _fake_create)
+
+    name = sb.ensure()
+    assert removed == ["orchestrator-sandbox-test"], (
+        f"broken reused container must be force-removed; got {removed}"
+    )
+    assert name == "orchestrator-sandbox-fresh", (
+        "ensure() must return the freshly-created healthy container"
+    )
+
+
+def test_ensure_reuses_container_when_network_healthy(monkeypatch):
+    """Symmetric: when the probe says the reused container is healthy, NO
+    force-remove happens and NO create() is called. This guards against
+    false-positives that would churn a working container on every ensure()."""
+    sb = C.SandboxContainer(org="x", project_path="/proj",
+                            client=_ReuseClient(cap_add=None))
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (None, "isolated"))
+    monkeypatch.setattr(sb, "_network_healthy", lambda name: True)
+
+    removed: list[str] = []
+    monkeypatch.setattr(sb, "_force_remove_unhealthy",
+                        lambda name: removed.append(name))
+
+    created: list[str] = []
+    monkeypatch.setattr(sb, "create",
+                        lambda: created.append("x") or "should-not-happen")
+
+    name = sb.ensure()
+    assert removed == [], f"healthy container must NOT be removed; got {removed}"
+    assert created == [], f"create() must NOT run on healthy reuse; got {created}"
+    assert name == "orchestrator-sandbox-test"
+
+
+def test_ensure_retries_create_when_fresh_container_has_broken_network(monkeypatch):
+    """The same race can strike at create() time. ensure() must verify the
+    fresh container + retry once. Without this, the agent's FIRST tool call
+    after a bad create() would fail."""
+    sb = C.SandboxContainer(org="x", project_path="/proj",
+                            client=_ReuseClient(cap_add=None))
+    monkeypatch.setattr(sb, "_resolve_policy", lambda: (None, "isolated"))
+    monkeypatch.setattr(sb, "_running_for_project", lambda: None)
+
+    # First create() returns a name whose probe fails; second succeeds.
+    create_calls: list[int] = []
+
+    def _fake_create():
+        create_calls.append(1)
+        return "orchestrator-sandbox-fresh"  # same name both calls
+
+    monkeypatch.setattr(sb, "create", _fake_create)
+
+    probe_calls: list[str] = []
+    def _health(name):
+        probe_calls.append(name)
+        # First probe (after first create) fails; second probe passes.
+        return len(probe_calls) > 1
+    monkeypatch.setattr(sb, "_network_healthy", _health)
+
+    removed: list[str] = []
+    monkeypatch.setattr(sb, "_force_remove_unhealthy",
+                        lambda name: removed.append(name))
+
+    name = sb.ensure()
+    assert len(create_calls) == 2, (
+        f"create() must be called twice (initial + retry); got {len(create_calls)}"
+    )
+    assert removed == ["orchestrator-sandbox-fresh"], (
+        f"first fresh container must be force-removed; got {removed}"
+    )
+    assert name == "orchestrator-sandbox-fresh"
