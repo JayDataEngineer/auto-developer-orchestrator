@@ -1,7 +1,6 @@
 // Thread-state fetcher — routes through the BFF (single ingress point).
 // The BFF proxies to Aegra's langgraph-api on :9988.
-
-const SITE_URL = import.meta.env.VITE_PUX_SITE_URL ?? "http://127.0.0.1:3001";
+// Relative URL — the Vite dev proxy (or BFF in production) handles forwarding.
 
 export interface ThreadState {
   thread_id: string;
@@ -12,7 +11,7 @@ export interface ThreadState {
 }
 
 async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const url = `${SITE_URL}${path}`;
+  const url = path;
   const opts: RequestInit = {
     method,
     headers: { "content-type": "application/json" },

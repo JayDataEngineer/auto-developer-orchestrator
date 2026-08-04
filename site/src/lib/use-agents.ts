@@ -12,8 +12,6 @@
 
 import { useEffect, useState } from "react";
 
-const SITE_URL = import.meta.env.VITE_PUX_SITE_URL ?? "http://127.0.0.1:3001";
-
 export interface AgentInfo {
   agent_id: string;
   name: string;
@@ -29,7 +27,7 @@ export function useAgents() {
     let cancelled = false;
     async function fetchAgents() {
       try {
-        const resp = await fetch(`${SITE_URL}/api/copilotkit`, {
+        const resp = await fetch("/api/copilotkit", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ method: "info" }),

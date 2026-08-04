@@ -91,7 +91,7 @@ export const TerminalPanel: FC = () => {
   }, []);
 
   return (
-    <div className="h-full bg-[#1e1e1e]">
+    <div className="h-full bg-[#0d1320]">
       <div ref={hostRef} className="h-full w-full p-1" />
     </div>
   );

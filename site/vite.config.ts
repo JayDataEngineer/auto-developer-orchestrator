@@ -14,6 +14,7 @@ export default defineConfig({
     dedupe: ["react", "react-dom"],
   },
   server: {
+    host: true,       // bind 0.0.0.0 — accessible over Tailscale / LAN
     port: 5176,
     strictPort: true,
     proxy: {
