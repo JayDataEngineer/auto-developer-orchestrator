@@ -8,7 +8,6 @@ import {
   CopilotKit,
 } from "@copilotkit/react-core";
 
-const HARNES_URL = import.meta.env.VITE_PUX_HARNESS_URL ?? "http://127.0.0.1:9988";
 const SITE_URL = import.meta.env.VITE_PUX_SITE_URL ?? "http://127.0.0.1:3001";
 
 export function PuxRuntimeProvider({

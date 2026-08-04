@@ -1,10 +1,11 @@
 // Pux site backend — a thin HTTP route layer for file ops, sandbox lifecycle,
-// terminal PTY, and VNC reverse-proxy.
+// terminal PTY, VNC reverse-proxy, CopilotKit runtime, and thread inspection.
 //
-// The Agent Protocol harness runs separately (default http://127.0.0.1:9988)
-// and the frontend talks to it directly via agent-protocol.ts.
-// This server only handles the BFF routes that need Node.js:
+// The Agent Protocol harness runs separately (default http://127.0.0.1:9988).
+// The frontend talks ONLY to this BFF — it never reaches Aegra directly:
 //
+//   CopilotKit: /api/copilotkit(.**) → CopilotRuntime → Aegra langgraph-api
+//   Thread:     /api/thread/:id      → Aegra /threads/:id (state for metrics)
 //   File ops:   /api/files/**
 //   Sandbox:    /api/sandbox/**
 //   Terminal:   /api/terminal/ws (WebSocket upgrade)
@@ -115,7 +116,7 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  // CopilotKit runtime — proxies to harness AG-UI endpoint.
+  // CopilotKit runtime — translates client protocol ↔ Aegra langgraph-api.
   if (urlPath === "/api/copilotkit" || urlPath.startsWith("/api/copilotkit/")) {
     try {
       const handled = await handleCopilotKitRoute(req, res, urlPath);
@@ -125,6 +126,34 @@ const server = createServer(async (req, res) => {
       console.error(`[api] ${method} ${urlPath} →`, err);
       if (!res.headersSent) sendError(res, 502, msg);
       else try { res.end(); } catch {}
+      return;
+    }
+  }
+
+  // Thread-state proxy — single-ingress-point passthrough to Aegra.
+  // The frontend metrics footer reads thread state (values, status, next)
+  // from this endpoint; routing through the BFF avoids a direct Aegra
+  // dependency in the browser.
+  if (urlPath.startsWith("/api/thread/") && method === "GET") {
+    const threadId = decodeURIComponent(urlPath.slice("/api/thread/".length));
+    if (threadId) {
+      try {
+        const aegraUrl = process.env.PUX_HARNESS_URL ?? "http://127.0.0.1:9988";
+        const upstream = await fetch(
+          `${aegraUrl}/threads/${encodeURIComponent(threadId)}`,
+        );
+        const body = await upstream.text();
+        res.writeHead(upstream.status, {
+          "content-type":
+            upstream.headers.get("content-type") ?? "application/json",
+          "cache-control": "no-store",
+        });
+        res.end(body);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!res.headersSent) sendError(res, 502, msg);
+        else try { res.end(); } catch {}
+      }
       return;
     }
   }

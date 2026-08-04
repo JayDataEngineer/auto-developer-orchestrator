@@ -1,7 +1,7 @@
-// Agent Protocol client — browser-side HTTP wrapper over the harness REST API.
-// Uses VITE_PUX_HARNESS_URL for the backend URL.
+// Thread-state fetcher — routes through the BFF (single ingress point).
+// The BFF proxies to Aegra's langgraph-api on :9988.
 
-const HARNES_URL = import.meta.env.VITE_PUX_HARNESS_URL ?? "http://127.0.0.1:9988";
+const SITE_URL = import.meta.env.VITE_PUX_SITE_URL ?? "http://127.0.0.1:3001";
 
 export interface ThreadState {
   thread_id: string;
@@ -12,7 +12,7 @@ export interface ThreadState {
 }
 
 async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const url = `${HARNES_URL}${path}`;
+  const url = `${SITE_URL}${path}`;
   const opts: RequestInit = {
     method,
     headers: { "content-type": "application/json" },
@@ -27,5 +27,5 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
 }
 
 export async function getThread(threadId: string): Promise<ThreadState> {
-  return api("GET", `/threads/${encodeURIComponent(threadId)}`);
+  return api("GET", `/api/thread/${encodeURIComponent(threadId)}`);
 }
