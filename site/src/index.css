@@ -56,15 +56,93 @@
   --sidebar-ring: #2563eb;
 }
 
+/* ── CopilotKit v2 dark-blue overrides ───────────────────────────────────────
+   CopilotKit ships its own `.dark [data-copilotkit]` block with pure-gray
+   oklch values (zero chroma → the "pure black" sidebar) plus a neutral
+   palette consumed as var(--cpk-color-*) by hardcoded Tailwind utilities
+   (cpk:bg-gray-900, cpk:dark:bg-zinc-900, …). Both are inside @layer
+   (theme/utilities); these UNLAYERED rules win the cascade for everything
+   inside [data-copilotkit]. The --cpk-color-* remap recolors the utility
+   classes because they resolve the variable at use time. Keep in sync with
+   the :root palette above. */
+.dark [data-copilotkit],
+[data-copilotkit].dark {
+  --background: #0a0e1a;
+  --foreground: #b8c5d6;
+  --card: #0f1525;
+  --card-foreground: #b8c5d6;
+  --popover: #0f1525;
+  --popover-foreground: #c5d1e0;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #161f33;
+  --secondary-foreground: #b8c5d6;
+  --muted: #121a2b;
+  --muted-foreground: #6b7a99;
+  --accent: #152033;
+  --accent-foreground: #c5d1e0;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #1a2538;
+  --input: #141c2e;
+  --ring: #2563eb;
+  --sidebar: #0d1320;
+  --sidebar-foreground: #b8c5d6;
+  --sidebar-primary: #3b82f6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #152033;
+  --sidebar-accent-foreground: #c5d1e0;
+  --sidebar-border: #1a2538;
+  --sidebar-ring: #2563eb;
+
+  /* Neutral palette → navy. Darkness hierarchy preserved (900 darkest). */
+  --cpk-color-black: #0a0e1a;
+  --cpk-color-gray-50: #5a6f9c;
+  --cpk-color-gray-100: #4a5f8a;
+  --cpk-color-gray-200: #3d5277;
+  --cpk-color-gray-400: #2a3a5a;
+  --cpk-color-gray-500: #23324d;
+  --cpk-color-gray-600: #1a2538;
+  --cpk-color-gray-700: #141c2e;
+  --cpk-color-gray-800: #121a2b;
+  --cpk-color-gray-900: #0f1525;
+  --cpk-color-zinc-50: #5a6f9c;
+  --cpk-color-zinc-100: #4a5f8a;
+  --cpk-color-zinc-200: #3d5277;
+  --cpk-color-zinc-300: #33466b;
+  --cpk-color-zinc-400: #2a3a5a;
+  --cpk-color-zinc-500: #23324d;
+  --cpk-color-zinc-700: #141c2e;
+  --cpk-color-zinc-800: #121a2b;
+  --cpk-color-zinc-900: #0f1525;
+  --cpk-color-white: #e8eef6;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 16px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * CopilotKit v2 font-size floor — the chat UI uses rem-based --cpk-text-*
+ * variables. With our 16px root they resolve correctly, but we pin explicit
+ * pixel floors here so messages/input never drop below readable size even if
+ * CopilotKit's stylesheet changes its variable defaults.
+ */
+:root {
+  --cpk-text-xs: 12px;
+  --cpk-text-sm: 14px;
+  --cpk-text-base: 16px;
+  --cpk-text-lg: 18px;
+  --cpk-text-xl: 20px;
+  --cpk-text-2xl: 24px;
+  --cpk-text-3xl: 30px;
 }
 
 * { box-sizing: border-box; }

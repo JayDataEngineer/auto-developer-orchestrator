@@ -9,15 +9,15 @@ import {
   ContainerIcon,
   SettingsIcon,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { PuxRuntimeProvider } from "./lib/runtime.tsx";
-import { CopilotSidebar } from "@copilotkit/react-core/v2";
+import { CopilotChat } from "@copilotkit/react-core/v2";
 import "@copilotkit/react-core/v2/styles.css";
 import { EditorPanel } from "./components/workbench/editor-panel.tsx";
 import { TerminalPanel } from "./components/workbench/terminal-panel.tsx";
 import { SandboxPanel } from "./components/workbench/sandbox-panel.tsx";
 import { SettingsPanel } from "./components/workbench/settings-panel.tsx";
 import { VncViewer } from "./components/workbench/vnc-viewer.tsx";
+import { ThreadHistory } from "./components/threads/thread-history.tsx";
 import { cn } from "./lib/utils";
 
 type WorkbenchTab = "files" | "terminal" | "sandbox" | "vnc" | "settings";
@@ -124,17 +124,26 @@ export function App() {
             key={`w${workbenchOpen ? 1 : 0}`}
             className="h-full"
           >
+            <Panel id="history" defaultSize="16%" minSize="10%" maxSize="28%">
+              <ThreadHistory
+                activeThreadId={activeThreadId}
+                onSelect={setActiveThreadId}
+                onNew={() => setActiveThreadId(null)}
+              />
+            </Panel>
+            <Separator className="w-px bg-border" />
             <Panel id="chat">
-              <CopilotSidebar
+              <CopilotChat
+                key={activeThreadId ?? "new"}
                 agentId="general"
-                defaultOpen={true}
+                threadId={activeThreadId ?? undefined}
+                hasExplicitThreadId={activeThreadId !== null}
+                className="h-full"
                 labels={{
                   modalHeaderTitle: "Pux",
+                  chatInputPlaceholder: "Message Pux…",
                 }}
-                className="h-full"
-              >
-                {/* CopilotKit renders the chat UI here */}
-              </CopilotSidebar>
+              />
             </Panel>
             {workbenchOpen && (
               <>

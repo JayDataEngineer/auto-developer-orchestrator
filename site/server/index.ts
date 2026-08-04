@@ -130,6 +130,28 @@ const server = createServer(async (req, res) => {
     }
   }
 
+  // Thread list proxy — single-ingress-point passthrough to Aegra's
+  // LangGraph thread search. Drives the site's thread-history sidebar:
+  // GET /api/threads?limit=50 → GET <aegra>/threads/?limit=50.
+  if (urlPath === "/api/threads" && method === "GET") {
+    try {
+      const aegraUrl = process.env.PUX_HARNESS_URL ?? "http://127.0.0.1:9988";
+      const upstream = await fetch(`${aegraUrl}/threads/?${query.toString()}`);
+      const body = await upstream.text();
+      res.writeHead(upstream.status, {
+        "content-type":
+          upstream.headers.get("content-type") ?? "application/json",
+        "cache-control": "no-store",
+      });
+      res.end(body);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!res.headersSent) sendError(res, 502, msg);
+      else try { res.end(); } catch {}
+    }
+    return;
+  }
+
   // Thread-state proxy — single-ingress-point passthrough to Aegra.
   // The frontend metrics footer reads thread state (values, status, next)
   // from this endpoint; routing through the BFF avoids a direct Aegra

@@ -19,26 +19,22 @@ import { CopilotRuntime, copilotRuntimeNodeHttpEndpoint } from "@copilotkit/runt
 import { LangGraphAgent } from "@copilotkit/runtime/langgraph";
 
 /**
- * PuxLangGraphAgent — forces ``streamSubgraphs: false`` on every run.
+ * PuxLangGraphAgent — enables ``streamSubgraphs: true`` on every run.
  *
- * WHY: deepagents' ``CodeInterpreterMiddleware`` stores a quickjs snapshot as
- * raw ``bytes`` in the graph-state field ``_quickjs_snapshot_payload``. The
- * payload starts ``b'QFGS\x01\x00\x00\x00\xe8…'`` — byte index 8 (``\xe8``)
- * is an invalid standalone UTF-8 byte, so Pydantic's Rust serializer inside
- * Aegra throws ``PydanticSerializationError: invalid utf-8 sequence of 1 bytes
- * from index 8`` whenever that subgraph state is included in the SSE stream.
+ * Subgraph streaming surfaces the FULL activity hierarchy to CopilotKit: when
+ * the supervisor delegates to a subagent via the ``task`` tool, every step the
+ * subagent takes (reasoning, tool calls, intermediate messages) appears in the
+ * SSE stream and renders natively in the chat UI. Without it, only the top-
+ * level tool-call result is visible — the subagent's internal work is invisible.
  *
- * The snapshot ONLY appears in subgraph events (``CodeInterpreterMiddleware.
- * after_agent``), never in the top-level ``values`` / ``events`` stream. So
- * disabling ``streamSubgraphs`` eliminates the invalid bytes from the wire
- * format without losing any data the CopilotKit UI actually renders (the
- * top-level messages, tool calls, and state snapshots are all unaffected).
- *
- * This is the correct server-side fix — it is transparent to every frontend
- * client and requires no per-request configuration. The root cause (raw bytes
- * in a JSON-serialized state field) is a bug in langchain-quickjs and should
- * be fixed upstream (base64-encode the snapshot), but this override makes the
- * bridge production-clean regardless.
+ * HISTORY: This was previously ``false`` to work around a crash in
+ * ``CodeInterpreterMiddleware`` — the ``mode="thread"`` QuickJS heap snapshot
+ * stored raw ``bytes`` in ``_quickjs_snapshot_payload`` (invalid UTF-8 at byte
+ * 8) which crashed Aegra's Pydantic serializer. That root cause is now fixed
+ * upstream in pux-harness: ``_build_interpreter`` uses ``mode="turn"`` so
+ * ``after_agent`` returns ``None`` — no bytes ever enter the graph state.
+ * With the bytes gone, subgraph streaming is safe and the override flips to
+ * ``true`` to give CopilotKit the full subagent event hierarchy.
  */
 class PuxLangGraphAgent extends LangGraphAgent {
   override run(input: Parameters<LangGraphAgent["run"]>[0]) {
@@ -46,7 +42,7 @@ class PuxLangGraphAgent extends LangGraphAgent {
       ...input,
       forwardedProps: {
         ...(input?.forwardedProps ?? {}),
-        streamSubgraphs: false,
+        streamSubgraphs: true,
       },
     });
   }
@@ -119,10 +115,125 @@ const ckHandler = copilotRuntimeNodeHttpEndpoint({
   endpoint: "/api/copilotkit",
 });
 
+interface AegraThread {
+  thread_id: string;
+  status?: string;
+  created_at: string;
+  updated_at: string;
+  metadata?: { thread_name?: string | null };
+}
+
+/**
+ * Thread list proxy — bridges CopilotKit's ``useThreads()`` to Aegra.
+ *
+ * CopilotKit's runtime does NOT serve ``/threads`` — thread management is a
+ * CopilotKit Cloud (Intelligence Platform) feature. We self-host on LangGraph
+ * (Aegra), which has its own native ``/threads`` endpoint. This proxy
+ * intercepts ``GET /api/copilotkit/threads`` BEFORE the CopilotKit runtime
+ * handler (which would 405), fetches from Aegra, and transforms the response
+ * to the format ``useThreads()`` expects (``data.threads`` → objects with
+ * ``id/name/createdAt/updatedAt/…``). This makes the native CopilotKit hook
+ * work against our self-hosted backend — no Cloud subscription needed.
+ */
+async function handleThreadListProxy(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  try {
+    const url = new URL(req.url ?? "", AEGRA_URL);
+    const limit = url.searchParams.get("limit") ?? "50";
+    const agentId = url.searchParams.get("agentId") ?? "general";
+    const aegraRes = await fetch(`${AEGRA_URL}/threads/?limit=${encodeURIComponent(limit)}`);
+    if (!aegraRes.ok) {
+      res.writeHead(aegraRes.status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: `Aegra /threads → ${aegraRes.status}` }));
+      return;
+    }
+    const data = (await aegraRes.json()) as { threads?: AegraThread[] };
+    const threads = (data.threads ?? []).map((t) => ({
+      id: t.thread_id,
+      agentId,
+      name: t.metadata?.thread_name ?? "",
+      archived: false,
+      createdAt: t.created_at,
+      updatedAt: t.updated_at,
+      lastRunAt: t.updated_at,
+    }));
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ threads, nextCursor: null }));
+  } catch (e) {
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: `Thread proxy: ${e}` }));
+  }
+}
+
+/**
+ * Enable thread endpoints in the runtime info response.
+ *
+ * The CopilotKit runtime reports ``threadEndpoints.list = false`` unless it
+ * detects CopilotKit Cloud (Intelligence Platform) OR a runner with
+ * ``ɵsupportsLocalThreadEndpoints``. We self-host on LangGraph (Aegra), so
+ * neither condition is met — but we DO serve ``/threads`` via
+ * :func:`handleThreadListProxy`. This wrapper intercepts the runtime info
+ * JSON response and flips ``list``/``inspect`` to ``true`` so the native
+ * ``useThreads()`` hook proceeds to fetch (and hits our proxy). It touches
+ * ONLY ``application/json`` responses; SSE streams (``agent/run``) pass
+ * through untouched.
+ */
+function enableThreadEndpointsInInfo(res: ServerResponse): void {
+  const origWrite = res.write.bind(res);
+  const origEnd = res.end.bind(res);
+  const buf: Buffer[] = [];
+  let buffering = false;
+
+  const isJson = (): boolean => {
+    const ct = res.getHeader("content-type");
+    return typeof ct === "string" && ct.includes("application/json");
+  };
+
+  (res as { write: typeof res.write }).write = (chunk: unknown, ...args: unknown[]): boolean => {
+    if (isJson() && typeof chunk === "string" || Buffer.isBuffer(chunk)) {
+      buffering = true;
+      buf.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      return true;
+    }
+    return origWrite(chunk as Parameters<typeof origWrite>[0], ...args as Parameters<typeof origWrite>[1][]);
+  };
+
+  (res as { end: typeof res.end }).end = (chunk?: unknown, ...args: unknown[]): ServerResponse => {
+    if (chunk != null && isJson()) {
+      buffering = true;
+      buf.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+    }
+    if (buffering && buf.length > 0) {
+      const body = Buffer.concat(buf).toString("utf-8");
+      try {
+        const d = JSON.parse(body) as Record<string, unknown>;
+        if (d && typeof d === "object" && "threadEndpoints" in d) {
+          const te = d.threadEndpoints as Record<string, boolean>;
+          te.list = true;
+          te.inspect = true;
+          // mutations stay false — we don't proxy create/rename/delete yet
+        }
+        const modified = JSON.stringify(d);
+        if (!res.headersSent) {
+          res.setHeader("Content-Length", Buffer.byteLength(modified));
+        }
+        return origEnd(modified);
+      } catch {
+        return origEnd(body);
+      }
+    }
+    return origEnd(chunk as Parameters<typeof origEnd>[0], ...args as Parameters<typeof origEnd>[1][]);
+  };
+}
+
 /**
  * Route handler for /api/copilotkit(.**). Delegates to the CopilotKit runtime
  * which translates the client protocol ↔ langgraph-api (Aegra). Returns true
  * if the path matched (the runtime owned the response); false to fall through.
+ *
+ * Two self-hosted intercepts BEFORE the CopilotKit runtime handler:
+ *   - ``GET /api/copilotkit/threads`` → proxied to Aegra (thread listing)
+ *   - ``POST /api/copilotkit`` (info) → ``threadEndpoints.list/inspect`` flipped
+ *     to ``true`` so the native ``useThreads()`` hook works without Cloud.
  */
 export async function handleCopilotKitRoute(
   req: IncomingMessage,
@@ -130,6 +241,14 @@ export async function handleCopilotKitRoute(
   urlPath: string,
 ): Promise<boolean> {
   if (urlPath !== "/api/copilotkit" && !urlPath.startsWith("/api/copilotkit/")) return false;
+  if (urlPath === "/api/copilotkit/threads" && req.method === "GET") {
+    await handleThreadListProxy(req, res);
+    return true;
+  }
+  // Wrap res for the main endpoint so the info response enables thread endpoints.
+  if (urlPath === "/api/copilotkit" && req.method === "POST") {
+    enableThreadEndpointsInInfo(res);
+  }
   await ckHandler(req, res);
   return true;
 }
