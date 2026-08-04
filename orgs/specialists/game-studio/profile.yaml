@@ -1,1 +1,9 @@
 ask_user: true
+
+# ``interpreter`` (CodeInterpreterMiddleware) — the dynamic-subagent happy path.
+# Was auto-armed by the deleted strength gate; now an explicit opt-in. Game
+# studio's CTO fans out across multiple subagents — keep the eval tool.
+middleware:
+  supervisor:
+    add:
+      - interpreter

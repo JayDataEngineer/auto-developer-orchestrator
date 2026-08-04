@@ -1,5 +1,13 @@
 ask_user: true
 
+# ``interpreter`` (CodeInterpreterMiddleware) — the dynamic-subagent happy path.
+# Was auto-armed by the deleted strength gate; now an explicit opt-in. DRE's
+# CTO dispatches gather/synthesize/audit subagents — keep the eval tool.
+middleware:
+  supervisor:
+    add:
+      - interpreter
+
 # Research-quality rubric gate. Each DRE agent (auditor, synthesizer, writer)
 # declares its OWN rubric via frontmatter `rubric:` + `middleware: [rubric]`,
 # which OVERRIDES this default via the _RubricOverride middleware. The gate
