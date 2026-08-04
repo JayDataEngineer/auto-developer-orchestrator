@@ -108,49 +108,23 @@ Outputs:
 | `exports/final.mp4` | Final muxed video |
 | `frames/qc_*.png` | QC preview frames |
 
-## Pitfalls
-
-- **Manim before venv activation.** Always `source /sandbox/workspace/.venv/bin/activate`
-  first. If `manim` isn't on PATH, the venv isn't active.
-- **pip install outside venv.** Use `bootstrap.sh` or `.venv/bin/pip`.
-- **MathTex complex equations.** LaTeX isn't installed — equations render
-  as empty boxes. Use animated shapes instead.
-- **Audio / video sync drift.** Regenerate with `--fps 30` and verify
-  segment durations in `audio/timings.json` match the visuals.
-- **Manim render OOM.** Reduce quality (`-ql`), simplify the scene, or
-  fall back to ffmpeg stills. Don't loop the OOM — surface it.
-- **Kokoro import fails.** Fall back to `espeak` or write
-  `src/timings.json` manually with duration estimates. Surface the gap
-  in `render.md` — don't silently ship a degraded version.
-- **PDF extraction fails.** Use web research to find an alternative
-  source, or skip figures.
-
 ## Troubleshooting
 
 | Issue | Action |
 |-------|--------|
-| Kokoro import fails | Fall back to espeak OR write `src/timings.json` manually with duration estimates |
-| Manim render OOM | Reduce quality (`-ql`), simplify scene, or use ffmpeg stills |
-| PDF extraction fails | Use web research to find alternative source, or skip figures |
-| Audio / video sync drift | Regenerate with `--fps 30`, verify `audio/timings.json` matches visuals |
-| Final MP4 has no audio stream | Do NOT archive. Re-mux, verify with `ffprobe -select_streams a:0`. |
+| `manim` not on PATH | Venv not active — `source /sandbox/workspace/.venv/bin/activate` first |
+| pip install outside venv | Use `bootstrap.sh` or `.venv/bin/pip` |
+| MathTex empty boxes | LaTeX isn't installed — use animated shapes instead |
+| Kokoro import fails | Fall back to espeak OR write `src/timings.json` manually. Surface the gap in `render.md` |
+| Manim render OOM | Reduce quality (`-ql`), simplify scene, or use ffmpeg stills. Don't loop >3× |
+| Audio/video sync drift | Regenerate with `--fps 30`, verify `audio/timings.json` matches visuals |
+| Final MP4 no audio | Do NOT archive. Re-mux, verify with `ffprobe -select_streams a:0` |
+| PDF extraction fails | Use web research for alternative source, or skip figures |
 
 ## Rules
 
-- **Activate the venv before any Manim / Kokoro call.** No exceptions.
+- **Venv before Manim/Kokoro.** Always `source .venv/bin/activate` first.
 - **Verify before archive.** `ffprobe` must confirm video + audio streams.
-- **QC frames before declaring done.** Extract + eyeball at least 2.
-- **Archive every finished MP4.** No leaving finished work in `/tmp` or
-  `renders/`.
-- **No silent degradation.** If Kokoro is unavailable, surface it in
-  `render.md` — don't ship a silent video pretending it's narrated.
-
-## Anti-patterns (don't do these)
-
-- Calling `manim` without sourcing the venv.
-- Shipping `exports/final.mp4` without `ffprobe`-verifying the audio
-  stream.
-- Declaring done without extracting + reviewing QC frames.
-- Leaving finished videos in `/tmp` or `renders/` (not archived).
-- Silently swapping Kokoro for espeak without noting it in `render.md`.
-- Looping a Manim OOM more than 3× without simplifying the scene.
+- **QC frames before done.** Extract + eyeball at least 2.
+- **Archive every finished MP4.** No leaving work in `/tmp` or `renders/`.
+- **No silent degradation.** If Kokoro is unavailable, note it in `render.md`.
