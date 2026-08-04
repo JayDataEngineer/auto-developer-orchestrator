@@ -4,7 +4,7 @@ Deterministic, browser-free proofs of the decision logic that turns a string
 ToolMessage carrying ``screenshot_path`` into a ``Command`` whose state update
 appends BOTH the original text ToolMessage (so the tool_call still gets its
 paired string result) AND a companion ``HumanMessage`` carrying the screenshot
-as a native image block (the gateway-compatible form: the shipped OpenCode-Zen
+as a native image block (the gateway-compatible form: the shipped OpenRouter
 gateway rejects image-in-tool but accepts image-in-user). Plus the honest-failure
 paths and the env gate. The live "real PNG out of real Chrome, image block
 reaches the model" proof lives under ``PUX_E2E=1`` in ``tests/integration/``.
@@ -192,14 +192,17 @@ def test_browser_vision_enabled_opt_out(monkeypatch):
 # Only tools whose slug is in _SCREENSHOT_SLUGS get a screenshot; everything
 # else returns text-only (the return value / SoM map is ground truth, the
 # agent calls browser_screenshot explicitly when it wants to look). This cuts
-# ~60% of vision tokens (type/scroll/evaluate/extract are high-frequency).
+# ~60% of vision tokens (type/evaluate/extract are high-frequency).
+# NOTE: scroll + scroll_into_view ARE in the screenshot set — the viewport
+# moves even though the DOM is unchanged, so the model needs to see the new
+# viewport. The dirty-flag capture still saves the expensive text re-extraction.
 
 @pytest.mark.parametrize("slug", [
-    "type", "press", "wait", "scroll", "scroll_into_view",
+    "type", "press", "wait",
     "evaluate", "extract", "find_text", "upload", "download",
     "save_session", "restore_session", "a11y", "dropdown_options",
     "iframe", "tabs", "close_tab", "save_screenshot", "warmup_history",
-    "solve_captcha",
+    "solve_captcha", "reset",
 ])
 def test_text_only_slugs_skip_screenshot(slug):
     """High-frequency non-visual slugs must NOT attach a screenshot — the result
@@ -217,6 +220,7 @@ def test_text_only_slugs_skip_screenshot(slug):
     "navigate", "search", "go_back", "new_tab", "switch_tab",
     "click", "click_at", "hover", "drag", "select_dropdown",
     "accept_cookies", "uc", "screenshot",
+    "scroll", "scroll_into_view",
 ])
 def test_visual_slugs_attach_screenshot(slug):
     """Slugs in the screenshot policy set DO attach the image (Command with the

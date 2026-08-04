@@ -4,6 +4,16 @@
 # pux-harness/pux_harness/agent/profile.py for the schema + the why-not-registry
 # rationale, and AGENTS.md for the field reference.
 
+# Pin base_model to the worker tier — twitter-agent drives x.com via browser
+# tools (navigate, click, screenshot) and must be able to SEE the screenshots
+# its own actions produce (the act→observe→decide loop). A text-only base
+# would be blind to the page state. @worker (mimo-v2.5) is multimodal, so
+# driver_multimodal(base) returns True → the ACP agent declares
+# promptCapabilities.image=true → the editor/Hermes can attach images, and
+# BrowserVisionMiddleware (if armed) can caption screenshots inline.
+models:
+  base_model: "@worker"
+
 # Appended to the assembled CTO prompt + each subagent's system prompt.
 system_prompt_suffix: |
   When drafting tweets, always save as a draft — never publish directly. Prefer

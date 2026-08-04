@@ -17,7 +17,7 @@ Usage:
 Environment:
     MEDIA_MCP_URL   default http://localhost:8101
     SURREALDB_URL   default http://localhost:8000
-    OPENCODE_API_KEY  passed to media-mcp for cloud_vlm calls
+    OPENROUTER_API_KEY  passed to media-mcp for cloud_vlm calls
 """
 
 import argparse
@@ -169,6 +169,137 @@ class FileServer:
         self.httpd.shutdown()
 
 
+# ─── Whisper ASR (direct, bypasses broken media-mcp Parakeet) ────────────────
+
+class WhisperASR:
+    """Direct ASR using faster-whisper (CTranslate2 backend).
+    Bypasses media-mcp's Parakeet ONNX path (broken Add_2 node on all
+    onnxruntime versions tested). faster-whisper is faster, more accurate,
+    and works reliably on CPU with int8 quantization."""
+
+    _model = None  # lazy singleton
+
+    def __init__(self, model_size: str = "large-v3", device: str = "auto"):
+        if WhisperASR._model is None:
+            from faster_whisper import WhisperModel
+            dev = device if device != "auto" else ("cuda" if _has_cuda() else "cpu")
+            compute = "float16" if dev == "cuda" else "int8"
+            progress(f"  Loading Whisper model: {model_size} ({dev}/{compute})")
+            WhisperASR._model = WhisperModel(model_size, device=dev, compute_type=compute)
+            progress(f"  Whisper model loaded")
+
+    def transcribe(self, audio_path: str) -> dict:
+        segments, info = self._transcribe_with_retry(audio_path)
+        seg_list = [
+            {"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}
+            for s in segments
+        ]
+        text = " ".join(s["text"] for s in seg_list)
+        return {"text": text, "segments": seg_list, "language": info.language}
+
+    def _transcribe_with_retry(self, audio_path: str, retries: int = 2):
+        for attempt in range(retries + 1):
+            try:
+                return WhisperASR._model.transcribe(
+                    audio_path, beam_size=5, vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500),
+                )
+            except Exception as e:
+                if attempt < retries:
+                    progress(f"    retry {attempt+1}/{retries}: {str(e)[:60]}")
+                    time.sleep(2)
+                else:
+                    raise
+
+
+def _has_cuda() -> bool:
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
+
+# ─── Pyannote Voice (direct host-side, bypasses media-mcp) ───────────────────
+
+HF_TOKEN = os.environ.get("HF_TOKEN", os.environ.get("HUGGING_FACE_HUB_TOKEN", ""))
+
+
+class PyannoteVoice:
+    """Host-side voice embeddings via WeSpeaker + diarization via pyannote 3.1.
+    Bypasses media-mcp (which lacks pyannote.audio in its Docker image).
+    Requires: pip install pyannote.audio + HF_TOKEN with accepted licenses."""
+
+    _embed_model = None
+    _dia_pipeline = None
+
+    @classmethod
+    def _get_embed_model(cls):
+        if cls._embed_model is None:
+            from pyannote.audio import Model
+            cls._embed_model = Model.from_pretrained(
+                "pyannote/wespeaker-voxceleb-resnet34-LM",
+                token=HF_TOKEN,
+            )
+            progress("  Voice embed model loaded (WeSpeaker)")
+        return cls._embed_model
+
+    @classmethod
+    def _get_dia_pipeline(cls):
+        if cls._dia_pipeline is None:
+            import torch
+            from pyannote.audio import Pipeline
+            cls._dia_pipeline = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                token=HF_TOKEN,
+            )
+            # Move to GPU if available (5-10x speedup over CPU)
+            if torch.cuda.is_available():
+                cls._dia_pipeline.to(torch.device("cuda"))
+                progress("  Diarization pipeline loaded (pyannote 3.1, GPU)")
+            else:
+                progress("  Diarization pipeline loaded (pyannote 3.1, CPU)")
+        return cls._dia_pipeline
+
+    @classmethod
+    def embed(cls, audio_path: str) -> dict:
+        """Extract a 256-d voice embedding from an audio file."""
+        import torch, torchaudio
+        from pyannote.audio import Inference
+        model = cls._get_embed_model()
+        waveform, sr = torchaudio.load(audio_path)
+        if sr != 16000:
+            waveform = torchaudio.transforms.Resample(sr, 16000)(waveform)
+            sr = 16000
+        # Use first 60 seconds max for embedding (speed)
+        if waveform.shape[1] > 60 * sr:
+            waveform = waveform[:, :60 * sr]
+        inference = Inference(model, window="whole")
+        emb = inference({"waveform": waveform, "sample_rate": sr})
+        return {"embedding": emb.tolist() if hasattr(emb, "tolist") else list(emb)}
+
+    @classmethod
+    def diarize(cls, audio_path: str, min_speakers: int = 1, max_speakers: int = 4) -> dict:
+        """Run full speaker diarization. Returns segments + speaker embeddings.
+        max_speakers=4 covers most conversations while keeping clustering fast."""
+        pipeline = cls._get_dia_pipeline()
+        result = pipeline(audio_path, min_speakers=min_speakers, max_speakers=max_speakers)
+        dia = result.speaker_diarization
+        segments = []
+        for turn, _, speaker in dia.itertracks(yield_label=True):
+            segments.append({
+                "speaker": speaker,
+                "start": round(turn.start, 2),
+                "end": round(turn.end, 2),
+            })
+        return {
+            "segments": segments,
+            "n_speakers": len(set(s["speaker"] for s in segments)),
+            "speaker_embeddings": result.speaker_embeddings.tolist()
+                if hasattr(result.speaker_embeddings, "tolist") else [],
+        }
+
+
 # ─── Utilities ───────────────────────────────────────────────────────────────
 
 def find_media(data_dir: Path, exts: set, skip_thumbs: bool = True) -> list[Path]:
@@ -181,6 +312,21 @@ def find_media(data_dir: Path, exts: set, skip_thumbs: bool = True) -> list[Path
                 continue
             results.append(p)
     return results
+
+
+def rel_key(data_dir: Path, p: Path) -> str:
+    """Stable dedup key for a media path: relative-to-data_dir when possible.
+
+    Two files in different subdirectories that share a basename (e.g.
+    ``photos/foo.jpg`` and ``NotebookLM_Source/foo.jpg``) are DIFFERENT files
+    and must BOTH be processed. Using ``p.name`` (basename only) for idempotency
+    caused the second copy to be silently skipped, leaving DB records with
+    missing embeddings/classification/OCR — failing audit coverage checks.
+    """
+    try:
+        return str(p.relative_to(data_dir))
+    except ValueError:
+        return str(p)
 
 
 def load_json(path: Path):
@@ -279,13 +425,22 @@ def step_parse(data_dir: Path, run_dir: Path):
 
 
 def step_faces(client: MCPClient, data_dir: Path, run_dir: Path):
-    """Step 2: Face embeddings for ALL photos via InsightFace (media-mcp)."""
+    """Step 2: Face embeddings for ALL photos via InsightFace (media-mcp).
+
+    Uses the path RELATIVE to data_dir (not the basename) for idempotency
+    tracking. Two photos in different subdirectories (e.g. ``photos/foo.jpg``
+    and ``NotebookLM_Source/foo.jpg``) are DIFFERENT files and must BOTH get
+    embeddings. The old code used ``photo.name`` (basename only), which caused
+    the second copy to be silently skipped — leaving DB face_appearance rows
+    with ``embedding = NONE`` and failing audit check #7 (embedding coverage).
+    """
     out = run_dir / "face_embeddings.json"
     existing = load_json(out) or {"embeddings": [], "metadata": []}
     done = {m.get("photo") for m in existing.get("metadata", [])}
 
     photos = find_media(data_dir, PHOTO_EXTS)
-    pending = [p for p in photos if p.name not in done]
+
+    pending = [p for p in photos if rel_key(data_dir, p) not in done]
     progress(f"  faces: {len(photos)} photos total, {len(done)} done, {len(pending)} pending")
 
     if not pending:
@@ -302,7 +457,7 @@ def step_faces(client: MCPClient, data_dir: Path, run_dir: Path):
         for fut in as_completed(futures):
             photo, result = fut.result()
             if "error" in result:
-                progress(f"    {photo.name}: ERROR {result['error'][:80]}")
+                progress(f"    {rel_key(data_dir, photo)}: ERROR {result['error'][:80]}")
                 continue
             faces = result.get("faces", result.get("embeddings", []))
             for idx, face in enumerate(faces):
@@ -311,7 +466,7 @@ def step_faces(client: MCPClient, data_dir: Path, run_dir: Path):
                 if emb:
                     existing["embeddings"].append(emb)
                     existing["metadata"].append({
-                        "photo": photo.name, "face_idx": idx,
+                        "photo": rel_key(data_dir, photo), "face_idx": idx,
                         "box": box, "confidence": face.get("confidence", face.get("score", 0)),
                     })
             batch_save += 1
@@ -348,7 +503,7 @@ def step_face_clusters(client: MCPClient, run_dir: Path):
 
 
 def step_voice(client: MCPClient, server: FileServer, data_dir: Path, run_dir: Path):
-    """Step 4: Voice embeddings for ALL audio via WeSpeaker (media-mcp)."""
+    """Step 4: Voice embeddings for ALL audio via WeSpeaker (host-side pyannote)."""
     out = run_dir / "voice_embeddings.json"
     existing = load_json(out) or {"embeddings": [], "metadata": []}
     done = {m.get("audio") for m in existing.get("metadata", [])}
@@ -361,30 +516,25 @@ def step_voice(client: MCPClient, server: FileServer, data_dir: Path, run_dir: P
         if stem not in seen_stems:
             seen_stems[stem] = a
     audio_files = sorted(seen_stems.values())
-    pending = [a for a in audio_files if a.name not in done]
+    pending = [a for a in audio_files if rel_key(data_dir, a) not in done]
     progress(f"  voice: {len(audio_files)} audio (deduped), {len(done)} done, {len(pending)} pending")
 
     if not pending:
         return
 
-    def embed_audio(audio: Path):
-        url = server.url_for(str(audio))
-        result = client.call("embed_voice", {"audioSource": url}, timeout=60)
-        return audio, result
-
-    with ThreadPoolExecutor(max_workers=2) as pool:  # voice is heavier
-        futures = {pool.submit(embed_audio, a): a for a in pending}
-        for fut in as_completed(futures):
-            audio, result = fut.result()
-            if "error" in result:
-                progress(f"    {audio.name}: ERROR {result['error'][:80]}")
-                continue
-            emb = result.get("embedding", result.get("voice_embedding", []))
+    for i, audio in enumerate(pending):
+        try:
+            result = PyannoteVoice.embed(str(audio))
+            emb = result.get("embedding", [])
             if emb:
                 existing["embeddings"].append(emb)
-                existing["metadata"].append({"audio": audio.name, "path": str(audio)})
+                akey = rel_key(data_dir, audio)
+                existing["metadata"].append({"audio": akey, "path": str(audio)})
+                progress(f"    [{len(existing['embeddings'])}/{len(audio_files)}] {akey}: {len(emb)}-d")
             else:
-                progress(f"    {audio.name}: no embedding returned")
+                progress(f"    {audio.name}: no embedding")
+        except Exception as e:
+            progress(f"    {audio.name}: ERROR {str(e)[:80]}")
 
     save_json(out, existing)
     progress(f"  voice: {len(existing['embeddings'])} voice embeddings")
@@ -410,7 +560,9 @@ def step_voice_clusters(client: MCPClient, run_dir: Path):
 
 
 def step_asr(client: MCPClient, server: FileServer, data_dir: Path, run_dir: Path):
-    """Step 6: Transcribe ALL audio via Parakeet (media-mcp)."""
+    """Step 6: Transcribe ALL audio via faster-whisper (direct, reliable).
+    Bypasses media-mcp's broken Parakeet ONNX model (Add_2 node fails on
+    all onnxruntime versions). faster-whisper uses CTranslate2 instead."""
     trans_dir = run_dir / "audio_transcripts"
     trans_dir.mkdir(parents=True, exist_ok=True)
 
@@ -436,28 +588,34 @@ def step_asr(client: MCPClient, server: FileServer, data_dir: Path, run_dir: Pat
     if not pending:
         return
 
-    def transcribe(item):
-        audio, out_path = item
-        url = server.url_for(str(audio))
-        result = client.call("transcribe_audio", {"audioSource": url}, timeout=120)
-        save_json(out_path, {
-            "file": audio.name, "path": str(audio), "transcript": result.get("text", ""),
-            "segments": result.get("segments", []), "error": result.get("error", ""),
-        })
-        return audio.name, result.get("text", "")[:50], result.get("error", "")
+    # Use faster-whisper directly (not media-mcp)
+    asr = WhisperASR()
+    done = 0
+    for audio, out_path in pending:
+        try:
+            result = asr.transcribe(str(audio))
+            save_json(out_path, {
+                "file": audio.name, "path": str(audio),
+                "transcript": result["text"],
+                "segments": result["segments"],
+                "language": result.get("language", ""),
+            })
+            done += 1
+            sample = result["text"][:60]
+            progress(f"    [{done}/{len(pending)}] {audio.name}: \"{sample}...\"")
+        except Exception as e:
+            save_json(out_path, {
+                "file": audio.name, "path": str(audio),
+                "transcript": "", "error": str(e)[:200],
+            })
+            progress(f"    [{done}/{len(pending)}] {audio.name}: ERROR {str(e)[:60]}")
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = {pool.submit(transcribe, item): item for item in pending}
-        for fut in as_completed(futures):
-            name, sample, err = fut.result()
-            if err:
-                progress(f"    {name}: ERROR {err[:60]}")
-            else:
-                progress(f"    {name}: OK \"{sample}...\"")
+    progress(f"  asr: {done}/{len(pending)} transcribed")
 
 
 def step_diarize(client: MCPClient, server: FileServer, data_dir: Path, run_dir: Path):
-    """Step 7: Speaker diarization on ALL audio (who speaks when)."""
+    """Step 7: Speaker diarization via pyannote 3.1 (host-side, direct).
+    Adds speaker segments to each transcript file."""
     trans_dir = run_dir / "audio_transcripts"
     all_audio = find_media(data_dir, AUDIO_EXTS)
     seen = {}
@@ -474,12 +632,16 @@ def step_diarize(client: MCPClient, server: FileServer, data_dir: Path, run_dir:
         trans = load_json(trans_path)
         if not trans or trans.get("diarization"):
             continue  # No transcript or already diarized
-        url = server.url_for(str(a))
-        result = client.call("diarize_audio", {"audioSource": url}, timeout=120)
-        if "error" not in result:
-            trans["diarization"] = result.get("segments", result.get("turns", []))
+        try:
+            result = PyannoteVoice.diarize(str(a))
+            trans["diarization"] = result.get("segments", [])
+            trans["n_speakers"] = result.get("n_speakers", 0)
             save_json(trans_path, trans)
             count += 1
+            progress(f"    [{count}] {a.name}: {result.get('n_speakers',0)} speakers")
+        except Exception as e:
+            progress(f"    {a.name}: ERROR {str(e)[:80]}")
+
     progress(f"  diarize: {count} files diarized")
 
 
@@ -519,7 +681,7 @@ def step_vlm_frames(client: MCPClient, run_dir: Path):
     done = {e.get("frame") for e in existing if "error" not in e}
 
     frames = sorted(frames_dir.rglob("*.jpg"))
-    pending = [f for f in frames if f.name not in done]
+    pending = [f for f in frames if rel_key(run_dir, f) not in done]
     progress(f"  vlm_frames: {len(frames)} keyframes, {len(pending)} pending")
 
     if not pending:
@@ -532,7 +694,7 @@ def step_vlm_frames(client: MCPClient, run_dir: Path):
             "image": uri,
             "prompt": "Describe what you see in this video frame. Note: people (count, appearance, actions), objects, weapons, text visible on screen, setting/location, and any notable details.",
         }, timeout=60)
-        return {"frame": frame.name, "video": video, "path": str(frame.relative_to(run_dir)),
+        return {"frame": rel_key(run_dir, frame), "video": video, "path": str(frame.relative_to(run_dir)),
                 "description": result.get("response") or result.get("text") or result.get("description") or "",
                 "error": result.get("error", "")}
 
@@ -557,7 +719,7 @@ def step_classify(client: MCPClient, data_dir: Path, run_dir: Path):
     done = {k for k, v in existing.items() if v.get("category") and "error" not in v}
 
     photos = find_media(data_dir, PHOTO_EXTS)
-    pending = [p for p in photos if p.name not in done]
+    pending = [p for p in photos if rel_key(data_dir, p) not in done]
     progress(f"  classify: {len(photos)} photos, {len(pending)} pending")
 
     if not pending:
@@ -572,8 +734,8 @@ def step_classify(client: MCPClient, data_dir: Path, run_dir: Path):
         cat = (result.get("response") or result.get("text") or "").strip().lower()
         for valid in ["text_screenshot", "photo_people", "document", "meme", "object"]:
             if valid in cat:
-                return photo.name, {"category": valid}
-        return photo.name, {"category": "other", "raw": cat[:50], "error": result.get("error", "")}
+                return rel_key(data_dir, photo), {"category": valid}
+        return rel_key(data_dir, photo), {"category": "other", "raw": cat[:50], "error": result.get("error", "")}
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = {pool.submit(classify_photo, p): p for p in pending}
@@ -603,7 +765,7 @@ def step_ocr(client: MCPClient, data_dir: Path, run_dir: Path):
         text_photos += [name for name, info in classification.items()
                         if info.get("category") == cat]
 
-    pending = [n for n in text_photos if n not in existing or "error" in existing.get(n, {})]
+    pending = [n for n in text_photos if n not in existing or existing.get(n, {}).get("error")]
     progress(f"  ocr: {len(text_photos)} text-bearing photos, {len(pending)} pending")
 
     if not pending:
@@ -611,7 +773,7 @@ def step_ocr(client: MCPClient, data_dir: Path, run_dir: Path):
 
     def find_photo(name: str) -> Path | None:
         for p in find_media(data_dir, PHOTO_EXTS):
-            if p.name == name:
+            if rel_key(data_dir, p) == name or p.name == name:
                 return p
         return None
 
@@ -659,7 +821,7 @@ def step_objects(client: MCPClient, data_dir: Path, run_dir: Path):
 
     def detect(name: str):
         for p in find_media(data_dir, PHOTO_EXTS):
-            if p.name == name:
+            if rel_key(data_dir, p) == name or p.name == name:
                 uri = file_to_data_uri(p)
                 result = client.call("detect_objects", {"imageSource": uri}, timeout=30)
                 return name, {"objects": result.get("detections") or result.get("objects") or [],
@@ -685,7 +847,7 @@ def step_scenes(client: MCPClient, server: FileServer, data_dir: Path, run_dir: 
     out = run_dir / "video_scenes.json"
     existing = load_json(out) or {}
     videos = find_media(data_dir, VIDEO_EXTS)
-    pending = [v for v in videos if v.name not in existing]
+    pending = [v for v in videos if rel_key(data_dir, v) not in existing]
     progress(f"  scenes: {len(videos)} videos, {len(pending)} pending")
 
     if not pending:
@@ -694,10 +856,11 @@ def step_scenes(client: MCPClient, server: FileServer, data_dir: Path, run_dir: 
     for v in pending:
         url = server.url_for(str(v))
         result = client.call("detect_scenes", {"videoSource": url}, timeout=120)
+        vkey = rel_key(data_dir, v)
         if "error" not in result:
-            existing[v.name] = {"scenes": result.get("scenes", [])}
+            existing[vkey] = {"scenes": result.get("scenes", [])}
         else:
-            existing[v.name] = {"error": result["error"]}
+            existing[vkey] = {"error": result["error"]}
     save_json(out, existing)
     progress(f"  scenes: {len(existing)} videos analyzed")
 

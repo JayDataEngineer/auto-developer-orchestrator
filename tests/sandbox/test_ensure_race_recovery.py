@@ -30,10 +30,17 @@ def _bare_container() -> SandboxContainer:
 @pytest.fixture(autouse=True)
 def _no_projects_io(monkeypatch):
     """ensure() calls projects.warn_if_switched + projects.record — stub both
-    so no filesystem / registry I/O happens during the race tests."""
+    so no filesystem / registry I/O happens during the race tests. Also stub
+    ``_network_healthy``: the race-recovery tests exercise create()'s
+    name-conflict retry path, NOT network probing, and the ``_bare_container``
+    harness intentionally skips ``__init__`` (so no DockerClient is wired).
+    Network-health self-healing has its own dedicated coverage in
+    ``test_container.py::test_ensure_force_removes_reused_container_*``."""
     from pux_harness.sandbox import projects
     monkeypatch.setattr(projects, "warn_if_switched", lambda *a, **k: False)
     monkeypatch.setattr(projects, "record", lambda *a, **k: None)
+    monkeypatch.setattr(SandboxContainer, "_network_healthy",
+                        lambda self, name: True)
 
 
 # --- _is_running_name_conflict classifier ------------------------------------

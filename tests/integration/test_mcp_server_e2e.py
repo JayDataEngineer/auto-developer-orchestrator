@@ -13,7 +13,7 @@ Skipped unless ``PUX_E2E=1`` — start both servers first:
     PUX_E2E=1 uv run pytest tests/integration/test_mcp_server_e2e.py -q
 
 Covers discovery, threads, jobs-status, and the async-lifecycle plumbing, PLUS
-``run_agent`` returning REAL model output when ``OPENCODE_API_KEY`` is present
+``run_agent`` returning REAL model output when ``OPENROUTER_API_KEY`` is present
 (the server loads it from ``.env`` via ``bin/pux``). The model-less tests
 tolerate a run ending in ``error``; the model-path test asserts a real answer.
 """
@@ -105,7 +105,7 @@ def test_get_jobs_real_policy(client, org_names):
 def test_run_agent_real_model_output(client):
     """Proves the full model path: run_agent → /runs/wait → real MiMo-V2.5 →
     bare answer text (NOT a JSON status blob — the bug _extract_run_output fixes).
-    Requires the running `pux serve` to have a live OPENCODE_API_KEY (bin/pux
+    Requires the running `pux serve` to have a live OPENROUTER_API_KEY (bin/pux
     auto-loads .env)."""
     async def _go():
         async with client as c:

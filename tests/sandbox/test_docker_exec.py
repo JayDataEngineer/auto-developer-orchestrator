@@ -13,10 +13,57 @@ import pytest
 from pux_harness.sandbox.docker_exec import (
     DockerExecClient,
     ExecTimeout,
+    _DEFAULT_TIMEOUT,
+    _NO_TIMEOUT_CEILING,
     _discover,
     _resolve_project,
+    _resolve_timeout,
     get_exec_client,
 )
+
+
+# --- _resolve_timeout --------------------------------------------------------
+
+
+class TestResolveTimeout:
+    """``_resolve_timeout`` is the SINGLE gate that prevents the
+    ``timeout=0`` footgun. deepagents' filesystem middleware documents
+    ``timeout=0`` to the model as "Use 0 for no-timeout execution on backends
+    that support it" (filesystem.py:414/1683). Without this helper,
+    ``future.result(timeout=0)`` trips INSTANTLY and the failure surfaces as
+    a misleading "model stream stalled" notice (see ``test_prompt_stall_recovery``
+    regression tests for the user-visible symptom).
+    """
+
+    def test_none_uses_default_timeout(self):
+        assert _resolve_timeout(None) == _DEFAULT_TIMEOUT == 120
+
+    def test_zero_uses_no_timeout_ceiling(self):
+        """The deepagents API contract: ``timeout=0`` means 'no-timeout
+        execution'. We use the Docker SDK's HTTP read ceiling (300s) as the
+        effective deadline since we can't actually block forever."""
+        assert _resolve_timeout(0) == _NO_TIMEOUT_CEILING == 300
+
+    def test_negative_uses_no_timeout_ceiling(self):
+        """Negative timeouts are nonsense; treat them the same as 0
+        (the 'no-timeout' ceiling) rather than crashing."""
+        assert _resolve_timeout(-1) == _NO_TIMEOUT_CEILING
+        assert _resolve_timeout(-999) == _NO_TIMEOUT_CEILING
+
+    def test_positive_uses_value_verbatim(self):
+        assert _resolve_timeout(5) == 5
+        assert _resolve_timeout(60) == 60
+        assert _resolve_timeout(3600) == 3600  # deepagents max_execute_timeout
+
+    def test_zero_does_not_instant_fail(self):
+        """THE regression: ``_resolve_timeout(0)`` MUST be > 0. The pre-fix
+        ``effective_timeout = timeout if timeout is not None else _DEFAULT_TIMEOUT``
+        returned 0 verbatim, ``future.result(timeout=0)`` raised
+        ``concurrent.futures.TimeoutError`` immediately, and the user saw a
+        fake 'stream stalled' notice for a command that never had a chance
+        to run. Proven in ``.pux/stall.log`` (2026-07-22T02:02:42, session
+        67f05375..., org coder): ``exec timed out after 0s``."""
+        assert _resolve_timeout(0) > 0
 
 
 # --- _resolve_project ---------------------------------------------------------
@@ -125,6 +172,56 @@ class TestDockerExecClient:
 
         out, code = client.exec("echo ok")
         assert out == "ok"
+
+    def test_exec_timeout_zero_uses_no_timeout_ceiling(self):
+        """REGRESSION (2026-07-22): the deepagents filesystem middleware
+        forwards ``timeout=0`` to ``execute(timeout=0)`` when the LLM votes
+        for "no-timeout execution" (the documented contract). The pre-fix
+        code passed 0 verbatim to ``future.result(timeout=0)`` which tripped
+        INSTANTLY — every long-running agent command appeared to "stall"
+        without ever running. ``_resolve_timeout`` must coerce 0 → the SDK
+        HTTP ceiling so the command actually has time to execute."""
+        client = self._make_client()
+        fake_result = SimpleNamespace(output=b"done", exit_code=0)
+
+        captured_timeouts: list[int] = []
+
+        class _FakeFuture:
+            def result(self, timeout=None):
+                captured_timeouts.append(timeout)
+                return fake_result
+
+        with patch.object(
+            concurrent.futures.ThreadPoolExecutor, "submit", return_value=_FakeFuture()
+        ):
+            out, code = client.exec("uv run pux direct --org coder", timeout=0)
+
+        assert out == "done"
+        assert code == 0
+        assert captured_timeouts == [_NO_TIMEOUT_CEILING], (
+            f"timeout=0 must reach future.result() as {_NO_TIMEOUT_CEILING}s "
+            f"(SDK ceiling), not 0 (instant fail). Got {captured_timeouts}."
+        )
+
+    def test_exec_timeout_negative_uses_no_timeout_ceiling(self):
+        """Defense: negative timeouts (nonsense caller input) must not crash
+        or instant-fail either; coerce to the same SDK ceiling."""
+        client = self._make_client()
+        fake_result = SimpleNamespace(output=b"ok", exit_code=0)
+
+        captured_timeouts: list[int] = []
+
+        class _FakeFuture:
+            def result(self, timeout=None):
+                captured_timeouts.append(timeout)
+                return fake_result
+
+        with patch.object(
+            concurrent.futures.ThreadPoolExecutor, "submit", return_value=_FakeFuture()
+        ):
+            client.exec("echo ok", timeout=-42)
+
+        assert captured_timeouts == [_NO_TIMEOUT_CEILING]
 
     def test_container_not_found_raises(self):
         from docker.errors import NotFound

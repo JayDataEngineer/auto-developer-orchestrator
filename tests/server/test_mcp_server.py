@@ -468,7 +468,7 @@ def test_reload_profiles_empty_pool_is_noop(mock_pool):
 
 
 # ---------------------------------------------------------------------------
-# deploy_browser_agent
+# deploy_browser_agent + browser_status (non-blocking fire + poll)
 # ---------------------------------------------------------------------------
 
 _PNG_1X1 = (
@@ -477,40 +477,105 @@ _PNG_1X1 = (
 )
 
 
-def test_deploy_browser_agent_happy_path(mock_pool):
-    """One-shot: new_session on browser-agent + prompt with the task, returns
-    the agent text + stop reason. No session-id leaks to the caller."""
-    mock_pool.org = "browser-agent"
-    mock_pool._prompt_result = ("Page says: Welcome to Example", "", "end_turn", [])
+@pytest.fixture(autouse=True)
+def _clear_browser_tasks():
+    """Hermeticity: clear the in-memory browser-task tracker before AND after
+    each test so progress dicts from one test can't leak into another."""
+    mcp_server._BROWSER_TASKS.clear()
+    yield
+    mcp_server._BROWSER_TASKS.clear()
 
-    r = run(_call("deploy_browser_agent", task="Go to https://example.com and summarize"))
+
+def _extract_sid(text: str) -> str | None:
+    """Pull the session_id out of a deploy_browser_agent response."""
+    import re
+    m = re.search(r"session_id: `([^`]+)`", text)
+    return m.group(1) if m else None
+
+
+async def _deploy_and_status(task: str) -> tuple:
+    """Call deploy_browser_agent, drain the background task, then poll
+    browser_status. Returns (deploy_result, sid, status_result)."""
+    async with Client(mcp_server.MCP) as c:
+        deploy_r = await c.call_tool("deploy_browser_agent", {"task": task})
+        sid = _extract_sid(deploy_r.content[0].text)
+        # Drain background tasks so the (synchronous mock) prompt completes
+        # before we poll status. In production this is where the 30-90s of
+        # real agent work would happen, pollable via browser_status.
+        if mcp_server._BG_TASKS:
+            await asyncio.gather(*mcp_server._BG_TASKS)
+        status_r = await c.call_tool("browser_status", {"session_id": sid})
+    return deploy_r, sid, status_r
+
+
+def test_deploy_returns_immediately_with_session_id(mock_pool):
+    """deploy_browser_agent is NON-BLOCKING — returns immediately with a
+    session_id. The agent text is NOT in this response; it's in
+    browser_status once state=done. This is the durable fix for the
+    'browser agent isn't producing traffic' symptom: the outer agent
+    gets a real handle to poll, not a 90s black-box wait."""
+    mock_pool.org = "browser-agent"
+    mock_pool._prompt_result = ("Page says: Welcome", "", "end_turn", [])
+
+    r = run(_call("deploy_browser_agent", task="Go to https://example.com"))
 
     assert r.is_error is False
     txt = r.content[0].text
+    assert "Browser task started" in txt
+    sid = _extract_sid(txt)
+    assert sid is not None, f"session_id missing from deploy response: {txt!r}"
+    # The deploy response tells the caller exactly how to get the result.
+    assert "browser_status" in txt
+    # The agent text is NOT here — must poll browser_status.
+    assert "Welcome" not in txt
+    # new_session was called; prompt has not YET been called at this instant
+    # (it runs in the background task).
+    assert mock_pool.calls[0][0] == "new_session"
+
+
+def test_browser_status_returns_result_when_done(mock_pool):
+    """After the background task completes, browser_status returns the
+    agent's text + stop_reason — the original synchronous payload, just
+    deferred."""
+    mock_pool.org = "browser-agent"
+    mock_pool._prompt_result = ("Page says: Welcome to Example", "", "end_turn", [])
+
+    deploy_r, sid, status_r = run(_deploy_and_status(
+        "Go to https://example.com and summarize"
+    ))
+
+    assert status_r.is_error is False
+    txt = status_r.content[0].text
+    assert "done" in txt
     assert "Welcome to Example" in txt
     assert "[end_turn]" in txt
     # new_session + prompt were both called on the browser-agent org
     assert mock_pool.calls[0][0] == "new_session"
     assert mock_pool.calls[1][0] == "prompt"
-    assert mock_pool.calls[1][1] is not None  # the generated session id
+    assert mock_pool.calls[1][1] == sid
 
 
-def test_deploy_browser_agent_returns_images_inline(mock_pool, temp_staged):
-    """When the agent produces screenshots, they come back as native MCP
-    ImageContent blocks (so the client SEES them) AND persist to staged/."""
+def test_browser_status_returns_images_inline_when_done(mock_pool, temp_staged):
+    """Screenshots flow back as native MCP image content blocks via
+    browser_status (not the deploy call) — the original asset passthrough,
+    preserved across the fire-and-status refactor."""
     mock_pool.org = "browser-agent"
     mock_pool._prompt_result = (
         "Here is the screenshot.", "", "end_turn",
         [{"data": _PNG_1X1, "mime_type": "image/png"}],
     )
 
-    r = run(_call("deploy_browser_agent", task="screenshot https://example.com"))
+    deploy_r, sid, status_r = run(_deploy_and_status(
+        "screenshot https://example.com"
+    ))
 
-    assert r.is_error is False
-    # text block + image block
-    types = [b.type for b in r.content]
+    # The deploy response has NO images — they come via status.
+    assert all(b.type == "text" for b in deploy_r.content)
+
+    # status_r delivers text + image when state=done.
+    types = [b.type for b in status_r.content]
     assert "text" in types and "image" in types
-    img_block = next(b for b in r.content if b.type == "image")
+    img_block = next(b for b in status_r.content if b.type == "image")
     assert img_block.data == _PNG_1X1
     assert img_block.mimeType == "image/png"
     # persisted to staged/ (temp_staged is the data/ dir; files land in staged/)
@@ -518,33 +583,124 @@ def test_deploy_browser_agent_returns_images_inline(mock_pool, temp_staged):
     assert len(staged) == 1
 
 
-def test_deploy_browser_agent_infra_error_is_surfaced(mock_pool):
-    """If the browser-agent org fails to boot, the error is returned as text
-    (not raised) so the MCP client gets a usable message."""
+def test_browser_status_reports_error_with_resume_hint(mock_pool):
+    """A mid-turn crash sets state=error; browser_status returns the
+    exception + a resume hint. The session_id is still durable — the
+    conversation persists in the agent-protocol store."""
+    mock_pool.org = "browser-agent"
+
+    async def _boom_prompt(sid, message, images=None):
+        raise RuntimeError("sandbox crashed mid-turn")
+    mock_pool.prompt = _boom_prompt
+
+    deploy_r, sid, status_r = run(_deploy_and_status("anything"))
+
+    txt = status_r.content[0].text
+    assert "error" in txt.lower()
+    assert "sandbox crashed mid-turn" in txt
+    # Resume recipe included.
+    assert "load_session" in txt
+    assert sid in txt
+
+
+def test_deploy_infra_error_before_session_creation(mock_pool):
+    """If _get_org or new_session fails BEFORE the session exists, deploy
+    returns an error string (no sid, no background task). This is the only
+    path that returns an error from deploy itself — mid-turn failures land
+    in browser_status instead."""
     async def _boom(org):
         raise RuntimeError("sandbox refused to start")
-    # mock_pool patches _get_org; override it to raise
     import pux_harness.mcp_server as ms
     ms._get_org = _boom  # noqa: SLF001
 
     r = run(_call("deploy_browser_agent", task="anything"))
 
     assert r.is_error is False
-    assert "Error deploying browser-agent" in r.content[0].text
-    assert "sandbox refused to start" in r.content[0].text
+    txt = r.content[0].text
+    assert "Error deploying browser-agent" in txt
+    assert "no session was created" in txt
+    assert "sandbox refused to start" in txt
+    # No background task was registered.
+    assert mcp_server._BROWSER_TASKS == {}
 
 
-def test_deploy_browser_agent_uses_browser_agent_org(mock_pool):
-    """The tool always targets the browser-agent org — the caller cannot
-    redirect it to another org (scoped by design)."""
+def test_browser_status_unknown_session_lists_active_tasks(mock_pool, monkeypatch):
+    """When the sid isn't in the tracker (server restart, typo, or created
+    via new_session), browser_status explains the mismatch and lists
+    currently-running tasks so the caller can recover."""
+    mock_pool.org = "browser-agent"
+
+    # Slow mock prompt — keeps the bg task in 'running' state while we poll.
+    async def _slow_prompt(session_id, message, images=None):
+        await asyncio.sleep(0.05)
+        return ("ok", "", "end_turn", [])
+    monkeypatch.setattr(mock_pool, "prompt", _slow_prompt)
+
+    async def _deploy_then_ask_wrong_sid():
+        async with Client(mcp_server.MCP) as c:
+            deploy_r = await c.call_tool(
+                "deploy_browser_agent", {"task": "real task"}
+            )
+            sid = _extract_sid(deploy_r.content[0].text)
+            # Poll the WRONG sid while the real task is still running.
+            status_r = await c.call_tool(
+                "browser_status", {"session_id": "no-such-session-zzz"}
+            )
+            return deploy_r, sid, status_r
+
+    deploy_r, sid, status_r = run(_deploy_then_ask_wrong_sid())
+
+    txt = status_r.content[0].text
+    assert "No deploy_browser_agent task" in txt
+    assert "no-such-session-zzz" in txt
+    # The active-task list is included with our still-running task.
+    assert "Active browser tasks:" in txt
+    assert sid in txt
+
+
+def test_deploy_always_targets_browser_agent_org(mock_pool):
+    """The tool is scoped to browser-agent — the caller cannot redirect it."""
     mock_pool.org = "browser-agent"
     mock_pool._prompt_result = ("ok", "", "end_turn", [])
 
-    run(_call("deploy_browser_agent", task="do something"))
+    run(_deploy_and_status("do something"))
 
     # _get_org is called with exactly "browser-agent" (captured by the mock
     # fixture, which sets mock_pool.org from the arg).
     assert mock_pool.org == "browser-agent"
+
+
+def test_browser_status_running_state_before_completion(mock_pool, monkeypatch):
+    """If the background task hasn't completed yet, browser_status returns
+    state=running with elapsed time. The mock prompt is normally instant;
+    we slow it down so we can observe the in-flight state."""
+    mock_pool.org = "browser-agent"
+
+    # Slow mock prompt — the bg task is still running when we poll.
+    async def _slow_prompt(session_id, message, images=None):
+        await asyncio.sleep(0.05)
+        return ("ok", "", "end_turn", [])
+    monkeypatch.setattr(mock_pool, "prompt", _slow_prompt)
+
+    async def _deploy_then_poll_midflight():
+        async with Client(mcp_server.MCP) as c:
+            deploy_r = await c.call_tool(
+                "deploy_browser_agent", {"task": "long task"}
+            )
+            sid = _extract_sid(deploy_r.content[0].text)
+            # Poll BEFORE the slow prompt finishes — the bg task is still
+            # pending.
+            status_r = await c.call_tool("browser_status", {"session_id": sid})
+            return deploy_r, sid, status_r
+
+    deploy_r, sid, status_r = run(_deploy_then_poll_midflight())
+
+    txt = status_r.content[0].text
+    assert "running" in txt
+    assert "elapsed" in txt
+    # The task preview is in the status so the caller remembers what's running.
+    assert "long task" in txt
+
 
 
 # ---------------------------------------------------------------------------
@@ -804,23 +960,6 @@ def test_orgconnection_prompt_does_not_retry_deterministic_errors(monkeypatch):
     with pytest.raises(ValueError):
         run(oc.prompt("SID", "hi"))
     assert calls["n"] == 1, f"deterministic error must not retry: {calls}"
-
-
-def test_deploy_browser_agent_surfaces_sid_on_error_for_resume(mock_pool, monkeypatch):
-    """Transient mid-turn failure must NOT cost the whole conversation. The
-    session was created; deploy_browser_agent must return its id + a resume
-    path so the caller can recover via load_session + prompt."""
-    # new_session on the mock returns "sess-abc123" by default.
-    async def _raising_prompt(session_id, message, images=None):
-        raise ConnectionError("model stream stalled: provider dropped the stream")
-    monkeypatch.setattr(mock_pool, "prompt", _raising_prompt)
-
-    r = run(_call("deploy_browser_agent", task="go to example.com"))
-    txt = r.content[0].text if r.content else ""
-    assert "sess-abc123" in txt, f"sid must be surfaced: {txt[:200]}"
-    assert "RECOVERABLE" in txt
-    assert "load_session" in txt
-    assert "model stream stalled" in txt  # original error preserved
 
 
 def test_deploy_browser_agent_no_session_created_path(mock_pool, monkeypatch):

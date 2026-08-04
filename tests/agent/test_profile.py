@@ -69,7 +69,7 @@ def _ctx() -> dict:
 # baseline lives here, once. (The capture/offload behavior itself is proven in
 # test_context_offload.py — here it's stubbed away to keep the profile test
 # focused on the wiring shape.)
-_BASELINE_MIDDLEWARE = ["ROUTE", "GUIDE", "PROMPT", "RETRY", "CACHE"]
+_BASELINE_MIDDLEWARE = ["ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
 
 
 @pytest.fixture
@@ -81,7 +81,6 @@ def fake_tree(tmp_path: Path, monkeypatch):
     (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
     (tmp_path / "orgs" / "_shared" / "skills").mkdir(parents=True)
     monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
-    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
     # BrowserVisionMiddleware is env-gated (default ON); pin it OFF so the
     # baseline tests below see EXACTLY _BASELINE_MIDDLEWARE (the always-mounted
     # routing+session_guide pair). The vision mount is proven in test_stack.py.
@@ -157,6 +156,12 @@ def captured_build(monkeypatch):
                         lambda **kw: "CACHE")
     monkeypatch.setattr(stack, "_FullPrefixCachingMiddleware",
                         lambda **kw: "CACHE")
+    # ReadFileVisionMiddleware is default-ON for EVERY scope (supervisor +
+    # subagent) — it auto-describes image/binary ToolMessages so non-multimodal
+    # drivers don't HTTP-400. Stub it to a marker so the baseline list stays a
+    # clean list of strings. Mirrors the same stub in test_stack.py.
+    monkeypatch.setattr(stack, "ReadFileVisionMiddleware",
+                        lambda **kw: "READFILE")
     # driver_strong_orchestrator gates CodeInterpreterMiddleware — stub False
     # so no real middleware object mounts in the baseline.
     monkeypatch.setattr(stack, "driver_strong_orchestrator", lambda **kw: False)
@@ -190,7 +195,11 @@ def test_suffix_lands_on_cto_and_subagent(fake_tree, captured_build):
 
 def test_tool_description_override_applies_everywhere(fake_tree, captured_build):
     """tool_description_overrides rewrites the named tool's description in the
-    main tool list AND the subagent's resolved whitelist."""
+    subagent's resolved whitelist. (The supervisor surface no longer carries
+    registry specialists by default — the override's effect on the supervisor
+    list is covered by test_stack's tool_surface tests; here we prove the
+    override reaches the SUBAGENT, which is where the specialist actually lives
+    for an org with no tool_surface block.)"""
     cfg = _cfg(overrides={
         "pux_sandbox_browser_save_session": "OVERRIDE_MARKER",
     })
@@ -200,10 +209,6 @@ def test_tool_description_override_applies_everywhere(fake_tree, captured_build)
         graph.build_graph("p", checkpointer=None)
     finally:
         mp.undo()
-
-    main = next(t for t in captured_build["tools"]
-                if t.name == "pux_sandbox_browser_save_session")
-    assert main.description == "OVERRIDE_MARKER"
 
     sub = next(s for s in captured_build["subagents"] if s["name"] == "browserish")
     ssub = next(t for t in sub["tools"]
@@ -249,7 +254,11 @@ def test_base_system_prompt_replaces(fake_tree, captured_build):
 
 def test_no_profile_is_byte_identical(fake_tree, captured_build):
     """Regression: no profile.yaml -> build_graph behaves exactly as today
-    (no suffix, no filtering, no override)."""
+    (no suffix, no filtering, no override). Under the tool-surface anti-flood
+    default (no profile → no specialists on the supervisor surface), the
+    supervisor tool list is empty of pux_sandbox_* registry specialists — they
+    still reach the supervisor via subagents, which resolve against the full
+    tools_surface (proven in test_stack.test_tool_surface_scopes_supervisor_not_subagents)."""
     mp = pytest.MonkeyPatch()
     mp.setattr(graph, "load_profile", lambda org: None)
     try:
@@ -259,11 +268,14 @@ def test_no_profile_is_byte_identical(fake_tree, captured_build):
 
     assert "SUFFIX_MARKER" not in captured_build["system_prompt"]
     names = {t.name for t in captured_build["tools"]}
-    assert names == {t.name for t in _SPECIALISTS}
-    # The original description is untouched.
-    main = next(t for t in captured_build["tools"]
-                if t.name == "pux_sandbox_browser_save_session")
-    assert main.description == "save session (original desc)"
+    # No profile → no registry specialists on the supervisor (anti-flood default).
+    assert names == set()
+    # The subagent surface is still the FULL specialist set — scoping is
+    # supervisor-only.
+    sub = next(s for s in captured_build["subagents"] if s["name"] == "browserish")
+    sub_names = {t.name for t in sub["tools"]}
+    assert {"pux_sandbox_browser_save_session",
+            "pux_sandbox_browser_navigate"} <= sub_names
 
 
 def test_build_graph_requests_base_and_multimodal_roles(fake_tree, monkeypatch):

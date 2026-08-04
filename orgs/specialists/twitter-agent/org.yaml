@@ -5,5 +5,14 @@ agents: [twitter-drafter]
 # egress; ``_org_yaml_mcp_items`` reads this org's OWN org.yaml only). web_research
 # is redeclared here to arm the ``web-search`` agent inherited from general. The
 # server runs host-side (HTTP) — no sandbox-egress entry needed in policy.yaml.
+#
+# nitter is the READ side of Twitter (search, user_tweets, replies, following,
+# followers — 10 read-only tools via direct GraphQL). The browser MCP at this
+# org is the WRITE side (post, like, RT, follow). Splitting read/write across
+# two MCPs lets the agent bulk-read at scale (twscrape round-robins the
+# configured accounts) without paying the per-call SeleniumBase cold start the
+# browser MCP charges for every read. Same egress story as web_research — the
+# server runs host-side, no sandbox-egress entry needed.
 capabilities:
   - {kind: mcp, ref: web_research}
+  - {kind: mcp, ref: nitter}

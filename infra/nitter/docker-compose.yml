@@ -1,0 +1,42 @@
+# Standalone compose for nitter-mcp. The orchestrator stack includes this
+# service via docker-compose.infra.yml — run THAT one for the full stack.
+# This file is for iterating on nitter-mcp in isolation:
+#
+#   cd infra/nitter && docker compose up -d --build
+#   curl http://localhost:41730/health
+#
+# Expose over Tailscale (host-side, not part of compose):
+#   tailscale serve --set-path /nitter http://127.0.0.1:41730
+#   Client URL: https://<node>.ts.net:10000/nitter/mcp
+
+services:
+  nitter-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: orchestrator-nitter-mcp:latest
+    container_name: orchestrator-nitter-mcp
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Bind inside the container; compose publishes on the host below.
+      NITTER_HOST: "0.0.0.0"
+      NITTER_PORT: "41730"
+      NITTER_DB_PATH: "/data/accounts.db"
+    ports:
+      # 127.0.0.1-only by default — operators expose via Tailscale Serve or
+      # an explicit port-map override. Don't put authenticated Twitter read
+      # access on a public interface by default.
+      - "127.0.0.1:41730:41730"
+    volumes:
+      - nitter-db:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:41730/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  nitter-db:

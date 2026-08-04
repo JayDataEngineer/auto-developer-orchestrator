@@ -88,7 +88,6 @@ def fake_tree(tmp_path: Path, monkeypatch):
     (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
     monkeypatch.setattr(orgs_mod, "_orgs_dir", lambda: tmp_path / "orgs")
     monkeypatch.setattr(contract, "_orgs_dir", lambda: tmp_path / "orgs")
-    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
     return tmp_path
 
 

@@ -17,7 +17,7 @@ Agents are frontmatter+body ``.md`` files resolved org-local first, then
 Token- and Docker-free: ``load_subagents`` only uses the tool list to resolve
 *names* (it builds a ``{name: tool}`` map and never invokes them), so we pass a
 minimal fake tool rather than constructing a ``DockerExecClient``. ``get_model``
-reads ``OPENCODE_API_KEY`` at CALL time — set a throwaway key; no real chat
+reads ``OPENROUTER_API_KEY`` at CALL time — set a throwaway key; no real chat
 happens.
 """
 from __future__ import annotations
@@ -62,7 +62,6 @@ def fake_tree(tmp_path: Path, monkeypatch):
     (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
     (tmp_path / "orgs" / "_shared" / "skills").mkdir(parents=True)
     monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
-    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
     return tmp_path
 
 
@@ -161,7 +160,7 @@ def test_model_omitted_uses_worker_role(fake_tree):
 
     sub = orgs.load_subagents("o", _specialists(), **_ctx())[0]
     assert isinstance(sub["model"], ChatOpenAI)
-    assert sub["model"].model_name == "mimo-v2.5"
+    assert sub["model"].model_name == "xiaomi/mimo-v2.5"  # wire_id
 
 
 def test_model_omitted_worker_role_org_override(fake_tree):
@@ -235,7 +234,7 @@ def test_md_agent_loads(fake_tree):
         "ctx_stats", "ctx_doctor", "ctx_purge",
     }
     assert sub["skills"] == ["/sandbox/workspace/orgs/_shared/skills"]
-    assert sub["model"].model_name == "mimo-v2.5"
+    assert sub["model"].model_name == "xiaomi/mimo-v2.5"  # wire_id
     # Each subagent carries the unified ContextMiddleware (capture +
     # offload in one pass) so the layer intercepts its own tool calls — the old
     # main-agent-only claim is retracted (file docstring above).
@@ -307,7 +306,6 @@ def test_real_browser_whitelist_resolves(monkeypatch):
     proves the whole whitelist binds."""
     from pux_harness.sandbox.tools import build_native_specialists
 
-    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")  # worker-role model build
     specialists = build_native_specialists("DUMMY", None, None)
     subs = orgs.load_subagents("general", specialists, **_ctx())
     browser = next(s for s in subs if s["name"] == "browser")

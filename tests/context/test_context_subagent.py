@@ -165,7 +165,6 @@ def fake_tree(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
     (tmp_path / "orgs" / "_shared" / "skills").mkdir(parents=True)
     monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
-    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
     (tmp_path / "orgs" / "o" / "AGENTS.md").write_text("# o\n")
     (tmp_path / "orgs" / "o" / "org.yaml").write_text("agents: [worker]\n")
     (tmp_path / "orgs" / "o" / "agents" / "worker.md").write_text(

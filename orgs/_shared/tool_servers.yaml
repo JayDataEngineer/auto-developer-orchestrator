@@ -39,9 +39,20 @@ web_research:
   kind: mcp
   transport: http
   url: ${PUX_MCP_WEB_RESEARCH_URL}
-  # allowlist verified against the LIVE server's tools/list. The
-  # server exposed `scrape` at the time of original pinning but now
-  # exposes `fetch` (renamed upstream).
+  # allowlist verified against the LIVE server's tools/list (17 tools total;
+  # only the read-only research trio is armed — search/fetch/research). The
+  # server exposed `scrape` at original pinning, renamed to `fetch` upstream.
+  #
+  # `fetch` was enhanced to return IMAGES + other file kinds, not just markdown:
+  #   - method: httpx | crawl4ai | selenium | pdf (force a scraper; auto-learned
+  #     per-domain when omitted). crawl4ai/selenium render JS; pdf extracts PDFs.
+  #   - text_only (default false): images are ON by default for crawl4ai — set
+  #     true to drop them for speed when only text matters.
+  #   - css_selector: targeted content extraction.
+  # langchain-mcp-adapters 0.3.0 converts MCP image/file content items into
+  # LangChain ImageContentBlock/FileContentBlock in the ToolMessage, so a
+  # multimodal base (e.g. mimo-v2.5) ingests fetched images directly — no
+  # custom converter needed. Text-only bases see the markdown + alt-text.
   # Env: PUX_MCP_WEB_RESEARCH_URL — the Streamable-HTTP endpoint of the
   # research-mcp server (e.g. http://<host>:41827/mcp or via Tailscale Serve).
   tools: [search, fetch, research]
@@ -141,4 +152,62 @@ godot-ai:
   # Env: PUX_MCP_GODOT_AI_URL — the HTTP endpoint of the godot-ai MCP server
   # (e.g. http://<host>:8000/mcp). The server is started by the Godot editor
   # plugin when the project is opened.
+
+# ── sandbox_browser (in-container SeleniumBase MCP) ─────────────────────────
+# Source: this repo — sandbox/scripts/mc_browser.py. A FastMCP server wrapping
+# SeleniumBase SB(uc=True), copied into the sandbox image at /usr/local/bin/mc_browser.py
+# by Dockerfile line 169. Baked into the image (fastmcp + seleniumbase installed
+# at image build time, NOT ephemeral pip installs — see Dockerfile line 146).
+#
+# Architecture: one MCP server per agent process. The host's agent framework
+# spawns `docker exec -i <sandbox> mc_browser.py` as a child subprocess; the
+# MCP client connects over stdio. The MCP server owns ONE Chrome instance for
+# its lifetime — when the agent process exits (stdin EOF), the server exits
+# and Chrome dies with it as a child of the server's PID. No orphan helpers,
+# no fuser/ss kill-stale dance, no PID cgroup trips.
+#
+# 42 tools including the custom CDP bridges (CDP_TYPE_JS, SIMULATE_DND_JS,
+# _trusted_cdp_drag etc.) ported verbatim from sb_server.py. Plus a `run`
+# escape hatch that execs arbitrary Python with the live sb in scope.
+#
+# Env: PUX_SANDBOX_CONTAINER — set automatically by DockerExecClient.container
+# when the sandbox is resolved. The placeholder below fails loud at load time
+# if the agent somehow runs without a known sandbox (e.g. a unit test context).
+#
+# Concurrency: each agent that references this server spawns its OWN
+# mc_browser.py + its own Chrome — two agents referencing sandbox_browser get
+# two browsers at the same time, with full isolation. Pattern 2 from the
+# concurrency design discussion.
+sandbox_browser:
+  kind: mcp
+  transport: stdio
+  command: docker
+  args: ["exec", "-i", "${PUX_SANDBOX_CONTAINER}", "mc_browser.py"]
+
+# ── nitter (READ-ONLY Twitter via direct GraphQL) ───────────────────────────
+# Source: this repo — infra/nitter/src/server.py. A FastMCP HTTP server that
+# talks to Twitter's web GraphQL endpoints directly via twscrape, using auth
+# cookies. Named "nitter" because the tool surface mirrors Nitter's URL paths
+# (search, user_tweets, replies, following). NOT the Nitter binary — we chose
+# direct GraphQL (option B in the design discussion) over self-hosting Nitter
+# (option A) for resilience + speed. See infra/nitter/README.md for the
+# tradeoff matrix + why twscrape is the right primary.
+#
+# 10 read-only tools: search, user_tweets, user_replies, user_media,
+# user_profile, user_following, user_followers, tweet_details, tweet_replies,
+# health. Writes (post, like, RT, follow) belong to the browser MCP at the
+# twitter-agent org — this server is the read path, browser is the write path.
+#
+# Auth: cookies injected from env (NITTER_ACCOUNT_<KEY>_AUTH_TOKEN + _CT0 per
+# account, loaded from the gitignored infra/nitter/.env via docker compose
+# env_file:). twscrape round-robins across all configured accounts. SQLite
+# state at /data/accounts.db (a docker volume) caches login across restarts.
+#
+# Env: PUX_MCP_NITTER_URL — the Streamable-HTTP MCP endpoint, e.g.
+# http://localhost:41730/mcp (host-only) or https://<node>.ts.net:10000/nitter/mcp
+# (via Tailscale Serve). Set in .env to point the twitter-agent org at it.
+nitter:
+  kind: mcp
+  transport: http
+  url: ${PUX_MCP_NITTER_URL}
 

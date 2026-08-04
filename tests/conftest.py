@@ -6,6 +6,21 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _provider_test_keys(monkeypatch):
+    """Seed EVERY provider's ``api_key_env`` (declared in models.yaml) with a
+    dummy value so model instantiation never KeyErrors — regardless of which
+    providers are configured. Model-agnostic: add/remove a provider profile in
+    models.yaml and the tests follow automatically, with no per-test key
+    hardcoding. Models are never called in unit tests (no network); the dummy
+    values just satisfy ``os.environ[api_key_env]`` at build time."""
+    from pux_harness.agent import model as _model  # local import: tests may patch it
+    for prof in _model._providers().values():
+        env = prof.get("api_key_env")
+        if env:
+            monkeypatch.setenv(env, "test-key")
+
+
 @pytest.fixture(scope="session")
 def project_root() -> Path:
     """The project root (parent of tests/)."""

@@ -7,7 +7,7 @@ to call ``ctx_recall`` is hard-coded. This file closes the last gap in
 [[verify-or-die]]: does a REAL model, paying REAL tokens, get the offload stub
 AND autonomously decide to recover the content with ``ctx_recall``?
 
-Skipped unless ``PUX_E2E=1`` AND ``OPENCODE_API_KEY`` is in env (the harness's
+Skipped unless ``PUX_E2E=1`` AND ``OPENROUTER_API_KEY`` is in env (the harness's
 ``.env``, auto-sourced by ``bin/pux``). Run from the harness dir:
 
     set -a; . ../.env; set +a
@@ -36,11 +36,11 @@ from pydantic import BaseModel
 pytestmark = [
     pytest.mark.skipif(
         os.environ.get("PUX_E2E") != "1",
-        reason="set PUX_E2E=1 (and source ../.env for OPENCODE_API_KEY) to run the live model E2E",
+        reason="set PUX_E2E=1 (and source ../.env for OPENROUTER_API_KEY) to run the live model E2E",
     ),
     pytest.mark.skipif(
-        not os.environ.get("OPENCODE_API_KEY"),
-        reason="OPENCODE_API_KEY missing — source the harness .env (bin/pux does this automatically)",
+        not os.environ.get("OPENROUTER_API_KEY"),
+        reason="OPENROUTER_API_KEY missing — source the harness .env (bin/pux does this automatically)",
     ),
 ]
 

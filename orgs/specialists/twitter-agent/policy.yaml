@@ -1,24 +1,17 @@
 # Declarative sandbox policy for org twitter-agent.
 # Drops host networking in favor of bridge + egress allowlist for x.com.
-# Cookies are extracted host-side by the host_setup hook (flatpak Brave),
-# base64'd into TWITTER_COOKIES_B64, and seeded into the in-sandbox browser at
-# boot by the seed-cookies supervisor. One mechanism — no operator
-# `bootstrap.sh --emit-env`.
+#
+# Cookies are extracted from Brave on the remote desktop (BRAVE_SSH_HOST in
+# .env) via brave_cookie_bridge.py — SSH to desktop, extract from flatpak
+# Brave, save session JSON. twitter_post.py injects them via SeleniumBase UC.
+# The saved session at orgs/specialists/twitter-agent/data/.twitter-session.json
+# is the fallback when the desktop is unreachable.
 
 sandbox:
   tier: isolated
 
-host_setup:
-  # Extract Twitter cookies from the host's flatpak Brave on the host BEFORE
-  # create() (the cookie DB + GNOME keyring are unreachable from inside the
-  # container). stdout → TWITTER_COOKIES_B64, consumed by credentials/browser
-  # below unchanged. Cached venv at <project>/.pux/venvs/extract_twitter_cookies/.
-  - name: extract_twitter_cookies
-    helper_script: orgs/_shared/sandbox/extract_browser_cookies.py
-    python_deps: [browser-cookie3, pycryptodome, jeepney]
-    args: [--browser, brave, --domain, x.com, --b64]
-    exports:
-      TWITTER_COOKIES_B64: stdout
+# Note: scripts (twitter_post.py, paths.py, etc.) and saved session are
+# deployed to /sandbox/ via the deploy_twitter_scripts job below.
 
 egress:
   allow:
@@ -34,18 +27,26 @@ egress:
     - host: pbs.twimg.com
       port: 443
 
-credentials:
-  required:
-    - TWITTER_COOKIES_B64
-
 browser:
   cookies_env: TWITTER_COOKIES_B64
+
+# OPT-IN specialist surface for the supervisor. twitter-agent drives the
+# browser directly from the supervisor (navigate, screenshot) to draft + post
+# tweets, so it carries the browser group + media (describe_image for
+# screenshot inspection). Without this declaration the opt-in default would
+# leave the supervisor with NO specialist tools.
+tool_surface:
+  groups: [browser, media]
 
 # Pre-run: warm the in-container SeleniumBase Chrome so the first browser tool
 # call doesn't pay the SeleniumBase CDP-attach cold start. sb_server runs in the
 # base sandbox image (supervisord priority 70); this job polls /status then hits
 # /warmup. Warn-and-continue: an unreachable sb_server is logged, not fatal.
 jobs:
+  - name: deploy_twitter_scripts
+    script: orgs/_shared/sandbox/deploy_twitter_scripts.sh
+    timeout: 15
+    description: "Deploy twitter_post.py, paths.py, and saved session to /sandbox/ so posting works without live cookie extraction"
   - name: warmup_browser
     script: orgs/_shared/sandbox/warmup_browser.py
     timeout: 90

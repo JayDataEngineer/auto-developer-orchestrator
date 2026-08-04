@@ -97,7 +97,7 @@ production target per the two-protocol split: ACP=local, AP=k3s) needs its build
   (every org = one graph_id = one assistant). k3s manifest + ingress + the shared
   sqlite→Postgres cutover for real multi-replica.
 - The model layer is now k3s-ready (multi-provider: glm-5.2 via ZAI anthropic-secret,
-  mimo via OpenCode Go secret — two separate k8s Secrets, not one).
+  mimo via OpenRouter secret — two separate k8s Secrets, not one).
 - `[[aegra-verified]]` Gate 2a/2b (compile + compose smoke) already green; the k3s
   cutover is the packaging, not the graph.
 
@@ -115,5 +115,5 @@ These are DONE and should NOT be revisited unless they break:
   [openssh-client]`. Config-only, no harness code change.
 - **Hermes→dev-bot seam = MCP:** `pux mcp` (FastMCP SSE :9987) wraps the Agent
   Protocol HTTP. Hermes config adds an `mcp_servers:` entry (HTTP `url:`).
-- **GLM-5.2 prod = ZAI Anthropic-compat** (`ANTHROPIC_AUTH_TOKEN`); mimo via OpenCode
-  Go. Multi-provider model layer shipped (submodule `56bdea1`).
+- **GLM-5.2 prod = ZAI Anthropic-compat** (`ANTHROPIC_AUTH_TOKEN`); mimo via OpenRouter.
+  Multi-provider model layer shipped (submodule `56bdea1`).

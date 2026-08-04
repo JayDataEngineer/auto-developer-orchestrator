@@ -78,7 +78,13 @@ Every browsing step is: **act → observe → decide → act.**
   `browser_restore_session` before other actions, to skip re-login.
 - **Escape hatch.** `browser_evaluate` runs arbitrary JS for anything the
   dedicated tools can't do (read `window.__DATA__`, scroll to a selector,
-  trigger an XHR). Reach for it last; the named tools are more reliable.
+  trigger an XHR, read canvas pixel data). Reach for it last; the named tools
+  are more reliable.
+- **Console errors.** When a page behaves wrong (blank render, broken click,
+  stuck spinner), capture the console error buffer before debugging:
+  `browser_evaluate("JSON.stringify(window.__consoleErrors || [])")`. The
+  harness captures errors at `window.__consoleErrors`; new entries after an
+  action point at the root cause.
 
 ## Advanced interactions
 
@@ -119,6 +125,18 @@ These cover what plain click/type can't — drag, hover-revealed menus, non-char
   and third-party widgets live in iframes; their contents are invisible to
   `browser_click` until you `action='enter'` the frame. `action='list'` to
   find it, `enter` to dive in, do your work, `exit` to return to the top page.
+- **Canvas & pixel reading.** When you need to verify a `<canvas>` actually
+  painted (not just that the element exists), read the pixel buffer via
+  `browser_evaluate`:
+  ```js
+  const c = document.querySelector('canvas');
+  const { data } = c.getContext('2d').getImageData(0, 0, c.width, c.height);
+  let nz = 0; for (let i = 3; i < data.length; i += 4) if (data[i] > 0) nz++;
+  return { nz, w: c.width, h: c.height };
+  ```
+  Pair with a before/after sample around the action — a flat pixel count after
+  a brush stroke means the tool is a no-op. Use `browser_drag` (strategy
+  `physics`) or `browser_click_at` to drive canvas interactions.
 
 
 ## Return format

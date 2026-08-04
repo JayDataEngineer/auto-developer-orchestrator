@@ -78,6 +78,12 @@ NOT a policy file (no egress/sandbox effect); it shapes the agent graph itself:
 - `base_system_prompt` — REPLACE the assembled CTO prompt (rarely needed; the
   suffix is the usual lever).
 
+An OPTIONAL `profile.local.yaml` in the same directory is deep-merged on top
+(local wins). It is **not** tracked by git (the `.gitignore` catch-all covers
+it) — use it for operator-specific overrides that shouldn't land in the shared
+repo (account-specific context, personal model preferences, etc.). Absent is
+the common case; byte-identical to the original single-file reader.
+
 Two more blocks ride on the same file:
 
 - `models:` — a map overriding the **model-role spec**. The harness resolves

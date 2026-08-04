@@ -197,10 +197,16 @@ def test_ported_subagents_exclude_browser_only_web_agent() -> None:
 def test_installed_cto_prompt_is_clean_of_pux_isms(temp_home) -> None:
     # The SHIPPED persona must reference only dcode-native tools — the strongest
     # guard, run against the real org source through the real installer.
+    # NOTE: ``web-agent`` IS allowed — the coder CTO deliberately delegates
+    # browser e2e verification to web-agent (it loads the page, asserts the
+    # DOM, drives a CANVAS check). web-agent is NOT in _PORTED_SUBAGENTS (it
+    # drives pux-only browser tools absent in dcode), but the CTO prompt
+    # references it as the delegate target on the pux side. The pux_isms guard
+    # here is for tool NAMES (``pux_sandbox_*``) and pux-only paths
+    # (``/sandbox/workspace/``), not delegate role names.
     target = _install_agent("coder", _resolve_org("coder"))
     text = (target / "AGENTS.md").read_text()
     assert "pux_sandbox_python" not in text
-    assert "web-agent" not in text
     assert "/sandbox/workspace/" not in text
 
 

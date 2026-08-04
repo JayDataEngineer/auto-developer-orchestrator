@@ -145,8 +145,174 @@ mcp__surreal__query(sql="RETURN count(SELECT id FROM person WHERE count(<-appear
 
 **Principle:** see MANIFESTO principle #7 (Comprehensive persistence). The agent's job isn't done when *some* data is in the DB — it's done when the DB is usable as a reference for future queries.
 
-## When all 6 pass
+## Check 8 — grounding_verification
+
+**Goal:** the brief/report contains NO ungrounded named entities. The auditor
+runs this INDEPENDENTLY — never trusts the synthesizer's own grounding check.
+
+```
+python3 sandbox/grounding_check.py check \
+  --report artifacts/brief.md \
+  --corpus data/<source-dir>,artifacts/<run>
+```
+
+Exit 0 = PASS, exit 1 = ungrounded entities found. If FAIL, list every
+UNFOUNDED entity in the audit report and recommend re-dispatching the
+synthesizer.
+
+**Pass:** exit code 0, 0 ungrounded entities.
+**Fail:** exit code 1, any ungrounded entities found.
+
+## Coverage checks (9–14) — source-vs-processed ratio gates
+
+These checks compare SOURCE file counts on disk against PROCESSED entries in
+artifacts/DB. A pipeline stage that "succeeds" but processes only 15% of
+source data is a FAILED run. These are the EXHAUSTIVE list of coverage checks
+— do not invent additional checks (e.g. classification coverage, OCR coverage,
+object detection coverage are NOT checks). Only the 6 checks below exist.
+
+### Check 9 — photo_face_analysis_coverage
+
+**Goal:** every source photo was face-analyzed. Target: ≥95% coverage.
+
+```
+# Source count: non-thumb photos on disk
+find data/ -type f \( -name '*.jpg' -o -name '*.jpeg' -o -name '*.png' \) ! -name '*_thumb*' | wc -l
+# Processed count
+python3 -c "import json; print(len(json.load(open('artifacts/<run>/face_analysis.json'))))"
+```
+
+**Pass:** processed/source ≥ 0.95.
+
+**IMPORTANT — correct denominator:** face_analysis.json contains ALL photos
+that were processed through the face pipeline, INCLUDING those where no face
+was detected. A photo with no face is still "analyzed" — it appears in
+face_analysis.json with an empty faces array. Therefore the denominator is
+non-thumb source photos and the numerator is ALL entries in face_analysis.json
+(not just those with faces). If face_analysis.json has 219 entries and there
+are 219 non-thumb source photos, coverage is 100% — even though only 36 of
+those photos had detectable faces.
+
+### Check 10 — text_message_ingestion_coverage
+
+**Goal:** every text message in the source export was ingested as an `item` row.
+
+```
+# Source count: text messages from Telegram export result.json
+python3 -c "import json; d=json.load(open('data/<export>/result.json')); print(sum(1 for m in d['messages'] if isinstance(m,dict) and m.get('text') and str(m.get('text','')).strip()))"
+# Processed count
+mcp__surreal__query(sql="SELECT count() FROM item WHERE type = 'message' GROUP ALL")
+```
+
+**Pass:** processed/source ≥ 0.95.
+
+### Check 11 — video_keyframe_analysis_coverage
+
+**Goal:** every source video has keyframe analysis.
+
+```
+# Source video count
+find data/ -type f \( -name '*.mp4' -o -name '*.MP4' -o -name '*.mov' -o -name '*.m4v' \) | wc -l
+# Analyzed videos
+python3 -c "import json; d=json.load(open('artifacts/<run>/video_frame_analysis.json')); print(len(set(e.get('video') for e in d)))"
+```
+
+**Pass:** analyzed/source ≥ 0.95.
+
+### Check 12 — video_summary_coverage
+
+**Goal:** every source video has a VLM summary.
+
+```
+# Source video count (same as check 11)
+find data/ -type f \( -name '*.mp4' -o -name '*.MP4' -o -name '*.mov' -o -name '*.m4v' \) | wc -l
+# Summarized count
+python3 -c "import json; print(len(json.load(open('artifacts/<run>/video_summaries.json'))))"
+```
+
+**Pass:** summarized/source ≥ 0.95.
+
+### Check 13 — ghost_url_detection
+
+**Goal:** no artifact JSON contains dead ephemeral URLs.
+
+```
+grep -rl 'http://172\.\|http://localhost' artifacts/<run>/*.json
+```
+
+**Pass:** 0 matches.
+**Fail:** ANY match.
+
+### Check 14 — entity_folder_structure
+
+**Goal:** `entities/` is subject-based, not a modality dump.
+
+```
+# Should show entity-named folders (hundreds), NOT pipeline-stage folders
+ls artifacts/<run>/entities/ | grep -vE '^(raw|other)$' | head
+# Should show NO top-level modality folders
+ls artifacts/<run>/entities/ | grep -E '^(face_clusters|voice_clusters|text_and_scenes|video_frames)$'
+# index.md must exist
+ls artifacts/<run>/entities/index.md
+```
+
+**Pass:** subject-named folders exist, index.md exists, no top-level modality folders.
+**Fail:** only modality folders, no index.md, or entity folders are pipeline-stage names.
+
+## When all checks pass
 
 Report `overall: pass`. The CTO can now safely delegate to the artifact-generation phase (research-director + artifact-director) knowing the underlying knowledge graph is trustworthy.
 
 If any check still fails after 5 iteration rounds, escalate to the user with the concrete failure mode + proposed fix. Don't keep retrying the same thing hoping it works.
+
+## Data integrity checks (15–17) — internal consistency gates
+
+These checks are NOT about whether the pipeline processed the data — they're
+about whether the DB is internally consistent. A pipeline that populates the
+right tables but leaves stale edges or unexplained count deltas is not clean.
+
+### Check 15 — item_count_reconciliation
+
+**Goal:** the DB `item` count matches the source `items.json` count, and any
+difference is explained in the audit report.
+
+```
+# Source
+python3 -c "import json; d=json.load(open('artifacts/<run>/items.json')); print(len(d.get('items',d) if isinstance(d,dict) else d))"
+# DB
+mcp__surreal__query(sql="RETURN count(SELECT id FROM item)")
+```
+
+**Pass:** delta is zero OR the delta is explicitly explained in the report
+(e.g. "85 thumb photos filtered by pipeline_ingest.py — thumbs are duplicates
+of original photos, not separate content").
+**Fail:** delta exists with no explanation.
+
+### Check 16 — graph_edge_hygiene
+
+**Goal:** no duplicate or stale graph edges. Every edge points to real records.
+
+```
+# Duplicate transcribed_by edges (one item → same transcript twice)
+mcp__surreal__query(sql="SELECT count() FROM item WHERE count(->transcribed_by) > 1 GROUP ALL")
+
+# Stale edges (in/out point to non-existent records)
+mcp__surreal__query(sql="RETURN count(SELECT id FROM transcribed_by WHERE in NOT IN (SELECT id FROM item))")
+```
+
+**Pass:** 0 duplicates, 0 stale edges. Edge count for transcribed_by should
+match the voice/video item count (one edge per item is expected cardinality).
+**Fail:** any duplicates or stale edges found.
+
+### Check 17 — cross_modal_label_arithmetic
+
+**Goal:** when the auditor reports face-only and voice-only counts in check #6,
+the overlap (persons with BOTH centroids) is subtracted. This is an arithmetic
+consistency check, not a new query.
+
+If face_total = 17, voice_total = 12, both = 1, then the report MUST say:
+- face-only = 16 (17 − 1)
+- voice-only = 11 (12 − 1)
+
+**Pass:** reported "only" counts correctly subtract the intersection.
+**Fail:** "only" counts include the overlap (inflated numbers).

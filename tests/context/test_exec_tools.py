@@ -33,17 +33,30 @@ from pux_harness.context.tools import build_context_tools
 
 class MockExecClient:
     """Records exec calls and returns canned (output, exit_code) pairs.
-    Default: empty output, exit 0. Set ``responses`` for specific commands."""
+    Default: empty output, exit 0. Set ``responses`` for specific commands.
+    Set ``raises_timeout_for`` to a list of substrings — any command
+    containing one raises ``ExecTimeout`` (simulating a real sandbox
+    wall-clock timeout)."""
 
     def __init__(self, *, output: str = "", exit_code: int = 0,
-                 responses: dict[str, tuple[str, int]] | None = None):
+                 responses: dict[str, tuple[str, int]] | None = None,
+                 raises_timeout_for: list[str] | None = None):
         self.calls: list[str] = []
         self._output = output
         self._exit_code = exit_code
         self._responses = responses or {}
+        self._raises_timeout_for = raises_timeout_for or []
 
     def exec(self, command: str, timeout: int | None = None) -> tuple[str, int]:
         self.calls.append(command)
+        # Timeout simulation: matched BEFORE responses so a flaky command
+        # reliably raises even if it also appears in ``responses``.
+        for needle in self._raises_timeout_for:
+            if needle in command:
+                from pux_harness.sandbox.docker_exec import ExecTimeout
+                raise ExecTimeout(
+                    f"exec timed out after 120s: {command[:120]!r}"
+                )
         for needle, (out, code) in self._responses.items():
             if needle in command:
                 return out, code
@@ -313,6 +326,93 @@ class TestCtxBatchExecute:
         })
         assert "Q: authentication" in out
         assert "authentication failed" in out  # match surfaced inline
+
+
+# =============================================================================
+# ExecTimeout → clean tool-result envelope (NOT raised)
+# =============================================================================
+#
+# Regression for the "⚠️ model stream stalled (ExecTimeout)" bug:
+# the sandbox's 120s wall-clock budget raised ExecTimeout, which walked
+# through langgraph's ToolNode (default _handle_tool_errors re-raises
+# anything that isn't a ToolInvocationError), hit the model-node
+# RetryPolicy, and matched the substring classifier in retry_on_stream_stall
+# ("timed out" / "timeout" in the message). Net effect: 4 × 120s of
+# useless retries before the misleading "⚠️ This turn ended early" banner.
+# Fix: catch ExecTimeout at the tool boundary and render it as a normal
+# tool-result string — exactly what describe_image already does at
+# sandbox/tools/_media.py:230.
+
+class TestExecTimeoutEnvelope:
+    """Each of the 4 exec tools converts ExecTimeout to a result envelope."""
+
+    def _tools(self, store, ec):
+        return {t.name: t for t in build_exec_tools(store, ec)}
+
+    def test_ctx_execute_timeout_returns_envelope(self, tmp_path):
+        store = EventStore(tmp_path / "e.db")
+        ec = MockExecClient(raises_timeout_for=["Wait 120s"])
+        tools = self._tools(store, ec)
+        out = tools["ctx_execute"].invoke({
+            "language": "javascript",
+            "code": "// Wait 120s and check\nsetTimeout(()=>{}, 130000)",
+        })
+        # The agent sees a TIMEOUT envelope, not an exception.
+        assert "[ctx_execute] timeout" in out
+        # The 120s budget is surfaced so the agent knows the constraint.
+        assert "120s" in out
+        # The triggering command preview is included so the agent can debug
+        # without re-reading its own tool call.
+        assert "Wait 120s" in out
+        # The workaround hint is present.
+        assert "poll" in out.lower() or "split" in out.lower()
+
+    def test_ctx_execute_file_timeout_returns_envelope(self, tmp_path):
+        store = EventStore(tmp_path / "e.db")
+        ec = MockExecClient(raises_timeout_for=["slow_operation"])
+        tools = self._tools(store, ec)
+        out = tools["ctx_execute_file"].invoke({
+            "path": "/tmp/x",
+            "language": "python",
+            "code": "slow_operation()",
+        })
+        assert "[ctx_execute_file] timeout" in out
+        assert "120s" in out
+
+    def test_ctx_batch_execute_timeout_continues_other_commands(self, tmp_path):
+        """On per-command timeout, batch_execute reports the timeout for
+        THAT command and continues with the rest — partial progress
+        preserved. Aborting the whole batch would lose completed work."""
+        store = EventStore(tmp_path / "e.db")
+        ec = MockExecClient(
+            output="ok\n",
+            exit_code=0,
+            raises_timeout_for=["sleep 200"],
+        )
+        tools = self._tools(store, ec)
+        out = tools["ctx_batch_execute"].invoke({
+            "commands": [
+                {"command": "echo quick", "label": "quick"},
+                {"command": "sleep 200", "label": "slow"},
+                {"command": "echo after", "label": "after"},
+            ],
+        })
+        # All 3 commands were attempted (not aborted at the first timeout).
+        assert "3 command(s)" in out
+        # The slow command is flagged as a timeout in its section.
+        assert "slow: TIMEOUT" in out
+        # Subsequent commands DID run — partial progress preserved.
+        assert "after" in out
+        assert "quick" in out
+
+    def test_ctx_fetch_and_index_timeout_returns_envelope(self, tmp_path):
+        store = EventStore(tmp_path / "e.db")
+        ec = MockExecClient(raises_timeout_for=["curl"])
+        tools = self._tools(store, ec)
+        out = tools["ctx_fetch_and_index"].invoke({"url": "https://slow.example"})
+        assert "[ctx_fetch_and_index] timeout" in out
+        assert "120s" in out
+
 
 
 # =============================================================================

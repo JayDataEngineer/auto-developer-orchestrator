@@ -591,9 +591,10 @@ class BrowserState:
         masking flags, optional unbranded Chromium, proxy, random viewport.
     """
 
-    def __init__(self, stealth=False, use_chromium=False):
+    def __init__(self, stealth=False, use_chromium=False, cdp_port=9222):
         self.stealth = stealth
         self.use_chromium = use_chromium
+        self.cdp_port = cdp_port
         self.sb = None
         self._ctx = None
         self._lock = threading.Lock()
@@ -662,19 +663,22 @@ class BrowserState:
         import subprocess as _sp
         import time as _t
 
-        # Kill ALL existing Chrome processes — supervisord's and any strays.
-        # Patterns MUST be precise binary names, NOT substrings like bare
-        # "chromium" — pkill -f matches against /proc/<pid>/cmdline, and
-        # sb_server's OWN argv is
-        #   "python3 .../sb_server.py --stealth --use-chromium"
-        # so ``pkill -9 -f chromium`` matches "--use-chromium" → self-SIGKILL
-        # → silent exit before the server ever binds (no log, no traceback,
-        # supervisord reports "Exited too quickly"). The full Debian package
-        # binary names (google-chrome-stable / chromium-browser) are unique
-        # enough to never collide with our own argv.
-        for _pat in ("google-chrome-stable", "chromium-browser"):
+        # Kill Chrome processes ONLY on OUR CDP port. When cdp_port == 9222
+        # (the default/shared instance), we kill ALL Chrome (backward compat —
+        # the supervisord Chrome + any strays on 9222). When cdp_port != 9222
+        # (ephemeral multi-instance), we ONLY kill whatever holds our specific
+        # port via fuser — other instances' Chrome processes are left alone.
+        if self.cdp_port == 9222:
+            for _pat in ("google-chrome-stable", "chromium-browser"):
+                try:
+                    _sp.run(["pkill", "-9", "-f", _pat], capture_output=True, timeout=5)
+                except Exception:
+                    pass
+        else:
+            # Ephemeral instance: only kill whatever holds our CDP port.
             try:
-                _sp.run(["pkill", "-9", "-f", _pat], capture_output=True, timeout=5)
+                _sp.run(["fuser", "-k", f"{self.cdp_port}/tcp"],
+                        capture_output=True, timeout=5)
             except Exception:
                 pass
         _t.sleep(0.8)
@@ -701,8 +705,9 @@ class BrowserState:
         # 4. Unique user data dir (avoid fingerprint reuse)
         self._user_data_dir = tempfile.mkdtemp(prefix="sb_stealth_")
 
-        # 5. CDP port — reuse 9222 since supervisord Chrome is dead
-        cdp_port = 9222
+        # 5. CDP port — from constructor (default 9222 for shared instance,
+        #    unique per ephemeral instance for multi-browser isolation)
+        cdp_port = self.cdp_port
 
         # 6. Build Chrome args
         args = [
@@ -710,10 +715,24 @@ class BrowserState:
             f"--window-size={w},{h}",
             "--no-first-run",
             "--no-default-browser-check",
+            # ── WebGL / GL backend ───────────────────────────────────────────
+            # Docker has no DRI/GPU, so we MUST keep --disable-gpu to avoid
+            # GPU-init crashes. But --disable-gpu alone kills WebGL — the GL
+            # backend is gone, canvas.getContext('webgl') returns null, and
+            # Three.js / GLB viewers parse metadata but can't render. Fix:
+            # layer SwiftShader (software WebGL) on top. Chrome 107+ requires
+            # --enable-unsafe-swiftshader to opt in (it's "unsafe" because
+            # software rasterization can be fingerprinted, but this sandbox
+            # already runs fingerprint-masking flags). --ignore-gpu-blocklist
+            # prevents Chrome from disabling SwiftShader on its own blocklist.
             "--disable-gpu",
+            "--use-gl=swiftshader",
+            "--enable-unsafe-swiftshader",
+            "--ignore-gpu-blocklist",
             "--no-sandbox",
             "--disable-dev-shm-usage",
             f"--remote-debugging-port={cdp_port}",
+            "--remote-allow-origins=*",
             f"--user-data-dir={self._user_data_dir}",
             # ── Fingerprint masking ─────────────────────────────────────────
             "--disable-blink-features=AutomationControlled",
@@ -733,7 +752,11 @@ class BrowserState:
             "--disable-search-engine-choice-screen",
             "--disable-dinosaur-easter-egg",
             # ── Visual consistency ─────────────────────────────────────────
-            "--enable-features=WebContentsForceDark",
+            # NOTE: Chrome only honors the LAST --enable-features on the
+            # command line, so Vulkan (SwiftShader accel) is merged HERE
+            # alongside WebContentsForceDark rather than declared separately
+            # near the GL flags above.
+            "--enable-features=WebContentsForceDark,Vulkan",
             "about:blank",
         ] + proxy_args
 
@@ -1018,6 +1041,27 @@ def dicts_to_cookie_params(dicts):
 # HTTP Handler
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Activity tracker for TTL self-reaper (ephemeral instances only)
+_last_activity = time.time()
+_REAPER_TTL = 300  # 5 minutes of inactivity → self-terminate
+
+def _activity_tick():
+    global _last_activity
+    _last_activity = time.time()
+
+def _start_reaper_if_ephemeral(cdp_port):
+    """Ephemeral instances (cdp_port != 9222) self-terminate after 5min idle."""
+    if cdp_port == 9222:
+        return  # shared instance — never self-reap
+    def _reaper():
+        while True:
+            time.sleep(30)
+            if time.time() - _last_activity > _REAPER_TTL:
+                log(f"ephemeral instance (cdp {cdp_port}) idle "
+                    f"{_REAPER_TTL}s — self-terminating")
+                os._exit(0)
+    threading.Thread(target=_reaper, daemon=True).start()
+
 class Handler(BaseHTTPRequestHandler):
     state = None
 
@@ -1059,15 +1103,29 @@ class Handler(BaseHTTPRequestHandler):
             return "", "missing selector or index"
         return selector, ""
 
-    def _capture_with_fingerprint(self, sb, state):
-        """Full capture + fingerprint comparison."""
-        element_map = run_labeler(sb, state)
-        stats = run_page_stats(sb)
-        page_data = extract_page_data(sb)
+    def _capture_with_fingerprint(self, sb, state, *, full=True):
+        """Full capture + fingerprint comparison.
 
+        When ``full=False`` (viewport-only actions: scroll, hover, drag,
+        scroll_into_view, find_text), skips the expensive ``extract_page_data``
+        + ``run_page_stats`` + ``check_page_changed`` — the page text, links,
+        and images are identical to the last full capture; only the viewport
+        moved. Returns element_map + screenshot + ``page_unchanged: true`` so
+        the agent gets fresh SoM labels and a fresh visual without re-paying
+        the ~500ms + ~4KB extraction tax on every scroll."""
+        element_map = run_labeler(sb, state)
         spath = screenshot_path()
         safe(lambda: sb.save_screenshot(spath), None)
 
+        if not full:
+            return {
+                "element_map": element_map,
+                "screenshot_path": spath,
+                "page_unchanged": True,
+            }
+
+        stats = run_page_stats(sb)
+        page_data = extract_page_data(sb)
         page_changed = state.check_page_changed()
 
         return {
@@ -1185,6 +1243,7 @@ class Handler(BaseHTTPRequestHandler):
     # ── GET ─────────────────────────────────────────────────────────────────
 
     def do_GET(self):
+        _activity_tick()
         if self.path == "/status":
             alive = self.state.sb is not None
             url = safe(lambda: self.state.sb.get_current_url() or "", "") if alive else ""
@@ -1232,13 +1291,25 @@ class Handler(BaseHTTPRequestHandler):
     # ── POST ────────────────────────────────────────────────────────────────
 
     def do_POST(self):
+        _activity_tick()
         try:
             body = self._read_body()
         except Exception as e:
             self._err(f"Invalid JSON: {e}", 400)
             return
         with self.state._lock:
-            self._dispatch(self.path, body)
+            try:
+                self._dispatch(self.path, body)
+            except Exception as e:
+                # Top-level catch: ANY handler exception returns an error JSON
+                # instead of dropping the HTTP connection ("Empty reply from
+                # server") which leaves the agent waiting forever.
+                import traceback
+                tb = traceback.format_exc()[-500:]
+                try:
+                    self._err(f"handler crashed: {e}\n{tb}")
+                except Exception:
+                    pass
 
     def _dispatch(self, path, body):
         sb = self.state.sb
@@ -1674,7 +1745,8 @@ class Handler(BaseHTTPRequestHandler):
                 js_code = f'{CDP_TYPE_JS}(\'{escaped_sel}\', \'{escaped_text}\', {str(clear).lower()})'
                 result = safe(lambda: json.loads(sb.execute_script(js_code) or "{}"), {})
                 if not isinstance(result, dict) or not result.get("ok"):
-                    return self._err("type failed: " + (result.get("error") if isinstance(result, dict) else "no result"))
+                    err_detail = str(result.get("error") or "unknown") if isinstance(result, dict) else str(result)
+                    return self._err(f"type failed: {err_detail}")
 
             if submit:
                 try:
@@ -1706,7 +1778,7 @@ class Handler(BaseHTTPRequestHandler):
             elif direction == "up": sb.scroll_up()
             else: sb.scroll_to(direction)
             sb.sleep(0.5)
-            self._ok(self._capture_with_fingerprint(sb, self.state))
+            self._ok(self._capture_with_fingerprint(sb, self.state, full=False))
 
         elif path == "/label":
             if sb is None: return self._err("browser not available")
@@ -1761,7 +1833,7 @@ class Handler(BaseHTTPRequestHandler):
                 sb.sleep(0.5)
             except Exception as e:
                 return self._err(f"find_text failed: {e}")
-            self._ok(self._capture_with_fingerprint(sb, self.state))
+            self._ok(self._capture_with_fingerprint(sb, self.state, full=False))
 
         elif path == "/evaluate":
             code = body.get("code", "").strip()
@@ -1822,20 +1894,23 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/new_tab":
             url = body.get("url", "about:blank")
             if sb is None: return self._err("browser not available")
+            target = url if url and url != "about:blank" else "about:blank"
+            escaped = target.replace("\\", "\\\\").replace("'", "\\'")
+            # Each step individually wrapped — sb_cdp's tab APIs crash
+            # unpredictably ("cannot unpack non-iterable NoneType") but the
+            # tab IS created by window.open. Return ok regardless so the
+            # agent can proceed (it'll /tabs to verify).
+            try: sb.execute_script(f"window.open('{escaped}', '_blank');")
+            except Exception: pass
+            sb.sleep(1)
+            try: sb.switch_to_newest_tab()
+            except Exception: pass
+            sb.sleep(2)
             try:
-                # window.open via sb.execute_script (NOT sb.driver — that's a
-                # Browser object without execute_script, the old bug). We avoid
-                # sb.open_new_tab(url) because it creates a DUPLICATE target in
-                # sb_cdp 4.50.6 (3 tabs after one open — verified). window.open
-                # creates exactly one tab; switch_to_newest_tab() makes it active.
-                target = url if url and url != "about:blank" else "about:blank"
-                escaped = target.replace("\\", "\\\\").replace("'", "\\'")
-                sb.execute_script(f"window.open('{escaped}', '_blank');")
-                sb.switch_to_newest_tab()
-                sb.sleep(2)
-                self._ok(self._capture_with_fingerprint(sb, self.state))
-            except Exception as e:
-                self._err(f"new tab failed: {e}")
+                capture = self._capture_with_fingerprint(sb, self.state)
+            except Exception:
+                capture = {"page_data": {"url": url, "text": ""}, "element_map": []}
+            self._ok(capture)
 
         elif path == "/switch_tab":
             index = body.get("index", 0)
@@ -2259,7 +2334,7 @@ class Handler(BaseHTTPRequestHandler):
             if status == "physics-fallback-needed":
                 method, status, _ = "physics", _do("physics")[0], None
             sb.sleep(0.6)
-            capture = self._capture_with_fingerprint(sb, self.state)
+            capture = self._capture_with_fingerprint(sb, self.state, full=False)
 
             # Verify-and-retry: if the page didn't react AND we auto-picked, try
             # the other strategy once (HTML5↔physics) — but only when we have
@@ -2274,7 +2349,7 @@ class Handler(BaseHTTPRequestHandler):
                 if s2.startswith("ok"):
                     method, retried = other, True
                     sb.sleep(0.6)
-                    capture = self._capture_with_fingerprint(sb, self.state)
+                    capture = self._capture_with_fingerprint(sb, self.state, full=False)
 
             if not status.startswith("ok") and not retried:
                 return self._err(status)
@@ -2301,7 +2376,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"{HOVER_JS}({sel_arg}, {xx}, {yy})") or "{}"), {})
             if not res.get("ok"): return self._err("hover failed: " + res.get("error", ""))
             sb.sleep(0.5)
-            self._ok(self._capture_with_fingerprint(sb, self.state))
+            self._ok(self._capture_with_fingerprint(sb, self.state, full=False))
 
         elif path == "/press":
             if sb is None: return self._err("browser not available")
@@ -2373,7 +2448,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"{SCROLL_INTO_VIEW_JS}({js_str(selector)})") or "{}"), {})
             if not res.get("ok"): return self._err("scroll_into_view failed: " + res.get("error", ""))
             sb.sleep(0.4)
-            self._ok(self._capture_with_fingerprint(sb, self.state))
+            self._ok(self._capture_with_fingerprint(sb, self.state, full=False))
 
         elif path == "/iframe":
             if sb is None: return self._err("browser not available")
@@ -2463,8 +2538,16 @@ def main():
     port = int(os.environ.get("SB_SERVER_PORT", DEFAULT_PORT))
     stealth = "--stealth" in sys.argv
     use_chromium = "--use-chromium" in sys.argv
-    state = BrowserState(stealth=stealth, use_chromium=use_chromium)
+    # CDP port: default 9222 (shared instance). When set via --cdp-port or
+    # SB_CDP_PORT env, each sb_server instance gets its own Chrome on a
+    # unique CDP port — enabling multiple isolated browsers in one container.
+    cdp_port = int(os.environ.get("SB_CDP_PORT", "9222"))
+    for i, a in enumerate(sys.argv):
+        if a == "--cdp-port" and i + 1 < len(sys.argv):
+            cdp_port = int(sys.argv[i + 1])
+    state = BrowserState(stealth=stealth, use_chromium=use_chromium, cdp_port=cdp_port)
     Handler.state = state
+    _start_reaper_if_ephemeral(cdp_port)
     # ThreadingHTTPServer (not single-threaded HTTPServer): a stuck sb.get() in
     # one POST handler must NOT block /status or concurrent requests. With the
     # single-threaded server, a page that hangs on load ("Timeout loading …")

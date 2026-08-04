@@ -73,7 +73,7 @@ def test_all_browser_factories_registered():
         "browser_scroll_into_view", "browser_a11y", "browser_iframe",
         # Captcha bypass + fingerprint-legitimacy
         "browser_uc", "browser_accept_cookies", "browser_warmup_history",
-        "browser_solve_captcha",
+        "browser_solve_captcha", "browser_reset",
     }
     assert set(specs) == expected, (
         f"missing: {expected - set(specs)}; extra: {set(specs) - expected}")

@@ -81,6 +81,44 @@ def test_classifier_skips_deterministic_errors():
     assert retry_on_stream_stall(Bad("invalid model: foo")) is False
 
 
+def test_classifier_does_not_retry_sandbox_exec_timeout():
+    """REGRESSION: the sandbox's own ExecTimeout is a deterministic tool-side
+    timeout, NOT a model-stream stall — must NOT be retried.
+
+    The ExecTimeout message ("exec timed out after 120s: ...") contains both
+    "timed out" and "timeout", which the substring fallback at the bottom of
+    retry_on_stream_stall would otherwise catch. That sent LangGraph into
+    4 × 120s of useless retries of the SAME tool call (each one hitting the
+    same wall-clock budget) before surfacing the misleading "⚠️ model stream
+    stalled (ExecTimeout)" banner. Tool timeouts are deterministic; retrying
+    cannot help.
+
+    Defense-in-depth: even though ctx_execute / ctx_execute_file /
+    ctx_batch_execute / ctx_fetch_and_index all catch ExecTimeout at the
+    tool boundary now, other surfaces (raw fs scripts, dynamic tools,
+    browser tools) may still let it escape. The classifier is the SINGLE
+    gate — pin it here.
+    """
+    from pux_harness.sandbox.docker_exec import ExecTimeout
+    exc = ExecTimeout("exec timed out after 120s: 'node -e ...'")
+    assert retry_on_stream_stall(exc) is False, (
+        "ExecTimeout is a deterministic tool timeout, not a model stream "
+        "stall — must NOT be retried (would waste 4 × 120s)."
+    )
+
+    # Subclasses shouldn't be retried either (defense against future wrappers).
+    class _WrappedExecTimeout(ExecTimeout):
+        pass
+    assert retry_on_stream_stall(_WrappedExecTimeout("wrapped timeout")) is False
+
+    # A bare Exception whose MESSAGE happens to contain "timed out" is
+    # ambiguous — the classifier keeps the existing substring behavior for
+    # model-layer exceptions it can't identify by type. Only the concrete
+    # ExecTimeout type is excluded.
+    assert retry_on_stream_stall(Exception("upstream read timed out")) is True
+
+
+
 def test_classifier_retries_badrequest_with_stream_message():
     """Provider streams sometimes surface transient stalls as
     ``bad_request: stream stalled`` — those MUST retry."""

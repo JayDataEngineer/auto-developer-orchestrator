@@ -8,10 +8,9 @@ JSON-RPC. This is the "so I don't have to deal with this" proof.
 
 Skipped unless ``PUX_E2E=1`` — the factory boots the sandbox eagerly
 (``DockerExecClient.__init__`` → ``docker.from_env``), and the model needs a live
-``OPENCODE_API_KEY`` (the ``acp-zed.sh`` wrapper sources ``.env``; ``bin/pux`` does
-the same). To run:
+``OPENROUTER_API_KEY`` (``bin/pux`` sources ``.env`` before launching). To run:
 
-    # Docker daemon running + .env has OPENCODE_API_KEY
+    # Docker daemon running + .env has OPENROUTER_API_KEY
     PUX_E2E=1 uv run pytest tests/integration/test_acp_e2e.py -q
 
 Mirrors the gate + ``asyncio.run`` helper style of ``test_mcp_server_e2e.py``.
@@ -32,7 +31,7 @@ from acp.stdio import spawn_agent_process
 pytestmark = pytest.mark.skipif(
     os.environ.get("PUX_E2E") != "1",
     reason=(
-        "set PUX_E2E=1 (Docker running + .env OPENCODE_API_KEY) to run the live ACP e2e"
+        "set PUX_E2E=1 (Docker running + .env OPENROUTER_API_KEY) to run the live ACP e2e"
     ),
 )
 
@@ -140,7 +139,7 @@ async def _prompt_and_collect(
     prompt: list[Any] | str, *, tier: str | None = None, org: str = "general",
 ) -> tuple[str, list[str], Any]:
     client = _CollectingClient()
-    # Forward the parent env so OPENCODE_API_KEY reaches the child past
+    # Forward the parent env so OPENROUTER_API_KEY reaches the child past
     # ``acp.transports.default_environment``'s POSIX allowlist (which strips
     # everything but HOME/PATH/SHELL/…). ``bin/pux`` auto-loads ``.env``; the
     # bare ``python -m pux_harness.acp`` the test spawns does not, so without
@@ -227,7 +226,7 @@ def test_acp_live_prompt_returns_answer() -> None:
 
 def test_acp_live_streams_tool_call() -> None:
     """Settles the 'no detailed tool calls in Zed' report end to end. MiMo-via-
-    OpenCode-Go streams ``tool_call_chunks`` (proven by /tmp/mimo_stream_probe.py);
+    OpenRouter streams ``tool_call_chunks`` (proven by /tmp/mimo_stream_probe.py);
     this test proves they reach the ACP wire as ``tool_call`` session_updates when
     the model invokes a native tool through the real graph. If this passes, tool
     calls ARE streamed and the Zed symptom is editor-rendering, not our harness.

@@ -33,6 +33,14 @@ sandbox:
 browser:
   cookies_env: BROWSER_COOKIES_B64
 
+# OPT-IN specialist surface for the supervisor. browser-agent's supervisor IS
+# the browser agent (agents: [] — no subagents), so it carries the browser
+# group + media (describe_image for screenshot inspection) directly. Without
+# this declaration the opt-in default would leave the supervisor with NO
+# specialist tools.
+tool_surface:
+  groups: [browser, media]
+
 protocols:
   - acp
   - agui

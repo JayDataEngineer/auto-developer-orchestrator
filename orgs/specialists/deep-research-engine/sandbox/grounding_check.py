@@ -58,12 +58,14 @@ ENV (for LLM entity extraction):
 
 import argparse
 import json
-import os
 import re
-import subprocess
 import sys
-import urllib.request
 from pathlib import Path
+
+# Universal LLM client — resolves model/endpoint from models.yaml (single source
+# of truth), replacing per-script raw urllib + env var injection.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from llm_client import call_llm as _llm_call
 
 
 # ---------------------------------------------------------------------------
@@ -84,11 +86,6 @@ def _extract_llm_entities(text: str) -> list[tuple[str, str]]:
     Returns [(category, entity), ...]. Categories: person, org, place, tool,
     weapon, number, other.
     """
-    url = os.environ.get("LLM_API_URL", "")
-    model = os.environ.get("LLM_MODEL", "")
-    if not url or not model:
-        return []  # LLM not configured — regex-only mode
-
     prompt = f"""Extract EVERY checkable entity from this intelligence report.
 For each entity, output a JSON array of {{"category": "...", "entity": "..."}}.
 
@@ -104,47 +101,8 @@ already flagged it.
 REPORT TEXT:
 {text[:30000]}
 """
-    # Reasoning models (e.g. mimo-v2.5) emit chain-of-thought into
-    # `reasoning_content` BEFORE the final answer. thinking:{type:disabled}
-    # turns the reasoning pass OFF — entity extraction from the report is a
-    # structured task, not a reasoning task, so skipping it is faster (~2s vs
-    # 10-30s) AND avoids the null-content trap entirely. We still fall back to
-    # reasoning_content below for safety.
-    data = json.dumps({
-        "messages": [{"role": "user", "content": prompt}],
-        "model": model,
-        "temperature": 0.0,
-        "max_tokens": 16000,
-        "thinking": {"type": "disabled"},
-    }).encode()
-    headers = {
-        "Content-Type": "application/json",
-        "User-Agent": "pux-harness-sandbox/1.0",
-    }
-    api_key = os.environ.get("LLM_API_KEY", "")
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
     try:
-        req = urllib.request.Request(url, data=data, headers=headers)
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            result = json.loads(resp.read())
-        msg = result["choices"][0]["message"]
-        # Reasoning models return null content when the budget is spent on
-        # chain-of-thought. Fall back to reasoning_content if present, then
-        # retry once with a doubled budget as a last resort.
-        content = msg.get("content")
-        if not content:
-            content = msg.get("reasoning_content") or ""
-            if content:
-                print("[grounding] LLM returned null content; using reasoning_content fallback", file=sys.stderr)
-        if not content:
-            finish = result["choices"][0].get("finish_reason")
-            print(f"[grounding] LLM returned empty content (finish_reason={finish}); "
-                  "increase max_tokens or use a non-reasoning model", file=sys.stderr)
-            return []
-        # Parse the JSON array from the response
-        # Find the JSON array in the response
+        content = _llm_call(prompt, temperature=0.0, max_tokens=16000)
         match = re.search(r'\[.*\]', content, re.DOTALL)
         if match:
             entities = json.loads(match.group())

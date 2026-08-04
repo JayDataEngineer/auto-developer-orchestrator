@@ -1,0 +1,26 @@
+# GPU override for docker-compose.infra.yml — enables NVIDIA GPU access for
+# media-mcp (Parakeet ASR, Florence-2, Pyannote, YOLO, InsightFace).
+# Usage:
+#   TORCH_VARIANT=cu124 \
+#   docker compose -f docker-compose.infra.yml -f docker-compose.infra.gpu.yml up -d --build media-mcp
+#
+# The RTX 4090 (24GB VRAM) eliminates the CPU OOM that killed Parakeet on
+# long audio (Conformer self-attention is O(n²) — 30min file = 116GB on CPU,
+# fits easily in VRAM). GPU inference is also 5-50x faster.
+services:
+  media-mcp:
+    build:
+      args:
+        TORCH_VARIANT: cu124
+    environment:
+      MEDIA_DEVICE: cuda
+    deploy:
+      resources:
+        limits:
+          memory: 12G   # GPU mode needs more host RAM for CUDA context + pinned memory
+        reservations:
+          memory: 2G
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

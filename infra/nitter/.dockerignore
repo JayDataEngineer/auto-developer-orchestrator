@@ -1,0 +1,17 @@
+# Build context — keep image small.
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.venv
+tests
+*.md
+!README.md
+Dockerfile
+docker-compose*.yml

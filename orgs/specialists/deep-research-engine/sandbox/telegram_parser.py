@@ -26,7 +26,6 @@ Output schema (each item):
 
 import argparse
 import json
-import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -276,7 +275,7 @@ def find_orphan_media(input_dir, items):
         if not media_dir.exists():
             continue
         for f in sorted(media_dir.iterdir()):
-            if f.is_file() and "_thumb." not in f.name:
+            if f.is_file() and "_thumb" not in f.name:
                 rel_path = f"{dir_name}/{f.name}"
                 if rel_path not in existing_paths:
                     orphans.append({

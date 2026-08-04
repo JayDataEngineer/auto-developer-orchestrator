@@ -143,7 +143,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 RUN apt-get update && apt-get install -y --no-install-recommends python3-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN python3 -m pip install seleniumbase requests beautifulsoup4 Pillow httpx \
-        onnxruntime-genai numpy \
+        onnxruntime-genai numpy fastmcp pyautogui \
     && python3 -m pip install --index-url https://download.pytorch.org/whl/cpu torch \
     && python3 -m pip install sentence-transformers \
     && python3 -m pip install resemblyzer librosa soundfile scikit-learn \
@@ -166,6 +166,7 @@ ENV BUN_INSTALL="/root/.bun"
 # Shared scripts
 COPY scripts/sb_agent.py /usr/local/bin/sb_agent.py
 COPY scripts/sb_server.py /usr/local/bin/sb_server.py
+COPY scripts/mc_browser.py /usr/local/bin/mc_browser.py
 COPY scripts/desktop_observe.py /usr/local/bin/desktop_observe.py
 COPY scripts/describe_image.py /usr/local/bin/describe_image.py
 COPY scripts/start-kasmvnc.sh /usr/local/bin/start-kasmvnc.sh
@@ -175,7 +176,7 @@ COPY scripts/apply-egress-policy.sh /usr/local/bin/apply-egress-policy.sh
 COPY scripts/refresh-egress-dns.sh /usr/local/bin/refresh-egress-dns.sh
 COPY scripts/egress-dns-refresh-loop.sh /usr/local/bin/egress-dns-refresh-loop.sh
 COPY scripts/seed-cookies.sh /usr/local/bin/seed-cookies.sh
-RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/bin/desktop_observe.py /usr/local/bin/describe_image.py /usr/local/bin/start-kasmvnc.sh /usr/local/bin/setup-display.sh /usr/local/bin/fluxbox-apps-menu.sh /usr/local/bin/apply-egress-policy.sh /usr/local/bin/refresh-egress-dns.sh /usr/local/bin/egress-dns-refresh-loop.sh /usr/local/bin/seed-cookies.sh
+RUN chmod +x /usr/local/bin/sb_agent.py /usr/local/bin/sb_server.py /usr/local/bin/mc_browser.py /usr/local/bin/desktop_observe.py /usr/local/bin/describe_image.py /usr/local/bin/start-kasmvnc.sh /usr/local/bin/setup-display.sh /usr/local/bin/fluxbox-apps-menu.sh /usr/local/bin/apply-egress-policy.sh /usr/local/bin/refresh-egress-dns.sh /usr/local/bin/egress-dns-refresh-loop.sh /usr/local/bin/seed-cookies.sh
 
 # Fluxbox config — dark theme, dynamic app menu
 COPY fluxbox/ /root/.fluxbox/
@@ -195,6 +196,12 @@ ARG VNC_BACKEND=standard
 ENV VNC_BACKEND=${VNC_BACKEND}
 
 WORKDIR /sandbox/workspace
+
+# Symlink /workspace → /sandbox/workspace so agents that guess "/workspace/"
+# as the save path (instead of the bind-mount path /sandbox/workspace/) still
+# land files on the shared host filesystem. Without this, downloads vanish
+# into the container's overlay layer and are invisible to Hermes/the host.
+RUN ln -sf /sandbox/workspace /workspace
 
 
 # ── Target: standard (TigerVNC + noVNC + websockify) ────────────────────────

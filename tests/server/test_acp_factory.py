@@ -9,7 +9,50 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pux_harness.acp import _make_factory
+from pux_harness.acp import _capture_editor_cwd, _make_factory
+
+
+# --- _capture_editor_cwd ------------------------------------------------------
+
+
+def test_capture_editor_cwd_sets_project_path(tmp_path, monkeypatch):
+    """A valid editor cwd is exported as ``PUX_PROJECT_PATH`` so the lazily-
+    booted sandbox container mounts the editor's project (Claude-Code-style
+    "spawn in folder"), not just the harness repo."""
+    monkeypatch.delenv("PUX_PROJECT_PATH", raising=False)
+    _capture_editor_cwd(str(tmp_path))
+    import os
+
+    assert os.environ["PUX_PROJECT_PATH"] == str(tmp_path)
+
+
+def test_capture_editor_cwd_does_not_override_existing(tmp_path, monkeypatch):
+    """An explicit ``PUX_PROJECT_PATH`` shell export wins (``setdefault``) —
+    the operator's pin beats the editor's cwd."""
+    monkeypatch.setenv("PUX_PROJECT_PATH", "/operator/pinned/path")
+    _capture_editor_cwd(str(tmp_path))
+    import os
+
+    assert os.environ["PUX_PROJECT_PATH"] == "/operator/pinned/path"
+
+
+def test_capture_editor_cwd_ignores_nonexistent(tmp_path, monkeypatch):
+    """A cwd that isn't a real directory is silently dropped — falls through to
+    the harness ``project_root()`` default. No env mutation."""
+    monkeypatch.delenv("PUX_PROJECT_PATH", raising=False)
+    _capture_editor_cwd(str(tmp_path / "does-not-exist"))
+    import os
+
+    assert "PUX_PROJECT_PATH" not in os.environ
+
+
+def test_capture_editor_cwd_ignores_none(monkeypatch):
+    """``None`` cwd (client sent nothing) is a no-op."""
+    monkeypatch.delenv("PUX_PROJECT_PATH", raising=False)
+    _capture_editor_cwd(None)
+    import os
+
+    assert "PUX_PROJECT_PATH" not in os.environ
 
 
 # --- _make_factory ------------------------------------------------------------

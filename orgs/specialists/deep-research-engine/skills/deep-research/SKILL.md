@@ -1,6 +1,6 @@
 ---
 name: deep-research
-description: Deep Research Engine pipeline — multimodal ingestion (PDFs, audio diarization, face clustering, persons), a context engine (query/search), web research, fact-checking, audit quality gates, and content production (Substack articles, social posts). Use when running a research query, an ingest job, a fact-check, or a content-production ask.
+description: Deep Research Engine pipeline — multimodal ingestion (PDFs, audio diarization, face clustering, persons), a context engine (query/search), web research, fact-checking, audit quality gates, and content production (Substack articles, social posts, safety-reference dossiers). Use when running a research query, an ingest job, a fact-check, or a content-production ask.
 ---
 
 # Deep Research Engine
@@ -27,9 +27,17 @@ upfront.
 | Audit + quality gates before publish | `references/AUDIT_QUALITY_GATES.md` |
 | Write Substack articles | `references/WRITE_SUBSTACK_ARTICLES.md` |
 | Write social posts | `references/WRITE_SOCIAL_POSTS.md` |
+| Write safety-reference / protective-intelligence dossier (extremist-network target profiles, two-network crossover mapping, Draw.io export) | `references/WRITE_SAFETY_REFERENCE.md` |
 
 ## Operating rule
 
 Every published claim must trace to an ingested source or a fetched URL and
 survive the audit gate. The synthesizer writes; the auditor gates; neither
 ships without the other.
+
+For safety-reference dossiers specifically: the clustering system is the
+determiner of what's in the folder (sender attribution is banned); every error
+caught gets a dated inline CORRECTION NOTE; both adversarial networks in a
+crossover dataset get documented, not just the side the dataset was built to
+expose.
+

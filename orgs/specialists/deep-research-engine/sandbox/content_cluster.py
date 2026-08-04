@@ -28,6 +28,11 @@ import os
 import sys
 from pathlib import Path
 
+# Universal LLM client — resolves model/endpoint from models.yaml (single source
+# of truth), replacing per-script raw HTTP + env var injection.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from llm_client import call_llm as _llm_call
+
 
 CLUSTER_PROMPT = """You are a content clustering specialist. Group the following items into thematic clusters.
 
@@ -60,61 +65,10 @@ CLUSTER_PROMPT = """You are a content clustering specialist. Group the following
 {combined}"""
 
 
-def _llm_env_required():
-    """The sandbox policy (``sandbox.llm: <role>``) injects these from the
-    harness model tier (models.yaml). This script is a DUMB CONSUMER — it does
-    not re-resolve the provider, model, or key."""
-    url = os.environ.get("LLM_API_URL", "")
-    model = os.environ.get("LLM_MODEL", "")
-    if not url or not model:
-        print(
-            "ERROR: LLM_API_URL and LLM_MODEL must be set. The sandbox policy\n"
-            "injects them via `sandbox.llm: <role>` (resolved from models.yaml).\n"
-            "For standalone use:\n"
-            '  export LLM_API_URL="https://opencode.ai/zen/go/v1/chat/completions"\n'
-            '  export LLM_MODEL="mimo-v2.5"\n'
-            '  export LLM_API_KEY="<key>"',
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    return url, model
-
-
 def call_llm(prompt, model=None, temperature=0.3, max_tokens=16000):
-    """Call LLM API and return response text."""
-    import urllib.request
-
-    url, default_model = _llm_env_required()
-    api_key = os.environ.get("LLM_API_KEY", "")
-    headers = {
-        "Content-Type": "application/json",
-        # Cloudflare bot-integrity (error 1010) bans the default
-        # ``Python-urllib/3.x`` signature. A neutral identifier passes.
-        "User-Agent": "pux-harness-sandbox/1.0",
-    }
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    data = json.dumps({
-        "messages": [{"role": "user", "content": prompt}],
-        "model": model or default_model,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }).encode()
-
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers=headers,
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            result = json.loads(resp.read())
-            return result["choices"][0]["message"]["content"]
-    except Exception as e:
-        print(f"ERROR: LLM API failed: {e}", file=sys.stderr)
-        sys.exit(1)
+    """Delegate to the universal llm_client. Kept for backward compat."""
+    return _llm_call(prompt, model=model, temperature=temperature,
+                     max_tokens=max_tokens, disable_thinking=False)
 
 
 def fetch_existing_topics():
@@ -125,6 +79,7 @@ def fetch_existing_topics():
     only need the surface labels. Uses the SurrealDB /sql HTTP endpoint —
     same pattern as surreal_client.py.
     """
+    import urllib.request
     url = os.environ.get("SURREALDB_URL", "http://localhost:8000") + "/sql"
     ns = os.environ.get("SURREALDB_NS", "research")
     db = os.environ.get("SURREALDB_DB", "main")

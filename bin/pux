@@ -16,13 +16,29 @@ REPO="$(cd "$HERE/.." && pwd)"
 
 if [[ -f "$REPO/.env" ]]; then set -a; . "$REPO/.env"; set +a; fi
 
+# Editors (Zed, VS Code) spawn this with a minimal PATH that often omits
+# ~/.local/bin — where uv + the `pux` symlink live. Prepend it so `uv run`
+# always resolves regardless of the caller's PATH. This is the ONE line that
+# used to live only in scripts/acp-zed.sh; now bin/pux is self-sufficient for
+# editor launches, so Zed calls `pux` by name (no absolute path anywhere).
+export PATH="${HOME}/.local/bin:${PATH}"
+
 # Pin the APP root for the harness: ``orgs/`` + ``.pux/`` + ``AGENTS.md`` live
 # at the orchestrator repo, regardless of where the ``pux_harness`` package is
 # physically installed. ``$PUX_PROJECT_ROOT`` is the ONE seam the kit's resolver
 # reads; without it the harness would default to the CWD and miss the orgs.
+export PUX_PROJECT_ROOT="$REPO"
+
+# Capture the CALLER's CWD as the project to edit BEFORE we cd into $REPO below.
+# ``PUX_PROJECT_PATH`` is what the sandbox bind-mounts at /sandbox/workspace —
+# i.e. what the agent reads/writes. ``resolve_project_path()`` falls back to
+# ``$PUX_PROJECT_ROOT`` (this repo) when it's unset, so without this capture a
+# ``pux acp``/``pux direct`` launched from ANY other project would silently edit
+# the orchestrator's own files. Honor an explicit override; else pin to CWD.
+export PUX_PROJECT_PATH="${PUX_PROJECT_PATH:-$PWD}"
+
 # Run from ``$REPO`` so ``uv run`` resolves the orchestrator workspace venv
 # (which installs pux-harness as a member) — no per-subcommand ``cd`` needed.
-export PUX_PROJECT_ROOT="$REPO"
 cd "$REPO"
 
 cmd="${1:-}"

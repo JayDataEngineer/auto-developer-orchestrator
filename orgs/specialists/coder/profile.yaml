@@ -71,6 +71,27 @@ rubric:
       surrounding code.
     - The deliverable is a concise summary (what changed, how verified), not a
       play-by-play.
+    - If the deliverable is within a web interface, the browser agent MUST be used to verify.
+    - If the result needs information from online, the research agent MUST be used to verify.
 
 # Enable ask_user HITL — agent can ask Hermes questions mid-task.
 ask_user: true
+
+# Pin the QuickJS interpreter (deepagents ``CodeInterpreterMiddleware``) ON.
+# It ALREADY auto-mounts today via the strength gate — coder's base model is
+# glm-5.2 (``strength: pro`` in models.yaml → ``driver_strong_orchestrator``
+# → ``_resolve_toggles`` adds ``interpreter``). This block makes the capability
+# EXPLICIT instead of implicit on the model id, so it survives:
+#   * ``--fast`` / ``PUX_TIER=fast`` (mimo-v2.5 is ``strength: flash`` → no
+#     auto-mount; the add override keeps it on anyway — add wins over the gate);
+#   * a future base-model repoint away from a ``pro`` id;
+#   * a reader who greps coder's profile for "what can this org do?".
+# The interpreter injects an ``eval`` tool (sandboxed JS REPL) + a ``task()``
+# global so the CTO writes one short dispatch script (recon → Promise.all
+# workers → synthesize) instead of grinding items one model-chosen call at a
+# time. PTC allowlist is read-only discovery (glob/grep/ls/read_file);
+# mutations still go through ``task(...)`` subagents. See
+# ``pux_harness/agent/stack.py::_build_interpreter`` + docs/interpreters.md.
+middleware:
+  supervisor:
+    add: [interpreter]

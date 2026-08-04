@@ -30,6 +30,16 @@ sandbox:
       - mypy
       - ruff
 
+# OPT-IN specialist surface for the supervisor (the CTO). The CTO carries
+# ``python`` (``pux_sandbox_python``) for quick parse/sanity checks — and
+# NOTHING else. Browser tools live on the ``web-agent`` subagent (which
+# resolves its own tools against the FULL surface), NOT on the CTO. This is
+# the anti-flood fix: before opt-in, every specialist (browser_*, desktop_*,
+# media) leaked onto the CTO's own tool list even though it only ever
+# delegates them.
+tool_surface:
+  groups: [code]
+
 # Pre-run: warm the in-container SeleniumBase Chrome so the first browser tool
 # call (dev-bot's `web-agent`) doesn't pay the SeleniumBase CDP-attach cold
 # start — that latency is moved out of the LLM turn budget so it can't trip the

@@ -21,7 +21,7 @@ dependencies = ["pux-harness"]
 pux-harness = { path = "pux-harness", editable = true }
 
 [dependency-groups]
-dev = ["pytest", "ruff", "mypy"]
+dev = ["pytest", "pytest-asyncio", "ruff", "mypy"]
 
 [tool.pytest.ini_options]
 # The orchestrator's suite is the INTEGRATION layer: it builds real orgs/
@@ -31,6 +31,11 @@ dev = ["pytest", "ruff", "mypy"]
 # lives in the submodule at pux-harness/tests/.
 testpaths = ["tests"]
 pythonpath = ["."]
+# Mirrors pux-harness/pyproject.toml — async tests (e.g. tests/model/
+# test_astream_idle_retry.py for the ReasoningChatOpenAI idle-watchdog) use
+# @pytest.mark.asyncio. Without ``asyncio_mode = auto`` the marker is unknown
+# (PytestUnknownMarkWarning) and the coroutine is never awaited → false fail.
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100

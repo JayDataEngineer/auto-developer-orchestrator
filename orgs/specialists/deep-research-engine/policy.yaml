@@ -18,10 +18,10 @@
 # `sandbox.llm: worker` declaration below triggers the harness to:
 #
 #   1. Resolve the role → models.yaml tier (default → worker_model = mimo-v2.5)
-#   2. Resolve the model → provider (opencode-go, kind: openai)
-#   3. Inject LLM_API_URL / LLM_MODEL into the sandbox env
-#   4. Inject LLM_API_KEY from the provider's api_key_env (OPENCODE_API_KEY)
-#   5. Auto-allow the provider host (opencode.ai:443) in the egress rules
+#   2. Resolve the model → provider (openrouter, kind: openai)
+#   3. Inject LLM_API_URL / LLM_MODEL (wire id, e.g. xiaomi/mimo-v2.5) into env
+#   4. Inject LLM_API_KEY from the provider's api_key_env (OPENROUTER_API_KEY)
+#   5. Auto-allow the provider host (openrouter.ai:443) in the egress rules
 #
 # This is the SHARED PATTERN: orgs declare a role, the harness owns resolution.
 # To repoint DRE at a different model, change the tier in models.yaml (ONE
@@ -30,9 +30,10 @@
 sandbox:
   tier: isolated
   # `llm: worker` — resolve from models.yaml's default tier worker_model
-  # (mimo-v2.5 via opencode-go). Cheap (~$0.001/call), multimodal, the right
-  # size for entity extraction / clustering / synthesis. The harness injects
-  # LLM_API_URL + LLM_MODEL + LLM_API_KEY and auto-allows opencode.ai:443.
+  # (mimo-v2.5 via OpenRouter, wire id xiaomi/mimo-v2.5). Cheap (~$0.001/call),
+  # multimodal, the right size for entity extraction / clustering / synthesis.
+  # The harness injects LLM_API_URL + LLM_MODEL + LLM_API_KEY and auto-allows
+  # openrouter.ai:443.
   llm: worker
   # Static config for host-side infra started by `make infra`. These are NOT
   # secrets (no auth tokens) — just the URLs the sandbox needs to reach the
@@ -63,7 +64,7 @@ egress:
     # Source pulls for research ingest.
     - host: github.com
       port: 443
-    # NOTE: opencode.ai:443 is auto-allowed by `sandbox.llm: worker` above —
+    # NOTE: openrouter.ai:443 is auto-allowed by `sandbox.llm: worker` above —
     # the harness resolves the provider host from models.yaml and appends it
     # to the egress rules. No need to mirror it here.
 

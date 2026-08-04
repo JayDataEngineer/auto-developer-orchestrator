@@ -14,6 +14,38 @@ authentically, post on schedule. Every tweet should inform, inspire, or
 entertain; cite sources when relevant; keep threads under 5 tweets
 unless it's a true deep dive.
 
+## Read/Write Split — nitter MCP vs. browser MCP
+
+This org has TWO ways to touch Twitter, and the choice is load-bearing:
+
+| Path      | What                            | Use for                                              |
+|-----------|---------------------------------|------------------------------------------------------|
+| **nitter** MCP (`search`, `user_tweets`, `user_replies`, `user_media`, `user_profile`, `user_following`, `user_followers`, `tweet_details`, `tweet_replies`) | READ-ONLY bulk reads via direct GraphQL (twscrape). Round-robins across the configured auth accounts. | "Last 50 replies to @user", "tweets from these 5 accounts", "my following list sorted for max engagement", "search for X". Fast (no browser), rate-limit-spread (multi-account), cheap at scale. |
+| **browser** MCP (`browser_navigate`, `browser_click`, `browser_type`, `browser_upload`, etc.) | The in-sandbox SeleniumBase Chrome driving x.com. WRITE surface: post, like, retweet, follow, bookmark. | Publishing a draft, uploading an image, liking/RT-ing a tweet you found via nitter, following a user. Also the fallback when nitter's cookies die — re-seed via the host browser session + nitter restarts cleanly. |
+
+**Default pattern for engagement workflows:** nitter reads → browser writes.
+
+```
+1. nitter.user_following("me", limit=200)         # bulk pull who I follow
+2. (filter for likely high-engagement targets)
+3. nitter.user_tweets("<target>", limit=20)       # pull their recent tweets
+4. (pick the best one to engage with)
+5. browser.navigate(tweet.url) → browser.click(Like)   # browser writes the like
+```
+
+This split exists because the browser MCP pays a SeleniumBase cold start
+per session AND a full Chrome round-trip per call — fine for one post,
+unusable for "scan 200 followings × 20 tweets each". nitter does that
+in seconds via direct GraphQL. Conversely, nitter has NO write surface
+(twscrape is read-only by design — it never touches the mutation
+endpoints), so every write goes through the browser.
+
+**When nitter returns an auth error** (cookies expired, account locked):
+fall back to browser reads for the immediate task, then escalate to the
+operator — nitter's cookies live in the gitignored
+`infra/nitter/.env` and need re-extraction via the same Brave bridge
+that feeds the browser session.
+
 ## Content Pillars
 
 1. **Daily Grind** — workout tips, form corrections, motivation.
@@ -60,6 +92,28 @@ python3 /sandbox/twitter_helpers.py mentions
 
 **Never default to VNC login.** Cookie pull is the canonical path.
 VNC is mentioned in old prompts as a last resort — ignore it.
+
+## Posting images
+
+When a task includes an image to post (the image is staged at a container
+path, typically `/sandbox/workspace/data/staged/<filename>`):
+
+1. **Navigate** to `https://x.com/compose/post` (or click the compose UI).
+2. **Upload** the image with `browser_upload`:
+   ```
+   pux_sandbox_browser_upload selector="input[type='file']" file_path="/sandbox/workspace/data/staged/tweet.jpg"
+   ```
+   If the `input[type='file']` selector doesn't match, screenshot the compose
+   box and find the image-upload button/icon — click it, THEN use
+   `browser_upload` on the file-input that appears.
+3. **Wait** for the upload to finish (the image thumbnail appears in the
+   composer). `browser_wait` 2-3s, then screenshot to confirm.
+4. **Type the caption** with `browser_type` into the tweet text box.
+5. **Post** — click the Post button, then verify the tweet appears on your
+   profile.
+
+The image file is on the workspace bind mount — no need to download or
+base64-decode anything. Just pass the path to `browser_upload`.
 
 ## Delegation
 

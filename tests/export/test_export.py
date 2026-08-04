@@ -141,11 +141,22 @@ class TestResolveSharedSkills:
 
 
 class TestResolveSharedSandbox:
-    """``_resolve_shared_sandbox`` finds host_setup helper scripts."""
+    """``_resolve_shared_sandbox`` finds host_setup helper scripts and job
+    scripts referenced by an org's policy."""
 
     def test_twitter_agent_needs_cookie_extractor(self):
+        # Cookies used to be extracted in-container via a host_setup hook
+        # (helper_script: extract_browser_cookies.py). That flow was replaced
+        # by env-var injection (``browser.cookies_env: TWITTER_COOKIES_B64``)
+        # populated on the host by brave_cookie_bridge.py — so the sandbox no
+        # longer ships extract_browser_cookies.py. What the sandbox DOES need
+        # is the deploy job that ships twitter_post.py + paths.py + the saved
+        # session. Verify the resolver still finds the deploy script.
         files = _resolve_shared_sandbox("twitter-agent")
-        assert any("extract_browser_cookies.py" in k for k in files)
+        assert any("deploy_twitter_scripts.sh" in k for k in files), (
+            "twitter-agent's sandbox must ship its deploy job script "
+            f"(deploys twitter_post.py + saved session); got {sorted(files)}"
+        )
 
 
 class TestResolveToolServers:

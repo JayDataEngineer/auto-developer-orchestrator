@@ -872,7 +872,6 @@ def test_coder_specialists_resolve_on_worker_role(monkeypatch):
     the ``worker`` role (cheap mimo, the "small one-shot worker" the user asked
     for). Drives the REAL load_subagents('coder') — no Docker, no tokens.
     Fake key only (get_model reads it at construction, never sends a request)."""
-    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
     from pux_harness.agent import orgs as orgs_mod
     from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
 
@@ -886,9 +885,21 @@ def test_coder_specialists_resolve_on_worker_role(monkeypatch):
     # load_subagents takes the context layer explicitly now (one way: the loader
     # no longer builds it). Build it here exactly as the stack factory does.
     from pux_harness.context.layer import build_context_layer
+    from pux_harness.agent import stack as stack_mod
     mw, ctx_tools = build_context_layer()
+    # web-agent declares ``middleware: [rubric]`` in its frontmatter, so
+    # load_subagents REQUIRES build_subagent_middleware (the runtime factory
+    # always supplies one). Pass the real builder with an unarmed gate →
+    # _build_rubric returns None, the builder resolves the context baseline.
+    _ctx = stack_mod.StackCtx(
+        org="coder", facts=stack_mod.RuntimeFacts(),
+        rubric_gate=None, exec_client="STUB",
+    )
     subs = orgs_mod.load_subagents(
         "coder", specialists, subagent_middleware=mw, retrieval_tools=ctx_tools,
+        build_subagent_middleware=stack_mod.make_subagent_middleware_builder(
+            _ctx, [], set(),
+        ),
     )
     by_name = {s["name"]: s for s in subs}
     assert set(by_name) == {"coder-explorer", "code-worker", "web-agent"}, \

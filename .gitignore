@@ -40,6 +40,10 @@ backend/server
 backend/tmp/
 
 # Runtime data
+# Workspace outputs (artifacts/, memos/, .pux/sessions/) are runtime state —
+# never source. The canonical way to retrieve one run's worth of work is
+# `pux bundle <thread_id>` → ./<thread_id>.tgz. The bundle output is itself
+# ignored (see Archives / backups below) so it isn't committed by accident.
 data/
 **/.pux/
 .deepagents/
@@ -134,5 +138,26 @@ GAPS-*.md
 # Archives / backups (never track tarballs)
 *.tar.gz
 *.tar.bz2
+*.tgz
 *.zip
 
+
+# Living notes on browser tool architecture + MCP swap decision
+BROWSER-AI-CONTEXT.md
+
+# Hard-won operator context — lessons beaten into Claude across sessions.
+# Never commit; this is the local memory of what NOT to get wrong.
+CLAUDE-CONTEXT.md
+
+# Exports (not tracked)
+export/
+=3.4.0
+compare_*.png
+drafts.json
+history.txt
+glb_viewer_screenshot.png
+final-test
+*.bak-check
+scripts/*_upload*.png
+scripts/compose_state.png
+scripts/debug_compose.png

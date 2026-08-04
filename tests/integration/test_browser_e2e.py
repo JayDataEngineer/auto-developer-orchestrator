@@ -297,7 +297,7 @@ def test_browser_vision_reaches_multimodal_driver(browser):
     (mimo-v2.5) through the gateway and the model SEES the rendered page —
     referencing content visible only in the PNG, not the tool's text JSON.
     The text-only ToolMessage shape is what makes the gateway accept it (it 400s
-    on image-in-tool). Skipped without ``OPENCODE_API_KEY`` (live model call)."""
+    on image-in-tool). Skipped without ``OPENROUTER_API_KEY`` (live model call)."""
     from types import SimpleNamespace
 
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -306,8 +306,8 @@ def test_browser_vision_reaches_multimodal_driver(browser):
     from pux_harness.context.browser_vision import BrowserVisionMiddleware
     from pux_harness.sandbox.docker_exec import DockerExecClient
 
-    if not os.environ.get("OPENCODE_API_KEY"):
-        pytest.skip("OPENCODE_API_KEY not set — cannot run live multimodal model call")
+    if not os.environ.get("OPENROUTER_API_KEY"):
+        pytest.skip("OPENROUTER_API_KEY not set — cannot run live multimodal model call")
 
     nav = browser["browser_navigate"]
     shot = browser["browser_screenshot"]
@@ -354,7 +354,7 @@ def test_mimo_drives_browser_with_vision_full_loop(browser):
     names the color, it SAW the screenshot — no other path to that info. This is
     strictly stronger than ``test_browser_vision_reaches_multimodal_driver``
     (which uses a hand-built conversation); this one proves the model decides to
-    look AND sees the result. Skipped without ``OPENCODE_API_KEY``."""
+    look AND sees the result. Skipped without ``OPENROUTER_API_KEY``."""
     from deepagents import create_deep_agent
     from langchain_core.messages import HumanMessage
 
@@ -362,8 +362,8 @@ def test_mimo_drives_browser_with_vision_full_loop(browser):
     from pux_harness.context.browser_vision import BrowserVisionMiddleware
     from pux_harness.sandbox.docker_exec import DockerExecClient
 
-    if not os.environ.get("OPENCODE_API_KEY"):
-        pytest.skip("OPENCODE_API_KEY not set — cannot run live multimodal model call")
+    if not os.environ.get("OPENROUTER_API_KEY"):
+        pytest.skip("OPENROUTER_API_KEY not set — cannot run live multimodal model call")
 
     # stage a vision-only page: text "VISION TARGET" lands in the tool JSON,
     # but the COLOR (#e91e63 = pink/magenta) does NOT — only the PNG has it.
@@ -457,7 +457,7 @@ def test_mimo_solves_real_dragdrop_challenge(browser):
     The model has to DISCOVER that; the task prompt gives only the goal.
 
     Verdict is read from the DOM, model-independent: solved iff
-    ``#drag1``'s parent is ``#div1``. Skipped without ``OPENCODE_API_KEY``."""
+    ``#drag1``'s parent is ``#div1``. Skipped without ``OPENROUTER_API_KEY``."""
     from deepagents import create_deep_agent
     from langchain_core.messages import HumanMessage
 
@@ -465,8 +465,8 @@ def test_mimo_solves_real_dragdrop_challenge(browser):
     from pux_harness.context.browser_vision import BrowserVisionMiddleware
     from pux_harness.sandbox.docker_exec import DockerExecClient
 
-    if not os.environ.get("OPENCODE_API_KEY"):
-        pytest.skip("OPENCODE_API_KEY not set — cannot run live multimodal model call")
+    if not os.environ.get("OPENROUTER_API_KEY"):
+        pytest.skip("OPENROUTER_API_KEY not set — cannot run live multimodal model call")
 
     nav = browser["browser_navigate"]
     for _ in range(30):

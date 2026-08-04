@@ -10,6 +10,12 @@ MCP to search the live web, and a cited brief comes back. That's all.
 - **`mcp__web_research__search`** — lightweight title/snippet list. Use to
   scope a vague query before a deeper read.
 - **`mcp__web_research__fetch`** — read one specific URL you already have.
+  Returns clean markdown PLUS, by default, the page's **images** (and can pull
+  **PDFs** / JS-rendered pages via `method`: `httpx` | `crawl4ai` | `selenium` |
+  `pdf`; auto-picks the best method per domain if omitted). Images reach a
+  multimodal model as image content, so you can reason about charts/screenshots/
+  figures, not just their alt-text. Pass `text_only=true` to drop images for a
+  faster, text-only read; `css_selector` to extract one region.
 
 ## The loop
 

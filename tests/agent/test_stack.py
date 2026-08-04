@@ -71,7 +71,6 @@ def fake_tree(tmp_path: Path, monkeypatch):
     (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
     (tmp_path / "orgs" / "_shared" / "skills").mkdir(parents=True)
     monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
-    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
     # BrowserVisionMiddleware is env-gated (default ON); pin it OFF so the
     # byte-identical baseline tests see EXACTLY the pre-vision stack. The
     # vision mount itself is proven in test_browser_vision_mounts_* below.
@@ -132,6 +131,15 @@ def stub_factory(monkeypatch):
                         lambda **kw: "CACHE")
     monkeypatch.setattr(stack, "_FullPrefixCachingMiddleware",
                         lambda **kw: "CACHE")
+    # ReadFileVisionMiddleware is default-on for every scope (supervisor +
+    # subagent) — the automatic image/binary fallback for non-multimodal
+    # drivers. Stub to a marker so resolved-stack tests observe its
+    # presence/position without calling driver_multimodal (which would resolve
+    # a real model). driver_multimodal is also stubbed so the builder doesn't
+    # touch the real models.yaml registry.
+    monkeypatch.setattr(stack, "driver_multimodal", lambda **kw: False)
+    monkeypatch.setattr(stack, "ReadFileVisionMiddleware",
+                        lambda **kw: "READFILE")
 
     def _rubric(**kwargs):
         cap["rubric"].append(kwargs)
@@ -178,12 +186,14 @@ def test_registry_lists_documented_names():
     ``browser_vision`` were folded in as first-class (default-on, removable) specs;
     added the opt-in ``audit`` spec (default OFF). ``prepare`` / ``interpreter``
     / ``web-router`` were appended later (non-wrap or opt-in, last position to
-    avoid shifting existing mounts)."""
+    avoid shifting existing mounts). ``interpreter_hints`` mounts paired with
+    ``interpreter`` (the eval error-diagnostic layer)."""
     names = stack.middleware_names()
     assert set(names) == {"audit", "context", "routing", "session_guide",
                           "prompt_capture", "rubric", "model_retry",
-                          "tool_retry", "browser_vision", "prompt_caching",
-                          "prepare", "interpreter", "web-router"}
+                          "tool_retry", "read_file_vision", "browser_vision",
+                          "interpreter_hints",
+                          "prompt_caching", "prepare", "interpreter", "web-router"}
     # No duplicate registrations.
     assert len(names) == len(set(names))
 
@@ -198,9 +208,10 @@ def test_defaults_match_pre_factory_baseline():
     for non-Anthropic models (``unsupported_model_behavior="ignore"``)."""
     assert stack.DEFAULT_SUPERVISOR == ["context", "routing", "session_guide",
                                         "prompt_capture", "model_retry",
-                                        "browser_vision", "prompt_caching",
-                                        "prepare"]
-    assert stack.DEFAULT_SUBAGENT == ["context", "browser_vision", "prompt_caching"]
+                                        "read_file_vision", "browser_vision",
+                                        "prompt_caching", "prepare"]
+    assert stack.DEFAULT_SUBAGENT == ["context", "read_file_vision",
+                                      "browser_vision", "prompt_caching"]
 
 
 def test_registry_scopes_are_correct():
@@ -215,7 +226,7 @@ def test_registry_scopes_are_correct():
     for name in ("routing", "session_guide", "prompt_capture",
                  "model_retry", "tool_retry"):
         assert by_name[name].scope == {stack.Scope.SUPERVISOR}, name
-    for name in ("audit", "context", "rubric", "browser_vision"):
+    for name in ("audit", "context", "rubric", "read_file_vision", "browser_vision"):
         assert by_name[name].scope == {stack.Scope.SUPERVISOR,
                                        stack.Scope.SUBAGENT}, name
 
@@ -225,7 +236,10 @@ def test_registry_scopes_are_correct():
 def test_no_profile_byte_identical_baseline(fake_tree, stub_factory):
     """No profile + no gate → the factory emits exactly the pre-factory stack:
     supervisor middleware [ROUTE, GUIDE] (context layer stubbed empty here),
-    the specialist tools, the assembled prompt, and the resolved subagents."""
+    the assembled prompt, and the resolved subagents. Under the tool-surface
+    anti-flood default, the supervisor surface carries NO registry specialists
+    (an org opts in via policy.yaml ``tool_surface.groups``); the specialists
+    still resolve onto their subagents, which carry the full surface."""
     plan = stack.build_stack(
         "p",
         specialists=list(_SPECIALISTS),
@@ -233,9 +247,12 @@ def test_no_profile_byte_identical_baseline(fake_tree, stub_factory):
         rubric_gate=None,
         exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "CACHE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
     sup_names = {t.name for t in plan.supervisor_tools}
-    assert {"pux_sandbox_python", "pux_sandbox_browser_navigate"} <= sup_names
+    # No profile → no registry specialists on the supervisor surface.
+    assert not any(n.startswith("pux_sandbox_") for n in sup_names), (
+        f"no-profile supervisor should carry no pux_sandbox_* specialists, got {sup_names}"
+    )
     # Prompt is the root + org + harness addendum (the org prose lands).
     assert "CTO prose" in plan.supervisor_prompt
     # The one specialist subagent resolved, on the worker role.
@@ -253,9 +270,11 @@ def test_no_profile_subagent_middleware_is_the_context_layer(fake_tree, stub_fac
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    # context layer stubbed empty; browser_vision env-gated OFF in fake_tree;
-    # prompt_caching is the only default-on subagent middleware that survives.
-    assert plan.subagents[0]["middleware"] == ["CACHE"]
+    # context layer stubbed empty; browser_vision env-gated OFF in fake_tree.
+    # ReadFileVisionMiddleware is default-ON for subagents too (read_file is
+    # universal, so the auto-describe fallback is too); prompt_caching is the
+    # other default-on subagent middleware that survives.
+    assert plan.subagents[0]["middleware"] == ["READFILE", "CACHE"]
 
 
 # --- the general-purpose subagent -------------------------------------------
@@ -374,10 +393,10 @@ def test_browser_vision_mounts_innermost_when_enabled(fake_tree, stub_factory, m
                for m in plan.supervisor_middleware)
     assert any(isinstance(m, BrowserVisionMiddleware)
                for m in plan.subagents[0]["middleware"])
-    # the rest of the stack is the same baseline + CACHE
+    # the rest of the stack is the same baseline + READFILE + CACHE
     non_vision = [m for m in plan.supervisor_middleware
                   if not isinstance(m, BrowserVisionMiddleware)]
-    assert non_vision == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "CACHE"]
+    assert non_vision == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
 
 
 def test_browser_vision_absent_when_disabled(fake_tree, stub_factory):
@@ -389,7 +408,7 @@ def test_browser_vision_absent_when_disabled(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "CACHE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
     assert not any(isinstance(m, BrowserVisionMiddleware)
                    for m in plan.supervisor_middleware)
     assert not any(isinstance(m, BrowserVisionMiddleware)
@@ -433,7 +452,7 @@ def test_rubric_gate_armed_appends_rubric(fake_tree, stub_factory):
         rubric_gate=_gate(max_iterations=5), exec_client="EXEC",
     )
     mw = plan.supervisor_middleware
-    assert mw == ["ROUTE", "GUIDE", "PROMPT", "RUBRIC", "RETRY", "CACHE"]
+    assert mw == ["ROUTE", "GUIDE", "PROMPT", "RUBRIC", "RETRY", "READFILE", "CACHE"]
     assert mw.index("ROUTE") < mw.index("RUBRIC")  # baseline before rubric
     assert stub_factory["rubric"][0]["max_iterations"] == 5
     # Grader model via the role-resolved path (stub_factory → "MODEL"); 3 tools.
@@ -448,7 +467,7 @@ def test_rubric_gate_disabled_mounts_no_rubric(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=_gate(enabled=False), exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "CACHE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
     assert stub_factory["rubric"] == []
 
 
@@ -476,7 +495,7 @@ def test_override_supervisor_remove_drops_routing(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["GUIDE", "PROMPT", "RETRY", "CACHE"]
+    assert plan.supervisor_middleware == ["GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
 
 
 def test_override_supervisor_add_is_idempotent(fake_tree, stub_factory):
@@ -488,7 +507,7 @@ def test_override_supervisor_add_is_idempotent(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "CACHE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
 
 
 def test_override_add_wins_over_remove(fake_tree, stub_factory):
@@ -511,7 +530,7 @@ def test_override_empty_block_is_byte_identical(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "CACHE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
 
 
 # --- the opt-in ``audit`` spec ---------------------------------------------
@@ -543,7 +562,7 @@ def test_audit_opt_in_supervisor_mounts_outermost(fake_tree, stub_factory):
     mw = plan.supervisor_middleware
     assert mw[0] == "AUDIT", mw  # outermost
     # the default-on baseline still follows, unchanged, in registry order
-    assert mw[1:] == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "CACHE"], mw
+    assert mw[1:] == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"], mw
 
 
 def test_audit_opt_in_subagent_scope_allowed(fake_tree, stub_factory):
@@ -571,7 +590,7 @@ def test_excluded_middleware_field_honored(fake_tree, stub_factory):
         "p", specialists=list(_SPECIALISTS), profile=cfg,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["GUIDE", "PROMPT", "RETRY", "CACHE"]
+    assert plan.supervisor_middleware == ["GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
 
 
 # --- fail-loud: unknown names + wrong scopes -------------------------------
@@ -696,8 +715,8 @@ def test_context_mounts_outermost_and_emits_tools(fake_tree, stub_factory, monke
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    # context outermost, then routing, session_guide, model_retry (vision off).
-    assert plan.supervisor_middleware == ["CONTEXT", "ROUTE", "GUIDE", "PROMPT", "RETRY", "CACHE"]
+    # context outermost, then routing, session_guide, model_retry, read_file_vision (vision off).
+    assert plan.supervisor_middleware == ["CONTEXT", "ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
     # The retrieval tool escaped the spec into the supervisor surface.
     assert "ctx_recall" in {t.name for t in plan.supervisor_tools}
 
@@ -715,7 +734,7 @@ def test_context_is_now_removable(fake_tree, stub_factory, monkeypatch):
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "CACHE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
     assert "ctx_recall" not in {t.name for t in plan.supervisor_tools}
 
 
@@ -731,7 +750,7 @@ def test_browser_vision_is_now_removable_when_enabled(fake_tree, stub_factory, m
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
-    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "CACHE"]
+    assert plan.supervisor_middleware == ["ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
     assert not any(isinstance(m, BrowserVisionMiddleware)
                    for m in plan.supervisor_middleware)
 
@@ -754,7 +773,7 @@ def test_full_supervisor_order_is_canonical_registry_order(fake_tree, stub_facto
     # browser_vision is present (not last — prompt_caching follows it, but
     # uses wrap_model_call not wrap_tool_call so they don't interfere)
     assert any(isinstance(m, BrowserVisionMiddleware) for m in mw)
-    assert len(mw) == 8  # context, routing, session_guide, prompt_capture, rubric, model_retry, browser_vision, prompt_caching
+    assert len(mw) == 9  # context, routing, session_guide, prompt_capture, rubric, model_retry, read_file_vision, browser_vision, prompt_caching
 
 
 # --- ask_user HITL construction gate (opt-in AND not mcp/autonomous) --------
@@ -1119,8 +1138,9 @@ def test_supervisor_prompt_is_the_assembled_registry(fake_tree, stub_factory):
 def test_scope_supervisor_tools_unit():
     """``_scope_supervisor_tools`` drops only ``pux_sandbox_*`` specialists whose
     group/slug isn't allowed; native (no prefix), mcp (``mcp__``), context
-    retrieval, and ``ask_user`` pass through untouched. ``None`` allow = keep
-    everything (byte-identical default)."""
+    retrieval, and ``ask_user`` pass through untouched. ``frozenset()`` is the
+    default (no specialists on the supervisor surface); a non-empty allowlist
+    opts the named slugs back in."""
     tools = [
         _mk_tool("pux_sandbox_python"),
         _mk_tool("pux_sandbox_browser_navigate"),
@@ -1129,11 +1149,13 @@ def test_scope_supervisor_tools_unit():
         _mk_tool("ctx_recall"),       # context retrieval
         _mk_tool("ask_user"),         # HITL, appended after scoping
     ]
-    # None -> unchanged
-    assert [t.name for t in stack._scope_supervisor_tools(tools, None)] == [
-        t.name for t in tools
-    ]
-    # only python allowed -> browser dropped, everything else kept
+    # Empty allow set → every registry specialist scoped away; non-specialists
+    # (native, mcp, ctx, ask_user) pass through untouched.
+    empty_names = {t.name for t in stack._scope_supervisor_tools(tools, frozenset())}
+    assert empty_names == {
+        "execute", "mcp__web_research__search", "ctx_recall", "ask_user",
+    }
+    # Only python allowed → browser dropped, everything else kept.
     scoped = stack._scope_supervisor_tools(tools, frozenset({"python"}))
     names = {t.name for t in scoped}
     assert names == {
@@ -1169,11 +1191,14 @@ def test_tool_surface_scopes_supervisor_not_subagents(fake_tree, stub_factory, m
 
 
 def test_no_tool_surface_is_byte_identical(fake_tree, stub_factory):
-    """An org with NO ``tool_surface`` block keeps the FULL specialist surface
-    on the supervisor (byte-identical to today)."""
+    """An org with NO ``tool_surface`` block carries NO registry specialists on
+    the supervisor (the anti-flood default). Specialists still reach the
+    supervisor via subagents."""
     plan = stack.build_stack(
         "p", specialists=list(_SPECIALISTS), profile=None,
         rubric_gate=None, exec_client="EXEC",
     )
     sup_names = {t.name for t in plan.supervisor_tools}
-    assert {"pux_sandbox_python", "pux_sandbox_browser_navigate"} <= sup_names
+    assert not any(n.startswith("pux_sandbox_") for n in sup_names), (
+        f"no-tool_surface supervisor should carry no pux_sandbox_* specialists, got {sup_names}"
+    )

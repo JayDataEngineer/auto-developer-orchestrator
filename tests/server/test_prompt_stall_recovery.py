@@ -256,6 +256,116 @@ def test_deterministic_error_is_not_retried(monkeypatch):
     assert result.stop_reason == "end_turn"
 
 
+# ---------------------------------------------------------------------------
+# NEW (2026-07-22): notice text honestly describes WHICH layer raised.
+# The pre-fix notice unconditionally said "model stream stalled" for EVERY
+# unrecoverable exception — sending operators to check provider health when
+# the real cause was a tool-side ExecTimeout or an AttributeError in a
+# middleware. These tests pin the per-exception-type notice branches.
+# ---------------------------------------------------------------------------
+
+
+def test_exectimeout_notice_does_not_say_stream_stall(monkeypatch):
+    """REGRESSION (2026-07-22, session 67f05375..., org coder): an
+    ``ExecTimeout`` reached the prompt boundary and surfaced as
+    ``⚠️ This turn ended early — the model stream stalled (ExecTimeout)``,
+    which is a lie on two counts:
+      1. ExecTimeout is a TOOL timeout, not a model stream stall.
+      2. The agent's command (recursive ``uv run pux``) never had a chance
+         to run — it was killed by ``future.result(timeout=0)`` instantly.
+
+    The notice must now say "tool call hit the sandbox wall-clock timeout"
+    and explicitly call out that it is NOT a stream stall.
+    """
+    from pux_harness.sandbox.docker_exec import ExecTimeout
+
+    async def timeout_super(self, prompt, session_id, message_id=None, **kwargs):
+        raise ExecTimeout(
+            "exec timed out after 0s: 'cd /sandbox/workspace && uv run pux direct ...'"
+        )
+
+    monkeypatch.setattr(AgentServerACP, "prompt", timeout_super)
+    server = _make_server()
+    server._log_text = AsyncMock()
+
+    asyncio.run(server.prompt(_ns(), "sess-tool-timeout"))
+
+    server._log_text.assert_awaited_once()
+    _, kwargs = server._log_text.call_args
+    text = kwargs.get("text", "")
+
+    assert "NOT a model stream stall" in text, (
+        f"ExecTimeout notice must explicitly disambiguate from a stream stall "
+        f"(got {text!r})"
+    )
+    assert "wall-clock timeout" in text, (
+        f"notice must name the actual cause: tool-side wall-clock timeout "
+        f"(got {text!r})"
+    )
+    # Pre-fix misleading text must NOT appear.
+    assert "model stream stalled" not in text, (
+        f"the misleading 'model stream stalled' phrase must NOT appear on a "
+        f"tool-timeout notice (got {text!r})"
+    )
+
+
+def test_unrecoverable_error_notice_names_the_actual_exception(monkeypatch):
+    """For unrecoverable non-timeout errors (AttributeError, KeyError,
+    ValueError, etc.) the notice must surface the actual exception name +
+    message so the operator knows where to look. Pre-fix text just said
+    'model stream stalled (AttributeError)' which obscured the cause."""
+    calls = {"n": 0}
+
+    async def bug_super(self, prompt, session_id, message_id=None, **kwargs):
+        calls["n"] += 1
+        raise AttributeError("'str' object has no attribute 'get'")
+
+    monkeypatch.setattr(AgentServerACP, "prompt", bug_super)
+    server = _make_server()
+    server._log_text = AsyncMock()
+
+    asyncio.run(server.prompt(_ns(), "sess-attr-err"))
+
+    server._log_text.assert_awaited_once()
+    _, kwargs = server._log_text.call_args
+    text = kwargs.get("text", "")
+
+    assert "AttributeError" in text, (
+        f"notice must name the exception type (got {text!r})"
+    )
+    assert "object has no attribute 'get'" in text, (
+        f"notice must surface the exception message (got {text!r})"
+    )
+    assert "deterministic" in text.lower(), (
+        f"notice must say this is deterministic (won't change on retry) so "
+        f"the operator knows not to wait/retry (got {text!r})"
+    )
+    # Pre-fix misleading label must NOT appear.
+    assert "model stream stalled" not in text
+
+
+def test_exhausted_retry_still_says_stream_stall(monkeypatch):
+    """Sanity: when the exception IS a real recoverable stream stall that
+    genuinely exhausted retries, the notice KEEPS calling it a stream stall.
+    The new branching must not regress the original case."""
+
+    async def always_stalls(self, prompt, session_id, message_id=None, **kwargs):
+        raise _stall_error()
+
+    monkeypatch.setattr(AgentServerACP, "prompt", always_stalls)
+    server = _make_server()
+    server._log_text = AsyncMock()
+
+    asyncio.run(server.prompt(_ns(), "sess-stall-exhaust"))
+
+    _, kwargs = server._log_text.call_args
+    text = kwargs.get("text", "")
+    assert "model stream stalled" in text, (
+        f"real stream stalls that exhausted retries must keep the original "
+        f"'model stream stalled' wording (got {text!r})"
+    )
+
+
 def test_exhausted_retry_notice_mentions_checkpointed_resume(monkeypatch):
     """When retries truly exhaust, the notice must tell the user the truth:
     their work is checkpointed and re-sending RESUMES — it does not restart.

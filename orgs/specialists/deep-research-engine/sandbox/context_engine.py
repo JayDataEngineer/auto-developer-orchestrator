@@ -40,8 +40,12 @@ import os
 import subprocess
 import sys
 import time
-import urllib.request
 from pathlib import Path
+
+# Universal LLM client — resolves model/endpoint from models.yaml (single source
+# of truth), replacing per-script raw HTTP + env var injection.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from llm_client import call_llm as _llm_call
 
 
 SANDBOX_DIR = Path(__file__).resolve().parent
@@ -453,8 +457,7 @@ def step_synthesize(items, transcripts, entities, work_dir, model=None):
         "{context_json}", json.dumps(context, indent=2, ensure_ascii=False)
     )
 
-    _url, _default_model = _llm_env_required()
-    print(f"  calling LLM (model={model or _default_model})...")
+    print(f"  calling LLM (model={model or 'resolved by llm_client'})...")
     try:
         report = _call_llm(prompt, model=model, max_tokens=8000)
     except Exception as e:
@@ -534,25 +537,10 @@ def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def _llm_env_required():
-    """The sandbox policy (``sandbox.llm: <role>``) injects these from the
-    harness model tier (models.yaml). This script is a DUMB CONSUMER — it does
-    not re-resolve the provider, model, or key. Fail loud if the vars are
-    missing so a misconfigured sandbox surfaces immediately."""
-    url = os.environ.get("LLM_API_URL", "")
-    model = os.environ.get("LLM_MODEL", "")
-    if not url or not model:
-        print(
-            "ERROR: LLM_API_URL and LLM_MODEL must be set. The sandbox policy\n"
-            "injects them via `sandbox.llm: <role>` (resolved from models.yaml).\n"
-            "For standalone use:\n"
-            '  export LLM_API_URL="https://opencode.ai/zen/go/v1/chat/completions"\n'
-            '  export LLM_MODEL="mimo-v2.5"\n'
-            '  export LLM_API_KEY="<key>"',
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    return url, model
+def _call_llm(prompt, model=None, temperature=0.3, max_tokens=8000):
+    """Delegate to the universal llm_client."""
+    return _llm_call(prompt, model=model, temperature=temperature,
+                     max_tokens=max_tokens, disable_thinking=False)
 
 
 def _run(cmd, capture=False, check=True):
@@ -567,30 +555,6 @@ def _relate(sc, src, edge, tgt):
          "--src", src, "--edge", edge, "--tgt", tgt],
         capture_output=True, check=False,
     )
-
-
-def _call_llm(prompt, model=None, temperature=0.3, max_tokens=8000):
-    url, default_model = _llm_env_required()
-    headers = {
-        "Content-Type": "application/json",
-        # Cloudflare bot-integrity (error 1010) bans the default
-        # ``Python-urllib/3.x`` signature. A neutral identifier passes.
-        "User-Agent": "pux-harness-sandbox/1.0",
-    }
-    api_key = os.environ.get("LLM_API_KEY", "")
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    data = json.dumps({
-        "messages": [{"role": "user", "content": prompt}],
-        "model": model or default_model,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }).encode()
-    req = urllib.request.Request(url, data=data, headers=headers)
-    with urllib.request.urlopen(req, timeout=600) as resp:
-        result = json.loads(resp.read())
-    return result["choices"][0]["message"]["content"]
 
 
 # ---------------------------------------------------------------------------

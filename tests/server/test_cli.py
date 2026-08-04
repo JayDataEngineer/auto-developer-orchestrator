@@ -435,10 +435,10 @@ class TestMainDispatch:
     def test_sandbox(self, cli, monkeypatch):
         seen = []
         monkeypatch.setattr("pux_harness.main.run_sandbox",
-                            lambda a: seen.append(a))
+                            lambda a, output=None: seen.append((a, output)))
         monkeypatch.setattr(sys, "argv", ["pux", "sandbox", "start"])
         cli.main()
-        assert seen == ["start"]
+        assert seen == [("start", None)]
 
     def test_agents(self, cli, monkeypatch):
         seen = []
@@ -501,6 +501,49 @@ class TestMainDispatch:
         monkeypatch.setattr(sys, "argv", ["pux", "wait", "run_1"])
         cli.main()
         assert seen == ["run_1"]
+
+    def test_bundle(self, cli, monkeypatch):
+        """``pux bundle <thread_id>`` routes to cmd_bundle with all flags."""
+        seen = []
+        monkeypatch.setattr(cli, "cmd_bundle",
+                            lambda tid, output=None, all_files=False,
+                            since=None, no_files=False:
+                            seen.append((tid, output, all_files, since, no_files)))
+        monkeypatch.setattr(sys, "argv", [
+            "pux", "bundle", "dre-deadbeef", "--all", "--no-files",
+            "-o", "out.tgz",
+        ])
+        cli.main()
+        assert seen == [("dre-deadbeef", "out.tgz", True, None, True)]
+
+    def test_bundle_since_flag(self, cli, monkeypatch):
+        seen = []
+        monkeypatch.setattr(cli, "cmd_bundle",
+                            lambda tid, output=None, all_files=False,
+                            since=None, no_files=False:
+                            seen.append((tid, since)))
+        monkeypatch.setattr(sys, "argv", [
+            "pux", "bundle", "t1", "--since", "2026-07-01T00:00:00Z",
+        ])
+        cli.main()
+        assert seen == [("t1", "2026-07-01T00:00:00Z")]
+
+    def test_sandbox_dump_persist(self, cli, monkeypatch):
+        """``pux sandbox dump-persist -o X`` wires through to run_sandbox."""
+        seen = []
+        monkeypatch.setattr("pux_harness.main.run_sandbox",
+                            lambda cmd, output=None: seen.append((cmd, output)))
+        monkeypatch.setattr(sys, "argv", [
+            "pux", "sandbox", "dump-persist", "-o", "/tmp/out.tgz",
+        ])
+        cli.main()
+        assert seen == [("dump-persist", "/tmp/out.tgz")]
+
+    def test_sandbox_dump_persist_rejects_unknown_action(self, cli, monkeypatch):
+        """The argparse choices= gate rejects anything outside the allowlist."""
+        monkeypatch.setattr(sys, "argv", ["pux", "sandbox", "bogus"])
+        with pytest.raises(SystemExit):
+            cli.main()
 
     def test_list(self, cli, monkeypatch):
         seen = []
@@ -571,7 +614,7 @@ class TestMainDispatch:
         output_path = tmp_path / "general.tar.gz"
         # Create a valid empty tar.gz so the open/read summary path in main() works.
         import tarfile
-        with tarfile.open(output_path, "w:gz") as tar:
+        with tarfile.open(output_path, "w:gz"):
             pass
         monkeypatch.setattr("pux_harness.pack.pack_org",
                             lambda org, output=None, **kw: output or output_path)

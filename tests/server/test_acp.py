@@ -235,7 +235,7 @@ def test_acp_session_registered_in_pux_threads_over_stdio(tmp_path, project_root
 
 
 def test_acp_advertises_mimo_not_openai(project_root) -> None:
-    """The server advertises the org's base-role model (MiMo via OpenCode Go) as a
+    """The server advertises the org's base-role model (MiMo via OpenRouter) as a
     session ``config_option`` — NOT OpenAI/ChatGPT. Without ``models=`` at
     construction, Zed's model dropdown falls back to its built-in ChatGPT list
     (the "asks for OpenAI models" bug); this asserts the fix holds.
@@ -349,9 +349,15 @@ def test_acp_advertises_session_load_and_list(tmp_path, project_root) -> None:
     assert caps.session_capabilities is not None, "session_capabilities missing"
     sc = caps.session_capabilities
     assert sc.list is not None, "session_capabilities.list not advertised"
-    assert sc.fork is None and sc.resume is None and sc.close is None, (
-        f"fork/resume/close advertised but unbacked — untruthful: "
-        f"fork={sc.fork!r} resume={sc.resume!r} close={sc.close!r}"
+    # Zed disables its history UI entirely unless the server advertises the
+    # FULL session surface: list + resume + close. All three are backed by
+    # _RegisteringAgentServerACP overrides. delete is advertised when the
+    # installed acp version supports it (pux-harness/.venv has it; the root
+    # orchestrator venv may not yet). fork stays unset (unbacked).
+    assert sc.resume is not None, "session_capabilities.resume not advertised"
+    assert sc.close is not None, "session_capabilities.close not advertised"
+    assert sc.fork is None, (
+        f"fork advertised but unbacked — untruthful: fork={sc.fork!r}"
     )
     # Truthful image cap (#69): default-tier general's base model is glm-5.2
     # (text-only) → image must be False over the wire, not the base class's
@@ -513,3 +519,146 @@ def test_acp_cancel_flips_cancellation_flag(tmp_path, monkeypatch) -> None:
             return srv._cancelled
 
     assert asyncio.run(go()) is True, "cancel() did not flip _cancelled"
+
+
+# ---------------------------------------------------------------------------
+# session history replay — the mechanism that makes Zed's conversation panel
+# show prior messages after a restart (#68 message replay).
+# ---------------------------------------------------------------------------
+#
+# When Zed calls ``session/load`` or ``session/resume``, it expects the server
+# to REPLAY the conversation history as ``session_update`` notifications.
+# Without this, the session is "loaded" but the conversation panel is empty.
+# ``_replay_history`` reads messages directly from the checkpointer (no graph
+# build) and emits each as a ``UserMessageChunk`` (human) or ``AgentMessageChunk``
+# (AI). ``ToolMessage`` / ``SystemMessage`` are silently skipped.
+
+
+def test_acp_replay_history_emits_correct_chunk_types(tmp_path, monkeypatch) -> None:
+    """``_replay_history`` reads messages from the ``writes`` table and emits
+    each as the correct ``session_update`` chunk: ``UserMessageChunk`` for
+    human messages, ``AgentMessageChunk`` for AI messages. ``ToolMessage`` /
+    ``SystemMessage`` are silently skipped.
+
+    In-process: seeds the ``writes`` table with serialized messages (using
+    the SAME ``JsonPlusSerializer`` langgraph uses), mocks ``_conn.session_update``
+    to capture emitted chunks. No graph build, no model tokens, no sandbox boot.
+    This is the UNIT proof; the E2E proof (Zed restart → conversation panel
+    shows history) is the manual verify."""
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+    from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+    import pux_harness.threads as threads_mod
+    from pux_harness.acp import _RegisteringAgentServerACP
+    from pux_harness.threads import open_thread_store
+
+    monkeypatch.setattr(threads_mod, "PUX_API_DB", str(tmp_path / "replay.sqlite"))
+
+    serde = JsonPlusSerializer()
+
+    async def go() -> list[tuple[str, str, str]]:
+        async with open_thread_store() as store:
+            srv = _RegisteringAgentServerACP(
+                agent=lambda _ctx: None,
+                store=store,
+                org="general",
+                models=[{"value": "x", "name": "x", "description": "x"}],
+            )
+
+            # Seed the writes table with serialized messages.
+            fake_messages = [
+                SystemMessage(content="You are a helpful assistant."),  # skipped
+                HumanMessage(content="Hello, what can you do?"),
+                AIMessage(content="I can help you code!"),
+                HumanMessage(content="Write a function."),
+                AIMessage(content="def hello(): pass"),
+                ToolMessage(content="result=42", tool_call_id="x"),  # skipped
+            ]
+            # Serialize each message the way langgraph would.
+            for idx, msg in enumerate(fake_messages):
+                dtype, dvalue = serde.dumps_typed(msg)
+                await store.db.execute(
+                    "INSERT INTO writes (thread_id, checkpoint_ns, checkpoint_id, "
+                    "task_id, idx, channel, type, value) VALUES (?,?,?,?,?,?,?,?)",
+                    ("test-session-id", "", f"ckpt-{idx}", f"task-{idx}", 0,
+                     "messages", dtype, dvalue),
+                )
+            await store.db.commit()
+
+            # Mock the connection to capture session_update calls.
+            emitted: list[tuple[str, str, str]] = []
+
+            class _MockConn:
+                async def session_update(self, *, session_id, update, **kw):  # noqa: ARG002
+                    text = getattr(getattr(update, "content", None), "text", "")
+                    emitted.append((session_id, type(update).__name__, text))
+
+            srv._conn = _MockConn()
+
+            await srv._replay_history("test-session-id")
+            return emitted
+
+    emitted = asyncio.run(go())
+
+    # 6 messages total, but System + Tool are skipped → 4 emitted.
+    assert len(emitted) == 4, (
+        f"expected 4 replayed messages (System+Tool skipped), got {len(emitted)}: "
+        f"{[e[1] for e in emitted]}"
+    )
+
+    # Pattern must be: user, agent, user, agent.
+    chunk_types = [e[1] for e in emitted]
+    assert chunk_types == [
+        "UserMessageChunk",
+        "AgentMessageChunk",
+        "UserMessageChunk",
+        "AgentMessageChunk",
+    ], f"chunk type pattern wrong: {chunk_types}"
+
+    # Content sanity check.
+    assert "Hello" in emitted[0][2], f"first user message wrong: {emitted[0][2]!r}"
+    assert "help you code" in emitted[1][2], f"first agent message wrong: {emitted[1][2]!r}"
+    assert "Write a function" in emitted[2][2], f"second user message wrong: {emitted[2][2]!r}"
+    assert "def hello" in emitted[3][2], f"second agent message wrong: {emitted[3][2]!r}"
+
+    # Session id passed through.
+    assert all(e[0] == "test-session-id" for e in emitted), "session_id not passed through"
+
+
+def test_acp_replay_history_no_checkpoint_is_noop(tmp_path, monkeypatch) -> None:
+    """``_replay_history`` on a session with NO writes (fresh, never prompted)
+    is a silent no-op — no ``session_update`` calls, no error.
+
+    This is the common case on the FIRST restart after ``new_session`` if the
+    user closed Zed before sending any messages. The replay must not break
+    loading a session that has no history yet."""
+    import pux_harness.threads as threads_mod
+    from pux_harness.acp import _RegisteringAgentServerACP
+    from pux_harness.threads import open_thread_store
+
+    monkeypatch.setattr(threads_mod, "PUX_API_DB", str(tmp_path / "replay-empty.sqlite"))
+
+    async def go() -> int:
+        async with open_thread_store() as store:
+            srv = _RegisteringAgentServerACP(
+                agent=lambda _ctx: None,
+                store=store,
+                org="general",
+                models=[{"value": "x", "name": "x", "description": "x"}],
+            )
+
+            call_count = 0
+
+            class _MockConn:
+                async def session_update(self, **kw):  # noqa: ARG002
+                    nonlocal call_count
+                    call_count += 1
+
+            srv._conn = _MockConn()
+
+            # No writes seeded — the writes table is empty for this session.
+            await srv._replay_history("fresh-session")
+            return call_count
+
+    count = asyncio.run(go())
+    assert count == 0, f"replay on empty checkpoint emitted {count} updates (expected 0)"

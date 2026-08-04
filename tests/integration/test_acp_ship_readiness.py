@@ -189,7 +189,7 @@ async def _prompt_and_collect(
     """Spawn the ACP subprocess, send ``prompt`` as a single text block, return
     ``(agent_text, update_kinds, tool_call_names, PromptResponse)``.
 
-    Forwards the parent env so ``OPENCODE_API_KEY`` reaches the subprocess past
+    Forwards the parent env so ``OPENROUTER_API_KEY`` reaches the subprocess past
     the ACP transport's POSIX allowlist (which strips everything but
     HOME/PATH/SHELL/...). ``bin/pux`` auto-loads ``.env``; the bare ``python -m
     pux_harness.acp`` the test spawns does not.
