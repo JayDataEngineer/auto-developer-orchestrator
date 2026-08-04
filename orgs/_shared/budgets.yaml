@@ -18,16 +18,8 @@ subagent_default: 1500   # the per-subagent budget (tokens)
 # Per-org overrides. ``waiver_reason`` documents WHY an org exceeds the default
 # — a waiver is a TRACKED debt, not a silent pass. Remove the override once the
 # org is slimmed under ``default``.
-overrides:
-  deep-research-engine:
-    budget: 10000
-    waiver_reason: "B1 rework in flight — DRE AGENTS.md 574L→~200L target (skills escape hatch). Current 9.4K tokens; waiver tightens to 6000 after the cut."
-  coder:
-    budget: 5000
-    waiver_reason: "B1 in flight — web-agent.md 291L→~180L via extends: browser"
-  game-studio:
-    budget: 4500
-    waiver_reason: "B2 general/AGENTS.md audit pending (base tax × every specialist)"
-  twitter-agent:
-    budget: 4500
-    waiver_reason: "B2 general/AGENTS.md audit pending + B3 session-cookie removal"
+#
+# Track B (org slimming) eliminated all four original waivers: DRE (9.4K→3.6K
+# via skills escape hatch), coder (4.7K→3.6K), twitter-agent (4.4K→3.4K),
+# game-studio (4.4K→3.3K). Zero overrides — every org meets the 4K default.
+overrides: {}

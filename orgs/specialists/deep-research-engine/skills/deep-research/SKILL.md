@@ -14,6 +14,8 @@ upfront.
 
 | Task | Read |
 |------|------|
+| Deterministic preprocessing + LLM identity labeling (the ingest runbook) | `references/PIPELINE_RUNBOOK.md` |
+| Artifacts/ directory tree, entity dossier spec, provenance format | `references/ARTIFACT_STRUCTURE.md` |
 | Overall context-engine architecture (ingest → report) | `references/CONTEXT_ENGINE.md` |
 | Query the context engine (vector lookup of prior ingests) | `references/CONTEXT_ENGINE_QUERY.md` |
 | Hybrid search across the context engine | `references/CONTEXT_ENGINE_SEARCH.md` |
@@ -22,12 +24,12 @@ upfront.
 | Ingest audio + speaker diarization | `references/INGEST_AUDIO_DIARIZATION.md` |
 | Ingest + cluster faces (v1 pipeline) | `references/INGEST_FACE_CLUSTERING.md` |
 | Ingest + cluster faces (v2 pipeline) | `references/INGEST_FACE_CLUSTERING_V2.md` |
-| Ingest multimodal persons (face + voice + name) | `references/INGEST_MULTIMODAL_PERSONS.md` |
+| Cross-modal identity linking strategies (temporal co-occurrence, voice→sender) | `references/INGEST_MULTIMODAL_PERSONS.md` |
 | Fact-check claims / articles against sources | `references/FACT_CHECK_ARTICLES.md` |
 | Audit + quality gates before publish | `references/AUDIT_QUALITY_GATES.md` |
 | Write Substack articles | `references/WRITE_SUBSTACK_ARTICLES.md` |
 | Write social posts | `references/WRITE_SOCIAL_POSTS.md` |
-| Write safety-reference / protective-intelligence dossier (extremist-network target profiles, two-network crossover mapping, Draw.io export) | `references/WRITE_SAFETY_REFERENCE.md` |
+| Write safety-reference / protective-intelligence dossier | `references/WRITE_SAFETY_REFERENCE.md` |
 
 ## Operating rule
 
