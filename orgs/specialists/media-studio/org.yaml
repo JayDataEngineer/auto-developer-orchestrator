@@ -1,0 +1,12 @@
+extends: general
+agents: [media-studio-director, media-studio-pipeline-engineer, media-studio-artist]
+
+# Foreign MCP tool servers armed for this org. ray_inference is the Ray MCP —
+# 11 self-describing tools across two surfaces (3 single-model generation +
+# 8 character-pipeline). This is the ONE capability that distinguishes this
+# org: every agent here can drive the full Ray media-generation surface.
+# web_research arms the ``web-search`` agent inherited from general (MCP is
+# security-scoped + never inherited via extends:; redeclared here for it).
+capabilities:
+  - {kind: mcp, ref: ray_inference}
+  - {kind: mcp, ref: web_research}

@@ -17,17 +17,43 @@
 
 # ── ray_inference (Ray in-tree MCP) ──────────────────────────────────────────
 # Source: this stack — server/mcp_inference.py in the Ray repo.
-# In-tree FastMCP server mounted into Ray's Starlette app at /mcp/ray. Three
-# self-describing tools (list_models, describe_model, generate) sourced live
-# from Ray's /v1/form-spec. Zero hardcoded model knowledge — when Ray's
-# catalog adds a model, this MCP exposes it automatically.
+# In-tree FastMCP server mounted into Ray's Starlette app at /mcp/ray. Eleven
+# self-describing tools across TWO surfaces:
+#
+#   1. Single-model generation (3 tools):
+#      list_models, describe_model, generate — sourced live from /v1/form-spec.
+#      Zero hardcoded model knowledge — when Ray's catalog adds a model, this
+#      MCP exposes it automatically.
+#
+#   2. Character pipelines (8 tools):
+#      list_pipelines, describe_pipeline, validate_pipeline, start_pipeline,
+#      get_pipeline_status, stop_pipeline, resume_pipeline, list_pipeline_runs
+#      — YAML-driven multi-step runs (character_trellis_ref, character_full, …)
+#      that orchestrate 20–40 bricks across generation → rigging → motion →
+#      texture → export, producing a final rigged+animated GLB. Status payloads
+#      are slimmed server-side to keep agent context lean (~5 KB not ~40 KB).
+#
 # This is the shared schema layer between Ray and every agent runtime
-# (see ~/Pux/docs/thin-architecture.md).
+# (see ~/Pux/docs/thin-architecture.md). Orgs that want BOTH surfaces declare
+# `ref: ray_inference` with no `tools:` narrowing; orgs that want only one
+# surface narrow the allowlist (e.g. media-studio wants all 11; a future
+# chat-only org might narrow to [list_models, describe_model, generate]).
 ray_inference:
   kind: mcp
   transport: http
   url: ${PUX_MCP_RAY_URL}
-  tools: [list_models, describe_model, generate]
+  tools:
+    - list_models
+    - describe_model
+    - generate
+    - list_pipelines
+    - describe_pipeline
+    - validate_pipeline
+    - start_pipeline
+    - get_pipeline_status
+    - stop_pipeline
+    - resume_pipeline
+    - list_pipeline_runs
   # Env: PUX_MCP_RAY_URL — the Streamable-HTTP MCP endpoint of the Ray
   # inference server. Local dev: http://localhost:33080/mcp/ray/
   # Remote (Tailscale): https://<tailnet-host>/mcp/ray/ (if served).
