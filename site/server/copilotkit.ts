@@ -1,90 +1,101 @@
-// CopilotKit runtime route — proxies /api/copilotkit requests to the
-// harness's AG-UI endpoint via LangGraphHttpAgent.
+// CopilotKit runtime — translates the CopilotKit client protocol ↔ langgraph-api.
 //
-// The harness runs AG-UI at http://127.0.0.1:9988/agui/<org_name>.
-// This route handles the CopilotKit protocol ↔ AG-UI translation.
+// Aegra (the langgraph-api server on :9988) serves every Pux org as a graph.
+// Each org name IS a langgraph graphId. CopilotKit's built-in LangGraphAgent
+// speaks STANDARD langgraph-api (/threads, /runs/stream), so NO custom /agui/
+// endpoint is needed — the protocol translation is owned by the runtime's own
+// adapter. This replaces the raw-proxy that 404'd against the non-existent
+// /agui/<org> path.
+//
+// The org→graph map is derived from pux-harness/aegra.json (the single source
+// of truth) at startup — adding an org there auto-registers it here on next
+// restart. No code change, no second hand-maintained list (PRO-PATTERN).
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { readFile } from "node:fs/promises";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { CopilotRuntime, copilotRuntimeNodeHttpEndpoint } from "@copilotkit/runtime";
+import { LangGraphAgent } from "@copilotkit/runtime/langgraph";
 
-const HARNESS_URL = process.env.PUX_HARNESS_URL ?? "http://127.0.0.1:9988";
+const AEGRA_URL = process.env.PUX_HARNESS_URL ?? "http://127.0.0.1:9988";
+const LANGSMITH_KEY = process.env.LANGSMITH_API_KEY ?? "";
 
+// Resolve aegra.json — the single source of truth for the org→graph map.
+// PUX_AEGRA_JSON overrides; else PUX_PROJECT_ROOT/pux-harness/aegra.json;
+// else derive from this module's own location (site/server/ → repo root).
+const here = dirname(fileURLToPath(import.meta.url));
+const aegraJsonPath =
+  process.env.PUX_AEGRA_JSON ??
+  join(process.env.PUX_PROJECT_ROOT ?? resolve(here, "..", ".."), "pux-harness", "aegra.json");
+
+// Fallback list — ONLY used when aegra.json is unreadable (e.g. the BFF
+// running outside the repo). Must match aegra.json; drift is logged loudly.
+const FALLBACK_ORGS = [
+  "browser-agent", "coder", "deep-research-engine", "fs-explorer",
+  "game-studio", "general", "invest", "orchestrator", "social-media-pipeline",
+  "telegram-agent", "twitter-agent", "video-production", "web-search",
+];
+
+async function loadOrgGraphs(): Promise<string[]> {
+  try {
+    const raw = await readFile(aegraJsonPath, "utf-8");
+    const graphs = Object.keys(JSON.parse(raw).graphs ?? {});
+    if (graphs.length > 0) {
+      console.log(`[copilotkit] loaded ${graphs.length} graphs from ${aegraJsonPath}`);
+      return graphs.sort();
+    }
+    console.warn("[copilotkit] aegra.json has no `graphs` key — falling back");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[copilotkit] could not read ${aegraJsonPath}: ${msg} — using fallback list`);
+  }
+  return FALLBACK_ORGS;
+}
+
+function makeAgent(graphId: string): LangGraphAgent {
+  return new LangGraphAgent({
+    deploymentUrl: AEGRA_URL,
+    graphId,
+    ...(LANGSMITH_KEY ? { langsmithApiKey: LANGSMITH_KEY } : {}),
+  });
+}
+
+// --- build the runtime (one LangGraphAgent per org graph) ------------------
+// Top-level await — ESM, target ES2022. The server cannot serve until the
+// agent map is ready, so this correctly gates startup.
+const orgs = await loadOrgGraphs();
+
+const agents: Record<string, LangGraphAgent> = {};
+for (const name of orgs) agents[name] = makeAgent(name);
+
+// "default" alias → "general" so CopilotKit's default-agent path works when
+// the frontend doesn't specify an agent explicitly (it expects "default").
+if (orgs.includes("general")) agents.default = makeAgent("general");
+
+const runtime = new CopilotRuntime({ agents });
+const agentNames = Object.keys(agents).sort().join(", ");
+console.log(`[copilotkit] CopilotRuntime ready — ${Object.keys(agents).length} agents [${agentNames}]`);
+console.log(`[copilotkit] forwarding to ${AEGRA_URL} via standard langgraph-api`);
+
+// The CopilotKit node-http endpoint handler — owns the full response cycle
+// (headers, body, SSE stream). We delegate (req, res) to it verbatim.
+const ckHandler = copilotRuntimeNodeHttpEndpoint({
+  runtime,
+  endpoint: "/api/copilotkit",
+});
+
+/**
+ * Route handler for /api/copilotkit(.**). Delegates to the CopilotKit runtime
+ * which translates the client protocol ↔ langgraph-api (Aegra). Returns true
+ * if the path matched (the runtime owned the response); false to fall through.
+ */
 export async function handleCopilotKitRoute(
   req: IncomingMessage,
   res: ServerResponse,
   urlPath: string,
 ): Promise<boolean> {
-  // Only handle POST /api/copilotkit and POST /api/copilotkit/**
-  const method = (req.method ?? "GET").toUpperCase();
-  if (method !== "POST") return false;
-
-  // Read the full request body
-  const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
-  const body = Buffer.concat(chunks);
-
-  // Parse to find which agent/graph is being targeted
-  let targetOrg = "general";
-  try {
-    const parsed = JSON.parse(body.toString("utf-8"));
-    // CopilotKit sends thread_id and run_id — extract org from metadata or default
-    if (parsed.thread_id) {
-      // Try to resolve org from thread metadata via the harness
-      try {
-        const threadResp = await fetch(
-          `${HARNESS_URL}/threads/${parsed.thread_id}`,
-        );
-        if (threadResp.ok) {
-          const thread = await threadResp.json() as { agent_id?: string };
-          if (thread.agent_id) targetOrg = thread.agent_id;
-        }
-      } catch {
-        // fall through to default
-      }
-    }
-  } catch {
-    // not JSON — forward as-is to default org
-  }
-
-  // Forward to the harness AG-UI endpoint
-  const aguiUrl = `${HARNESS_URL}/agui/${targetOrg}`;
-  try {
-    const upstream = await fetch(aguiUrl, {
-      method: "POST",
-      headers: {
-        "content-type": req.headers["content-type"] ?? "application/json",
-        "accept": req.headers["accept"] ?? "*/*",
-      },
-      body,
-    });
-
-    // Stream the response back
-    res.writeHead(upstream.status, {
-      "content-type": upstream.headers.get("content-type") ?? "text/event-stream",
-      "cache-control": "no-store",
-      "x-accel-buffering": "no",
-    });
-
-    if (upstream.body) {
-      const reader = upstream.body.getReader();
-      const decoder = new TextDecoder();
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = typeof value === "string" ? value : decoder.decode(value, { stream: true });
-          res.write(chunk);
-        }
-      } catch {
-        // stream ended
-      }
-    }
-    res.end();
-    return true;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[copilotkit] proxy to ${aguiUrl} failed:`, msg);
-    res.writeHead(502, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: `harness unavailable: ${msg}` }));
-    return true;
-  }
+  if (urlPath !== "/api/copilotkit" && !urlPath.startsWith("/api/copilotkit/")) return false;
+  await ckHandler(req, res);
+  return true;
 }
