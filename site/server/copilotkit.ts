@@ -18,6 +18,40 @@ import { fileURLToPath } from "node:url";
 import { CopilotRuntime, copilotRuntimeNodeHttpEndpoint } from "@copilotkit/runtime";
 import { LangGraphAgent } from "@copilotkit/runtime/langgraph";
 
+/**
+ * PuxLangGraphAgent — forces ``streamSubgraphs: false`` on every run.
+ *
+ * WHY: deepagents' ``CodeInterpreterMiddleware`` stores a quickjs snapshot as
+ * raw ``bytes`` in the graph-state field ``_quickjs_snapshot_payload``. The
+ * payload starts ``b'QFGS\x01\x00\x00\x00\xe8…'`` — byte index 8 (``\xe8``)
+ * is an invalid standalone UTF-8 byte, so Pydantic's Rust serializer inside
+ * Aegra throws ``PydanticSerializationError: invalid utf-8 sequence of 1 bytes
+ * from index 8`` whenever that subgraph state is included in the SSE stream.
+ *
+ * The snapshot ONLY appears in subgraph events (``CodeInterpreterMiddleware.
+ * after_agent``), never in the top-level ``values`` / ``events`` stream. So
+ * disabling ``streamSubgraphs`` eliminates the invalid bytes from the wire
+ * format without losing any data the CopilotKit UI actually renders (the
+ * top-level messages, tool calls, and state snapshots are all unaffected).
+ *
+ * This is the correct server-side fix — it is transparent to every frontend
+ * client and requires no per-request configuration. The root cause (raw bytes
+ * in a JSON-serialized state field) is a bug in langchain-quickjs and should
+ * be fixed upstream (base64-encode the snapshot), but this override makes the
+ * bridge production-clean regardless.
+ */
+class PuxLangGraphAgent extends LangGraphAgent {
+  override run(input: Parameters<LangGraphAgent["run"]>[0]) {
+    return super.run({
+      ...input,
+      forwardedProps: {
+        ...(input?.forwardedProps ?? {}),
+        streamSubgraphs: false,
+      },
+    });
+  }
+}
+
 const AEGRA_URL = process.env.PUX_HARNESS_URL ?? "http://127.0.0.1:9988";
 const LANGSMITH_KEY = process.env.LANGSMITH_API_KEY ?? "";
 
@@ -53,8 +87,8 @@ async function loadOrgGraphs(): Promise<string[]> {
   return FALLBACK_ORGS;
 }
 
-function makeAgent(graphId: string): LangGraphAgent {
-  return new LangGraphAgent({
+function makeAgent(graphId: string): PuxLangGraphAgent {
+  return new PuxLangGraphAgent({
     deploymentUrl: AEGRA_URL,
     graphId,
     ...(LANGSMITH_KEY ? { langsmithApiKey: LANGSMITH_KEY } : {}),
@@ -66,7 +100,7 @@ function makeAgent(graphId: string): LangGraphAgent {
 // agent map is ready, so this correctly gates startup.
 const orgs = await loadOrgGraphs();
 
-const agents: Record<string, LangGraphAgent> = {};
+const agents: Record<string, PuxLangGraphAgent> = {};
 for (const name of orgs) agents[name] = makeAgent(name);
 
 // "default" alias → "general" so CopilotKit's default-agent path works when
