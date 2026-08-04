@@ -1,0 +1,33 @@
+# Token-budget gate for assembled org prompts (Track C of the declarative pass).
+#
+# The ``--check-contract`` green gate fails when an org's assembled supervisor
+# or subagent prompt exceeds its budget. Token heuristic: 4 chars/token (the
+# same ratio used everywhere in pux). Numbers are SUPERVISOR-prompt budgets
+# (the CTO prompt — the heaviest); subagent budgets are the same number / 2.5
+# (rounded up), set in ``budget_for``.
+#
+# ``pux prompt stats <org>`` reports headroom against these numbers.
+#
+# To TIGHTEN after a slimming pass: lower ``default`` (or add an org-specific
+# override) and re-run ``pux check-contract``. Bloat becomes a PERMANENT
+# contract failure, not a review opinion.
+
+default: 4000        # the green-gate budget for a supervisor prompt (tokens)
+subagent_default: 1500   # the per-subagent budget (tokens)
+
+# Per-org overrides. ``waiver_reason`` documents WHY an org exceeds the default
+# — a waiver is a TRACKED debt, not a silent pass. Remove the override once the
+# org is slimmed under ``default``.
+overrides:
+  deep-research-engine:
+    budget: 10000
+    waiver_reason: "B1 rework in flight — DRE AGENTS.md 574L→~200L target (skills escape hatch). Current 9.4K tokens; waiver tightens to 6000 after the cut."
+  coder:
+    budget: 5000
+    waiver_reason: "B1 in flight — web-agent.md 291L→~180L via extends: browser"
+  game-studio:
+    budget: 4500
+    waiver_reason: "B2 general/AGENTS.md audit pending (base tax × every specialist)"
+  twitter-agent:
+    budget: 4500
+    waiver_reason: "B2 general/AGENTS.md audit pending + B3 session-cookie removal"
