@@ -1,5 +1,5 @@
 extends: general
-agents: [game-studio-creative, game-studio-design-researcher, game-studio-docs-writer, game-studio-gameplay-programmer, game-studio-narrative-designer, game-studio-qa-tester, game-studio-renderer, game-studio-technical-artist]
+agents: [game-studio-creative, game-studio-design-researcher, game-studio-docs-writer, game-studio-gameplay-programmer, game-studio-narrative-designer, game-studio-qa-tester, game-studio-renderer, game-studio-technical-artist, game-studio-art-specialist]
 
 # Foreign MCP tool servers armed for this org. ``godot-mcp-runtime`` (stdio/npx,
 # zero-footprint — no Godot addon) gives a live Godot 4.x editor bridge:
@@ -15,3 +15,7 @@ capabilities:
   # web_research arms the ``web-search`` agent inherited from general (MCP is
   # security-scoped + never inherited via extends:; redeclared here for it).
   - {kind: mcp, ref: web_research}
+  # ray_inference — the Ray MCP (list_models, describe_model, generate).
+  # Self-describing tools sourced from Ray's /v1/form-spec. Armed for the
+  # thin art-specialist agent (and available to any agent that refs it).
+  - {kind: mcp, ref: ray_inference}

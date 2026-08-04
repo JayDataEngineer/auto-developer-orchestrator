@@ -15,6 +15,23 @@
 # one unset var can't brick the org). Set the documented PUX_MCP_* vars in
 # your shell / env manager before `pux serve|acp|direct`.
 
+# ── ray_inference (Ray in-tree MCP) ──────────────────────────────────────────
+# Source: this stack — server/mcp_inference.py in the Ray repo.
+# In-tree FastMCP server mounted into Ray's Starlette app at /mcp/ray. Three
+# self-describing tools (list_models, describe_model, generate) sourced live
+# from Ray's /v1/form-spec. Zero hardcoded model knowledge — when Ray's
+# catalog adds a model, this MCP exposes it automatically.
+# This is the shared schema layer between Ray and every agent runtime
+# (see ~/Pux/docs/thin-architecture.md).
+ray_inference:
+  kind: mcp
+  transport: http
+  url: ${PUX_MCP_RAY_URL}
+  tools: [list_models, describe_model, generate]
+  # Env: PUX_MCP_RAY_URL — the Streamable-HTTP MCP endpoint of the Ray
+  # inference server. Local dev: http://localhost:33080/mcp/ray/
+  # Remote (Tailscale): https://<tailnet-host>/mcp/ray/ (if served).
+
 # ── web_research (research-mcp) ──────────────────────────────────────────────
 # Source: https://github.com/JayDataEngineer/research-mcp
 # Docker Compose service — no standalone binary; deploy via the repo's compose file.
