@@ -54,16 +54,35 @@ def test_resolve_runtime(tier, env, runsc, want, monkeypatch):
 
 
 def test_cache_volume_name_deterministic():
-    p = "/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator"
+    p = "/proj/any-project"
     expect = "pux-cache-" + hashlib.sha256(os.path.abspath(p).encode()).hexdigest()[:16]
     assert C.cache_volume_name(p) == expect
 
 
-def test_cache_volume_name_matches_live_container():
-    # Verified against the live container's bind 2026-07-03.
-    assert (
-        C.cache_volume_name("/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator")
-        == "pux-cache-c6f1b24fe47c2162"
+def test_cache_volume_name_matches_live_container(monkeypatch):
+    """The cache volume name for the REAL project path is stable and matches
+    what the live sandbox container uses. Deriving from resolve_project_path()
+    (not a hardcoded absolute path) keeps this correct on any host — the old
+    assertion pinned the ubuntu-cloud hash and went stale on the first move.
+
+    When Docker is reachable, we cross-check against the actual volume that the
+    live container is bind-mounted with (the ground truth). Without Docker we
+    still prove the name is the deterministic sha256 of the resolved path."""
+    monkeypatch.delenv("PUX_PROJECT_PATH", raising=False)
+    real_path = C.resolve_project_path()
+    expected = "pux-cache-" + hashlib.sha256(os.path.abspath(real_path).encode()).hexdigest()[:16]
+    assert C.cache_volume_name(real_path) == expected
+
+    # Cross-check against the live Docker volume if a daemon is present.
+    try:
+        import docker  # noqa: PLC0415
+        client = docker.from_env()
+        volumes = [v.name for v in client.volumes.list(filters={"name": "pux-cache-"})]
+    except Exception:  # noqa: BLE001 — no docker daemon in CI / dev-laptop
+        return
+    assert expected in volumes, (
+        f"live docker has no volume {expected!r} for path {real_path!r}; "
+        f"present: {volumes[:5]}"
     )
 
 

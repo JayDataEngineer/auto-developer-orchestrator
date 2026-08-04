@@ -26,7 +26,12 @@
 #    model. Aegra has no EXTERNAL webhook, but the EventBus IS the receiver.
 set -euo pipefail
 
-PROJECT_ROOT="${PUX_PROJECT_ROOT:-/home/ubuntu/Documents/programs/dev/auto-developer-orchestrator}"
+# Derive PROJECT_ROOT from THIS script's location (parent of scripts/) so the
+# default is correct on ANY host without editing. PUX_PROJECT_ROOT still wins as
+# an explicit override (e.g. when Aegra runs on a separate host from the tree).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PUX_PROJECT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+unset SCRIPT_DIR
 PUX_DIR="$PROJECT_ROOT/pux-harness"
 # Services bind to 0.0.0.0 — accessible from localhost (tailscale serve)
 # AND from Docker containers (Hermes reaches MCP via Tailscale IP).
@@ -42,6 +47,14 @@ SECRETS_ENV="$PROJECT_ROOT/.env"
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
 export PUX_PROJECT_ROOT="$PROJECT_ROOT"
+# Pin the sandbox edit target EXPLICITLY. Aegra is a single-project server
+# (Hermes posts tasks; the agent edits ONE host tree). Without this, the
+# sandbox's resolve_project_path() falls back to PUX_PROJECT_ROOT — correct
+# HERE only because aegra runs on the orchestrator host, but the silent
+# fallback is the same foot-gun that leaks edits across projects in the editor
+# path. Make the bind explicit + overridable so a different project is a
+# conscious choice, not an accident.
+export PUX_PROJECT_PATH="${PUX_PROJECT_PATH:-$PROJECT_ROOT}"
 export PUX_API_HOST="$BIND_HOST" PUX_API_PORT="$API_PORT"
 export PUX_MCP_HOST="$BIND_HOST" PUX_MCP_PORT="$MCP_PORT"
 export PUX_API_URL="http://127.0.0.1:$API_PORT"
