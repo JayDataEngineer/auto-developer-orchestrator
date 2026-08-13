@@ -5,11 +5,10 @@
 # Topology (HOST-API): Aegra API on the host (systemd), postgres+redis as Docker
 # sidecars (scripts/aegra-prod.compose.yml), both DBs on 127.0.0.1 ONLY. Same
 # Tailscale binding + ports as server.py → consumers (Hermes /events+stream,
-# dev-bot, MCP) need NO URL change on cutover (path-transparency, proven for the
+# dev-bot) need NO URL change on cutover (path-transparency, proven for the
 # langgraph-api lane). The AP wire format is identical (langgraph_sdk).
 #
 #   aegra serve — Agent Protocol HTTP backend  :9988  (PUX_API_HOST)
-#   pux mcp     — FastMCP SSE wrapper          :9987  (PUX_MCP_HOST)  [unchanged]
 #
 # Rollback is via git history: server.py + scripts/start_pux_prod.sh were deleted
 # in phase D (Aegra is the single AP runtime). Recover them by reverting the
@@ -33,12 +32,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PUX_PROJECT_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 unset SCRIPT_DIR
 PUX_DIR="$PROJECT_ROOT/pux-harness"
-# Services bind to 0.0.0.0 — accessible from localhost (tailscale serve)
-# AND from Docker containers (Hermes reaches MCP via Tailscale IP).
+# Services bind to 0.0.0.0 — accessible from localhost (tailscale serve).
 # NEVER bind to a Tailscale IP: it breaks if the IP changes.
 BIND_HOST="0.0.0.0"
 API_PORT="${PUX_API_PORT:-9988}"
-MCP_PORT="${PUX_MCP_PORT:-9987}"
 LOG_DIR="$PROJECT_ROOT/.pux/logs"
 PID_DIR="$PROJECT_ROOT/.pux/pids"
 COMPOSE="$PROJECT_ROOT/scripts/aegra-prod.compose.yml"
@@ -56,7 +53,6 @@ export PUX_PROJECT_ROOT="$PROJECT_ROOT"
 # conscious choice, not an accident.
 export PUX_PROJECT_PATH="${PUX_PROJECT_PATH:-$PROJECT_ROOT}"
 export PUX_API_HOST="$BIND_HOST" PUX_API_PORT="$API_PORT"
-export PUX_MCP_HOST="$BIND_HOST" PUX_MCP_PORT="$MCP_PORT"
 export PUX_API_URL="http://127.0.0.1:$API_PORT"
 
 # --- load secrets (project .env) + the aegra env template into THIS process so
@@ -72,7 +68,7 @@ case "${1:-start}" in
     # so uvicorn children die with the wrapper. Falls back to a direct kill,
     # then a port-derived sweep for any child that escaped its group (e.g. a
     # process launched before the setsid fix).
-    for pf in serve mcp; do
+    for pf in serve; do
       f="$PID_DIR/$pf.pid"
       [ -f "$f" ] || continue
       pid="$(cat "$f" 2>/dev/null || true)"
@@ -84,7 +80,7 @@ case "${1:-start}" in
       fi
       rm -f "$f"
     done
-    for port in "$API_PORT" "$MCP_PORT"; do
+    for port in "$API_PORT"; do
       hld="$(ss -ltnp 2>/dev/null | grep ":$port " | grep -oP 'pid=\K[0-9]+' | head -1)"
       if [ -n "$hld" ]; then
         echo "[pux-aegra] killing lingering :$port holder pid $hld"
@@ -123,7 +119,6 @@ stop_pidfile() {
   fi
 }
 stop_pidfile "$PID_DIR/serve.pid" "aegra serve"
-stop_pidfile "$PID_DIR/mcp.pid" "mcp"
 
 start_one() {
   local name="$1" cmd="$2" pf="$3" lf="$4"
@@ -137,8 +132,8 @@ start_one() {
   echo $! > "$pf"
 }
 
-# aegra serve (AP HTTP) — prod mode, Tailscale-bound, no reload. Must be up
-# before mcp wraps it. Reads pux-harness/aegra.json (custom_app mounted).
+# aegra serve (AP HTTP) — prod mode, Tailscale-bound, no reload. Reads
+# pux-harness/aegra.json (custom_app mounted).
 # `--extra prod`: aegra lives in the ``prod`` optional-dependency (kept out of the
 # base install). ``uv run --extra prod`` installs it on first start AND re-installs
 # it if a bare ``uv sync`` pruned it — so prod self-heals without manual reinstall.
@@ -157,13 +152,7 @@ for i in $(seq 1 90); do
   if [ "$i" = 90 ]; then echo "[pux-aegra] WARN: aegra not healthy in 90s — check $LOG_DIR/aegra-serve.log"; fi
 done
 
-# mcp (FastMCP SSE wrapper) — unchanged; proxies the Aegra AP backend.
-start_one mcp \
-  "cd '$PUX_DIR' && PUX_PROJECT_ROOT='$PROJECT_ROOT' PUX_MCP_HOST='$BIND_HOST' PUX_MCP_PORT='$MCP_PORT' PUX_API_URL='http://127.0.0.1:$API_PORT' exec uv run python -m pux_harness mcp" \
-  "$PID_DIR/mcp.pid" "$LOG_DIR/mcp.log"
-
-sleep 3
+sleep 1
 echo "[pux-aegra] stack up:"
 echo "  aegra pid $(cat "$PID_DIR/serve.pid") → http://$BIND_HOST:$API_PORT  (log $LOG_DIR/aegra-serve.log)"
-echo "  mcp   pid $(cat "$PID_DIR/mcp.pid") → http://$BIND_HOST:$MCP_PORT  (log $LOG_DIR/mcp.log)"
 echo "[pux-aegra] rollback is via git history (server.py deleted in phase D); see docs/AEGRA_PROD.md"

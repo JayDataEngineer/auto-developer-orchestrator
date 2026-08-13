@@ -39,7 +39,6 @@ dev-bot, MCP) need **no URL change** on cutover:
 | Process | Bind | Port | Notes |
 |---|---|---|---|
 | `aegra serve` (AP HTTP) | Tailscale `100.99.57.110` | `9988` | prod mode, no reload; reads `pux-harness/aegra.json` |
-| `pux mcp` (FastMCP SSE) | Tailscale `100.99.57.110` | `9987` | unchanged; proxies the Aegra backend |
 | postgres sidecar | `127.0.0.1` ONLY | `5432` | `pgvector/pgvector:pg18` |
 | redis sidecar | `127.0.0.1` ONLY | `6379` | `redis:7-alpine`, run broker |
 
@@ -63,8 +62,8 @@ Docker too) remains the k3s-ready target.
 - **`scripts/start_pux_aegra.sh`** — prod launcher (mirrored the now-deleted
   `start_pux_prod.sh`). Sources the env template + `.env`, unsets
   `PUX_UPSTREAM_GRAPH`, brings up sidecars, waits on postgres, starts `aegra
-  serve` + `pux mcp`, waits on `/events/health`. `stop` subcommand kills serve +
-  mcp (leaves sidecars). Idempotent.
+  serve`, waits on `/events/health`. `stop` subcommand kills serve
+  (leaves sidecars). Idempotent.
 - **`pux-harness/aegra.json`** (phase A, submodule `e017ea6`) — Aegra
   auto-discovers `aegra.json` with PRIORITY over `langgraph.json`. Its graph
   loader is FILE-PATH-only (no module-import branch), so graph specs are

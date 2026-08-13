@@ -87,10 +87,8 @@ the harness drives the Docker sandbox directly over the SDK.
 | Subcommand | What it does |
 |------------|-------------|
 | _(server)_ | The Agent Protocol server is **Aegra** (prod: `scripts/start_pux_aegra.sh`) or `langgraph dev` / `aegra dev` (local). Not a `pux` subcommand. |
-| `pux acp [--org <name>]` | ACP stdio server — exposes one org to ACP editors (Zed / VS Code / Neovim); the editor IS the TUI. |
-| `pux mcp` | FastMCP server (SSE on :9987) wrapping the Agent Protocol — exposes orgs as MCP tools to any MCP client (Hermes, Claude Desktop, Zed). Requires the Agent Protocol server running (Aegra / `langgraph dev`). |
 | `pux direct --org <name> --task "..."` | In-process runner — no server. The verify/dev path. |
-| `pux sandbox <start\|stop\|status\|ensure\|pause\|unpause\|dump-persist>` | Docker sandbox lifecycle (harness-owned, 8g). Replaces the old `task start/stop/status`. `pause`/`unpause` use the cgroup freezer — processes freeze in place (memory resident), no teardown, no re-boot. `dump-persist` streams the named Docker volume to a host tarball (the bits the workspace bind-mount does NOT cover). |
+| `pux sandbox <projects\|prune-sessions>` | Sandbox wayfinding — list active project paths and prune stale session state. |
 | `pux agents` | List orgs as Agent Protocol agents (+ their specialists). |
 | `pux dispatch --org <name> "task"` | Ephemeral blocking run; prints the answer + a resumable `thread_id`. |
 | `pux resume [--org <name>]` | List recent threads (with task snippets + offline fallback to the sqlite store when the server is down). The first half of "pick up where I left off". |

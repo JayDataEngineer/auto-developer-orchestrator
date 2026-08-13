@@ -314,9 +314,9 @@ across those process restarts. Do **not** try to multiplex orgs inside one
 `pux acp` — the ACP `session/new` doesn't take an org param by design (the
 graph is compiled once at boot).
 
-### Do NOT confuse with MCP
+### Transports moved upstream
 
-`pux mcp` (SSE on :9987) is the *opposite* direction — it exposes pux's tools
-TO an editor's own agent. That's a tool-surface integration, not an
-agent-surface one. ACP = "drive this agent"; MCP = "use these tools." Toad /
-Aethna / Hermes want the former. Always `pux acp` for them, never `pux mcp`.
+The `pux acp` and `pux mcp` stdio/SSE transports have been removed from this
+repo — they are the same concern (external client → agent) and now live in the
+upstream `deepagents_acp` package. The Agent Protocol HTTP surface (Aegra
+`serve`) is the single runtime; editors connect via the upstream ACP adapter.

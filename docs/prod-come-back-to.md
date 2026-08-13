@@ -15,8 +15,8 @@ below are P3/P4 + known defects.
 ## P3 — Retire the hand-rolled `server.py` REST lane  (task #15)
 
 **Why it's deferred:** the prod build reuses the EXISTING `pux serve` (uvicorn +
-FastAPI `server.py`) as the Agent Protocol HTTP backend that `pux mcp` wraps. It
-works today and is proven. Retiring it is a clean-up, not a blocker.
+FastAPI `server.py`) as the Agent Protocol HTTP backend. It works today and is
+proven. Retiring it is a clean-up, not a blocker.
 
 **The work:**
 - `pux_harness/runtime/server.py` reimplements the Agent Protocol REST surface
