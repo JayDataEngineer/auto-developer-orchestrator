@@ -42,7 +42,6 @@ tool_surface:
   groups: [browser, media]
 
 protocols:
-  - acp
   - agui
 
 # Pre-run: warm the in-container SeleniumBase Chrome so the first browser tool

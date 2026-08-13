@@ -14,5 +14,4 @@
 # returns "" (no egress.conf staged -> open), resolve_tier() returns "isolated".
 # This file's only execution effect is the protocols: axis (client surfaces).
 protocols:
-  - acp
   - agui

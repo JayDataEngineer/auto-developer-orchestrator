@@ -17,13 +17,10 @@
 # isolation: an unreachable server / missing token logs ERROR + zero tools;
 # general still starts.
 # Agent-facing client SURFACES general exposes (a separate axis from sandbox
-# execution — this block never affects egress/tier). [acp, agui] is the DEFAULT
-# (an absent `protocols:` resolves to both), declared here explicitly so the org
-# self-describes its intended surface: Toad/Zed/VS Code via `pux acp --org
-# general`; CopilotKit via `pux serve` at /agui/general. An org narrowing to
-# e.g. [acp] is excluded from the AG-UI mount. See policy.DEFAULT_PROTOCOLS.
+# execution — this block never affects egress/tier). ``agui`` = CopilotKit
+# AG-UI SSE — the web surface. Declared here explicitly so the org
+# self-describes its intended surface. See policy.DEFAULT_PROTOCOLS.
 protocols:
-  - acp
   - agui
 
 # Pre-run: warm the in-container SeleniumBase Chrome so the first browser tool
