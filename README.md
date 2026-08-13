@@ -97,7 +97,6 @@ the harness drives the Docker sandbox directly over the SDK.
 | `pux run <thread_id> "task"` | Background run on an existing thread → `run_id`. |
 | `pux wait <run_id>` | Block for a background run's output. |
 | `pux direct --thread <thread_id> --task "…"` | **Resume a thread in-process** — the checkpointer restores the full conversation, the agent sees every prior turn. No server needed. |
-| `pux bundle <thread_id>` | **Optional** tarball export — transcript + artifacts + memos in one file. Works offline. `--all` ignores mtime, `--since ISO8601` filters, `--no-files` is transcript-only. |
 
 ## Tool surface
 
@@ -237,33 +236,6 @@ after lunch." `stop` is the right answer to "I'm done with the sandbox
 entirely." **The thread store survives both** — `pux direct --thread <id>`
 works regardless of container state (it boots a fresh container if needed,
 then restores the conversation from the checkpointer).
-
-### Exporting a run (optional)
-
-`pux bundle` packages a thread into one tarball — useful for archival or
-handing the work to someone who doesn't have Pux installed. Works offline
-(falls back to the on-disk thread store + meta.json when the server is down):
-
-```bash
-pux bundle dre-deadbeef                       # → ./dre-deadbeef.tgz
-pux bundle dre-deadbeef --all                 # ignore mtime filter
-pux bundle dre-deadbeef --since 2026-07-12T00:00:00Z
-pux bundle dre-deadbeef --no-files            # transcript only
-
-# The named-volume bits (Chrome cookies, apt list, dotfiles):
-pux sandbox dump-persist                      # → ./sandbox-<id>-persist-<ts>.tgz
-```
-
-The bundle tarball contains `MANIFEST.json` (thread_id, agent_id, file
-inventory with sizes + mtimes, transcript source `server` or `disk`),
-`transcript.json` (full thread state + revision history), and every
-workspace file the agent wrote during the run.
-
-Workspace files are gitignored (runtime state, not source). The bundle
-output is gitignored too — it's a tarball, push it elsewhere. Artifact
-files SHOULD carry a `pux:agent=… saved=… task=… stage=…` HTML-comment
-provenance header (see `orgs/specialists/deep-research-engine/AGENTS.md`
-"Provenance") so a future reader can trace a file back to its producing run.
 
 ## Tests
 
