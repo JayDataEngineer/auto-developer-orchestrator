@@ -8,7 +8,7 @@
 # tools (navigate, click, screenshot) and must be able to SEE the screenshots
 # its own actions produce (the act→observe→decide loop). A text-only base
 # would be blind to the page state. @worker (mimo-v2.5) is multimodal, so
-# driver_multimodal(base) returns True → the ACP agent declares
+# driver_multimodal(base) returns True → the agent declares
 # promptCapabilities.image=true → the editor/Hermes can attach images, and
 # BrowserVisionMiddleware (if armed) can caption screenshots inline.
 models:
@@ -20,13 +20,15 @@ system_prompt_suffix: |
   the logged-in x.com session (browser_save_session after login) over
   re-authenticating each run.
 
-# Rewrite a specialist tool's description (keyed by its full pux_sandbox_* name).
-# Use this to nudge how the model calls a tool in THIS org's context.
+# Rewrite a tool's description (keyed by its full tool name — here the
+# sandbox_browser MCP tool, after the browser family migrated off the
+# specialist registry). Use this to nudge how the model calls a tool in THIS
+# org's context.
 tool_description_overrides:
-  pux_sandbox_browser_save_session: "Persist the logged-in x.com session to the given /tmp path so the next run can browser_restore_session it without re-login."
+  mcp__sandbox_browser__browser_save_session: "Persist the logged-in x.com session to the given /tmp path so the next run can browser_restore_session it without re-login."
 
-# Specialist tools to drop from this org's stack entirely (full pux_sandbox_*
-# names). Empty here — listed for completeness.
+# Tools to drop from this org's stack entirely (full names). Empty here —
+# listed for completeness.
 excluded_tools: []
 
 # Enable ask_user HITL — agent can ask Hermes questions mid-task.

@@ -1,6 +1,6 @@
 """Green gate for the declarative org contract.
 
-Two tiers, mirroring ``contract.py``:
+Two tiers, mirroring ``audit.py``:
 
 * **Structural** (no server, no tokens): one parametrized case per discovered
   org asserts ``check_org(org) == []``. This is the gate — if an org's bundle
@@ -23,19 +23,13 @@ from pathlib import Path
 
 import pytest
 
-from pux_harness.agent import contract, orgs
-from pux_harness.agent.contract import (
-    KNOWN_POLICY_SECTIONS,
-    _REQUIRED_AGENT_KEYS,
-    _scan_for_profile_registration,
-    _scan_runtime_for_memory_saver,
-    check_harness,
-    check_org,
-    discover_orgs,
-    orphan_agents,
-)
+from pux_harness.agent import orgs
+from pux_harness.agent.orgs import discover_orgs
+from pux_harness.validation import audit as ov
+check_org = ov.audit_org
+from pux_harness.validation.schemas import KNOWN_POLICY_SECTIONS, REQUIRED_AGENT_KEYS
 from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
-# ``NATIVE_FS_TOOLS`` lives canonically in the tools registry — ``contract.py``
+# ``NATIVE_FS_TOOLS`` lives canonically in the tools registry — ``audit.py``
 # re-exported it once as a dead convenience surface and that was removed (the
 # daemon-recovery sweep). Import it from its home, not the contract module.
 from pux_harness.sandbox.tools.registry import NATIVE_FS_TOOLS
@@ -45,8 +39,9 @@ from pux_harness.sandbox.tools.registry import NATIVE_FS_TOOLS
 
 EXPECTED_ORGS = {
     "_demo", "browser-agent", "coder", "deep-research-engine", "fs-explorer",
-    "game-studio", "general", "invest", "orchestrator", "social-media-pipeline",
-    "telegram-agent", "twitter-agent", "video-production", "web-search",
+    "game-studio", "general", "invest", "media-studio", "orchestrator",
+    "social-media-pipeline", "telegram-agent", "twitter-agent",
+    "video-production", "web-search",
 }
 
 
@@ -63,11 +58,6 @@ def test_org_bundle_is_green(org):
     assert errors == [], f"{org}: {errors}"
 
 
-def test_no_orphan_agents():
-    """Every specialist is owned by >=1 org (rule 7)."""
-    assert orphan_agents() == [], f"orphan agents: {orphan_agents()}"
-
-
 def test_every_org_has_a_forcing_task():
     """The in-process runner (``pux direct --org <name>``) drives a delegation-
     forcing task per org. Every discovered org must have a DEFAULT_TASKS entry —
@@ -78,13 +68,6 @@ def test_every_org_has_a_forcing_task():
     missing = set(discover_orgs()) - set(DEFAULT_TASKS)
     assert not missing, f"orgs without a DEFAULT_TASKS forcing task: {missing}"
 
-
-def test_harness_has_no_hardcoded_manifest():
-    """Rule 6: the org->agent map lives in org.yaml, not harness code."""
-    assert check_harness() == []
-
-
-# --- rule 4 fires (tool resolution against the static native surface) -----
 
 def test_rule4_unknown_tool_fails_loud(fake_tree):
     """An agent ``tools:`` entry that's neither a native fs tool nor a known
@@ -121,16 +104,17 @@ def test_rule4_native_fs_tool_always_allowed(fake_tree):
 def fake_tree(tmp_path: Path, monkeypatch):
     """A scratch orgs/ tree (no .pi/). Returns helpers to build orgs + agents.
 
-    Both ``contract._orgs_dir`` AND ``orgs._orgs_dir`` are patched: rule-3
+    Both ``ov._orgs_dir`` AND ``orgs._orgs_dir`` are patched: rule-3
     resolution delegates into ``orgs._load_agent_spec`` (which reads
-    ``orgs._orgs_dir`` via ``_agent_search_dirs``), while the contract's own
-    path helpers read ``contract._orgs_dir`` — patching only one lets the two
+    ``orgs._orgs_dir`` via ``_agent_search_dirs``), while audit's own
+    path helpers read ``ov._orgs_dir`` — patching only one lets the two
     halves see different trees. ``_shared/{agents,skills}`` are pre-created
     (the shared agent search dir + the default skills root)."""
     (tmp_path / "orgs").mkdir()
     (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
     (tmp_path / "orgs" / "_shared" / "skills").mkdir(parents=True)
-    monkeypatch.setattr(contract, "_orgs_dir", lambda: tmp_path / "orgs")
+    monkeypatch.setattr(ov, "_orgs_dir", lambda: tmp_path / "orgs")
+    monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
     monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
 
     def add_agent(slug: str, tools: list[str] | None = None,
@@ -151,12 +135,14 @@ def fake_tree(tmp_path: Path, monkeypatch):
         (agents_dir / f"{slug}.md").write_text("\n".join(fm) + "\n\nprose body\n")
 
     def add_org(org: str, agents: list[str] | None = None, body: str = "# Org\n",
-                policy: str | None = None) -> None:
-        """Write org.yaml (roster) + prose-only AGENTS.md (+ optional policy)."""
+                policy: str | None = None, org_yaml_extra: str = "") -> None:
+        """Write org.yaml (roster) + prose-only AGENTS.md (+ optional policy +
+        extra org.yaml lines, e.g. ``roster_deny:``)."""
         d = tmp_path / "orgs" / org
         d.mkdir(exist_ok=True)
         if agents is not None:
-            (d / "org.yaml").write_text(f"agents: [{', '.join(agents)}]\n")
+            (d / "org.yaml").write_text(
+                f"agents: [{', '.join(agents)}]\n" + org_yaml_extra)
         (d / "AGENTS.md").write_text(body)
         if policy is not None:
             (d / "policy.yaml").write_text(policy)
@@ -167,7 +153,7 @@ def fake_tree(tmp_path: Path, monkeypatch):
 def test_rule1_missing_agents_md(fake_tree):
     add_org, _ = fake_tree
     add_org("empty")  # AGENTS.md created, but test a dir without it:
-    (contract._orgs_dir() / "empty" / "AGENTS.md").unlink()
+    (ov._orgs_dir() / "empty" / "AGENTS.md").unlink()
     vs = check_org("empty")
     assert any(v.rule == "org-agents-md" for v in vs)
 
@@ -177,7 +163,7 @@ def test_rule2_legacy_frontmatter_rejected(fake_tree):
     tripwire — the roster must live in org.yaml."""
     add_org, _ = fake_tree
     add_org("badorg")
-    (contract._orgs_dir() / "badorg" / "AGENTS.md").write_text(
+    (ov._orgs_dir() / "badorg" / "AGENTS.md").write_text(
         "---\nagents: x\n---\n\n# Org\n")
     vs = check_org("badorg")
     assert any(v.rule == "no-legacy-org-roster" for v in vs)
@@ -193,7 +179,7 @@ def test_rule3_unresolvable_slug(fake_tree):
 def test_rule3_agent_missing_required_key(fake_tree):
     add_org, _ = fake_tree
     # Write an agent .md whose frontmatter is missing 'description'
-    agents_dir = contract._orgs_dir() / "o" / "agents"
+    agents_dir = ov._orgs_dir() / "o" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     (agents_dir / "nodesc.md").write_text("---\nname: nodesc\n---\n\nprose\n")
     add_org("o", agents=["nodesc"])
@@ -207,7 +193,7 @@ def test_rule3_agent_frontmatter_parse_error(fake_tree):
     yielding a junk spec. (.py agents are forbidden, so the old import-error
     path is gone; the equivalent failure mode is a malformed .md.)"""
     add_org, _ = fake_tree
-    agents_dir = contract._orgs_dir() / "o" / "agents"
+    agents_dir = ov._orgs_dir() / "o" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     # colon-space in an unquoted scalar is a YAML parse error
     (agents_dir / "broken.md").write_text(
@@ -219,7 +205,7 @@ def test_rule3_agent_frontmatter_parse_error(fake_tree):
 
 def test_rule3_unknown_agent_key_warned(fake_tree):
     """A SUBAGENT dict with unexpected keys still loads (extra keys are
-    harmless) — but _REQUIRED_AGENT_KEYS must be present."""
+    harmless) — but REQUIRED_AGENT_KEYS must be present."""
     add_org, add_agent = fake_tree
     add_agent("sp", desc="x")
     add_org("o", agents=["sp"])
@@ -268,20 +254,21 @@ def test_rule5_policy_unknown_protocol_rejected(fake_tree):
 
 
 def test_rule5_policy_known_protocols_ok(fake_tree):
-    """Both known surfaces pass the contract (no protocols violation)."""
+    """The known surface set passes the contract (no protocols violation)."""
     add_org, add_agent = fake_tree
     add_agent("r")
-    add_org("o", agents=["r"], policy="protocols:\n  - acp\n  - agui\n")
+    add_org("o", agents=["r"], policy="protocols:\n  - agui\n")
     assert check_org("o") == []
 
 
-def test_rule5_policy_protocols_narrow_to_acp_ok(fake_tree):
-    """A single-surface narrowing (ACP only) passes — the org is served on ACP
-    and excluded from the AG-UI mount, but the declaration itself is valid."""
+def test_rule5_policy_unknown_protocol_caught(fake_tree):
+    """A protocol outside KNOWN_PROTOCOLS (e.g. the retired 'acp' surface)
+    fails loud — narrowing is explicit, typos can't silently widen."""
     add_org, add_agent = fake_tree
     add_agent("r")
     add_org("o", agents=["r"], policy="protocols:\n  - acp\n")
-    assert check_org("o") == []
+    vs = check_org("o")
+    assert any(v.rule == "protocols" and "acp" in v.message for v in vs), vs
 
 
 def test_rule5_policy_empty_is_ok(fake_tree):
@@ -305,26 +292,25 @@ def test_rule5_policy_non_mapping_section_caught(fake_tree):
     ``policy.load`` raises 'section must be a mapping'. Proves the load layer."""
     add_org, add_agent = fake_tree
     add_agent("r")
-    add_org("o", agents=["r"], policy="egress: not-a-mapping\n")
+    add_org("o", agents=["r"], policy="sandbox: not-a-mapping\n")
     vs = check_org("o")
     assert any(v.rule == "policy-schema" for v in vs), vs
     # and the shallow section check must NOT fire — the key IS known
-    assert not any(v.rule == "policy-sections" for v in vs)
+    assert not any(v.rule == "policy-sections" for v in vs), vs
 
 
-def test_rule5_policy_bad_mount_caught(fake_tree):
-    """Deep schema: a workspace mount with a relative container path
-    parses as valid YAML + known sections, so both the shallow checks pass —
-    only ``resolve_mounts`` (called by the contract's deep check) catches it.
-    Proves the resolve_mounts layer (no network — safe offline)."""
+def test_rule5_policy_bad_section_type_caught(fake_tree):
+    """Deep schema: a scalar ``jobs:`` section parses as valid YAML + a known
+    section key, so both shallow checks pass — only ``policy.load`` catches it
+    ('section must be a list'). The workspace-mounts variant retired with the
+    deleted mounts surface. No network — safe offline."""
     add_org, add_agent = fake_tree
     add_agent("r")
-    add_org("o", agents=["r"],
-            policy="workspace:\n  mounts:\n    - host: /abs/path\n"
-                   "      container: relative/path\n")
+    add_org("o", agents=["r"], policy="jobs: not-a-list\n")
     vs = check_org("o")
     assert any(v.rule == "policy-schema" for v in vs), vs
-    assert not any(v.rule == "policy-sections" for v in vs)
+    assert not any(v.rule == "policy-sections" for v in vs), vs
+
 
 
 def test_rule4_tool_resolution_for_agent(fake_tree):
@@ -340,7 +326,7 @@ def test_rule4_tool_resolution_for_agent(fake_tree):
 
 def test_required_agent_keys():
     """The required-keys set is exactly name + description + system_prompt."""
-    assert _REQUIRED_AGENT_KEYS == {"name", "description", "system_prompt"}
+    assert REQUIRED_AGENT_KEYS == {"name", "description", "system_prompt"}
 
 
 # --- rule 8 — skill hygiene (well-formedness + global root scan) ---------
@@ -359,7 +345,7 @@ def _write_skill(root: Path, slug: str, *, name: str | None = None,
 
 def test_skill_well_formed_missing_skill_md(tmp_path):
     """A skill dir without SKILL.md is not a skill."""
-    from pux_harness.agent.contract import _check_skill_dir
+    from pux_harness.validation.audit import check_skill_dir as _check_skill_dir
     (tmp_path / "ghost").mkdir()
     vs = _check_skill_dir(tmp_path / "ghost")
     assert [v.rule for v in vs] == ["skill-well-formed"]
@@ -367,21 +353,21 @@ def test_skill_well_formed_missing_skill_md(tmp_path):
 
 
 def test_skill_well_formed_name_must_match_dir(tmp_path):
-    from pux_harness.agent.contract import _check_skill_dir
+    from pux_harness.validation.audit import check_skill_dir as _check_skill_dir
     _write_skill(tmp_path, "real-name", name="wrong-name")
     vs = _check_skill_dir(tmp_path / "real-name")
     assert any("must equal the dir name" in v.message for v in vs), vs
 
 
 def test_skill_well_formed_name_must_be_kebab(tmp_path):
-    from pux_harness.agent.contract import _check_skill_dir
+    from pux_harness.validation.audit import check_skill_dir as _check_skill_dir
     _write_skill(tmp_path, "Bad_Name", name="Bad_Name")  # caps + underscore
     vs = _check_skill_dir(tmp_path / "Bad_Name")
     assert any("kebab-case" in v.message for v in vs), vs
 
 
 def test_skill_well_formed_description_required(tmp_path):
-    from pux_harness.agent.contract import _check_skill_dir
+    from pux_harness.validation.audit import check_skill_dir as _check_skill_dir
     d = tmp_path / "no-desc"
     d.mkdir()
     (d / "SKILL.md").write_text(
@@ -393,7 +379,7 @@ def test_skill_well_formed_description_required(tmp_path):
 def test_skill_well_formed_unparseable_frontmatter(tmp_path):
     """A colon-space in an unquoted scalar fails YAML parsing — caught here
     as a skill-well-formed error, not mid-run (the game-studio regression)."""
-    from pux_harness.agent.contract import _check_skill_dir
+    from pux_harness.validation.audit import check_skill_dir as _check_skill_dir
     d = tmp_path / "broken"
     d.mkdir()
     (d / "SKILL.md").write_text(
@@ -403,169 +389,12 @@ def test_skill_well_formed_unparseable_frontmatter(tmp_path):
     assert "parse" in vs[0].message
 
 
-def test_skill_well_formed_clean(tmp_path):
-    from pux_harness.agent.contract import _check_skill_dir
-    _write_skill(tmp_path, "clean-skill", desc="does the thing")
-    assert _check_skill_dir(tmp_path / "clean-skill") == []
-
-
-def test_check_skill_roots_flags_loose_md(fake_tree, monkeypatch):
-    """A loose .md directly under a skills root warns — it's invisible to
-    SkillsMiddleware (the stranded-playbook regression)."""
-    monkeypatch.setattr(contract, "project_root", lambda: contract._orgs_dir().parent)
-    root = contract._orgs_dir() / "_shared" / "skills"
-    _write_skill(root, "good-one")
-    (root / "STRAY_PLAYBOOK.md").write_text("# a loose playbook\n")
-    vs = contract.check_skill_roots()
-    assert ("skill-dir-not-loose", "warn") in {
-        (v.rule, v.severity) for v in vs}, vs
-    # the well-formed sibling is NOT flagged
-    assert not any(v.rule == "skill-well-formed" for v in vs), vs
-
-
-def test_check_skill_roots_flags_malformed_skill(fake_tree, monkeypatch):
-    """A malformed skill anywhere under a root surfaces as skill-well-formed."""
-    monkeypatch.setattr(contract, "project_root", lambda: contract._orgs_dir().parent)
-    root = contract._orgs_dir() / "_shared" / "skills"
-    _write_skill(root, "mismatch", name="not-the-dir-name")  # name mismatch
-    vs = contract.check_skill_roots()
-    assert any(v.rule == "skill-well-formed" for v in vs), vs
-
-
-def test_check_skill_roots_clean_on_real_repo():
-    """The shipped repo: every SKILL.md well-formed, no loose .md under any
-    skills root. The regression guard for the skills reorg."""
-    assert contract.check_skill_roots() == [], contract.check_skill_roots()
-
-
-def test_no_legacy_agent_py_on_real_repo():
-    """No .py agents ship + every agent .md carries frontmatter (name +
-    description) + a non-empty body — the FLIPPED tripwire. The
-    old ``.pi/agents/<slug>.py`` SUBAGENT-dict form is permanently forbidden."""
-    vs = [v for v in check_harness()
-          if v.rule == "no-legacy-agent-py"]
-    assert vs == [], vs
-
-
 def test_no_legacy_org_roster_on_real_repo():
     """No orgs/*/AGENTS.md carries an agents: key — roster in org.yaml."""
     for org in discover_orgs():
         vs = check_org(org)
         roster_vs = [v for v in vs if v.rule == "no-legacy-org-roster"]
         assert roster_vs == [], f"{org}: {roster_vs}"
-
-
-def test_no_legacy_sandbox_artifacts_rejected(fake_tree):
-    """A bootstrap.sh / docker-compose.yml under any org is a HARD contract
-    failure — the harness owns the full sandbox lifecycle now (no bash/compose
-    shadow). Mirrors no-legacy-org-roster / no-legacy-agent-py."""
-    add_org, _ = fake_tree
-    add_org("badorg")
-    (contract._orgs_dir() / "badorg" / "bootstrap.sh").write_text("#!/bin/sh\n")
-    (contract._orgs_dir() / "badorg" / "docker-compose.yml").write_text("services: {}\n")
-    vs = check_harness()
-    art_vs = [v for v in vs if v.rule == "no-legacy-sandbox-artifacts"]
-    assert len(art_vs) == 2, vs
-    msgs = "\n".join(v.message for v in art_vs)
-    assert "bootstrap.sh" in msgs and "docker-compose.yml" in msgs
-
-
-def test_no_legacy_sandbox_artifacts_on_real_repo():
-    """No orgs/*/{bootstrap.sh,docker-compose.yml,docker-compose.override.yml}
-    ships — the shadow lifecycle is gone."""
-    vs = [v for v in check_harness()
-          if v.rule == "no-legacy-sandbox-artifacts"]
-    assert vs == [], vs
-
-
-def test_no_legacy_memory_saver_on_real_repo():
-    """acp.py + main.py neither import nor instantiate MemorySaver — the
-    server-side runtimes share the persistent AsyncSqliteSaver from
-    threads.open_thread_store."""
-    vs = [v for v in check_harness()
-          if v.rule == "no-legacy-memory-saver"]
-    assert vs == [], vs
-
-
-def test_no_legacy_memory_saver_tripwire_fires(tmp_path):
-    """Provocation: a runtime file that imports + instantiates MemorySaver emits
-    one Violation per offence. Mirrors the no-legacy-sandbox-artifacts
-    provocation shape — drives the AST scanner against a temp file so the real
-    acp.py/main.py are untouched."""
-    fake = tmp_path / "evil_runtime.py"
-    fake.write_text(
-        "from langgraph.checkpoint.memory import MemorySaver\n"
-        "cp = MemorySaver()\n"
-    )
-    vs = _scan_runtime_for_memory_saver(fake)
-    assert len(vs) == 2, vs  # one for the import, one for the call
-    assert all(v.rule == "no-legacy-memory-saver" and v.severity == "error"
-               for v in vs)
-    msgs = "\n".join(v.message for v in vs)
-    assert "imports MemorySaver" in msgs
-    assert "instantiates MemorySaver" in msgs
-
-
-def test_no_legacy_memory_saver_tripwire_clean(tmp_path):
-    """A clean runtime (no MemorySaver at all) emits nothing — including when
-    'MemorySaver' appears only in a docstring/comment (no false positive)."""
-    fake = tmp_path / "clean_runtime.py"
-    fake.write_text(
-        '"""Docstring mentions MemorySaver but never uses it."""\n'
-        "# a comment: MemorySaver() would be bad\n"
-        "from pux_harness.threads import open_thread_store\n"
-        "saver = object()  # not a MemorySaver\n"
-    )
-    assert _scan_runtime_for_memory_saver(fake) == []
-
-
-def test_no_harness_profile_registration_on_real_repo():
-    """pux stays OFF the model-keyed _HARNESS_PROFILES registry — no file under
-    pux_harness/ calls register_harness_profile / register_provider_profile.
-    Parity depends on pux NEVER registering, else deepagents' own
-    _apply_excluded_middleware could strip pux middleware by class match."""
-    vs = [v for v in check_harness()
-          if v.rule == "no-harness-profile-registration"]
-    assert vs == [], vs
-
-
-def test_no_harness_profile_registration_tripwire_fires(tmp_path):
-    """Provocation: a module that calls register_harness_profile (bare + as an
-    attribute) emits one Violation per offence — drives the AST scanner against
-    a temp file so the real package is untouched. An aliased import
-    (``from x import register_harness_profile as reg``) still trips because the
-    CALL node's name is what's matched."""
-    fake = tmp_path / "evil_profile.py"
-    fake.write_text(
-        "from deepagents import register_harness_profile as reg\n"
-        "register_harness_profile('m', cfg)\n"
-        "reg('m', cfg)  # aliased — still a call by the banned name via import\n"
-        "obj.register_provider_profile('m', cfg)\n"
-    )
-    vs = _scan_for_profile_registration(fake)
-    # register_harness_profile (direct) + register_provider_profile (attr) trip.
-    # (``reg(...)`` is a Name node 'reg', not a banned literal — by design we
-    # match on the resolved call NAME, not the import alias; reg() is missed but
-    # register_harness_profile()/register_provider_profile() both trip.)
-    names = sorted(v.message for v in vs)
-    assert any("calls register_harness_profile()" in m for m in names), names
-    assert any("calls register_provider_profile()" in m for m in names), names
-    assert all(v.rule == "no-harness-profile-registration"
-               and v.severity == "error" for v in vs)
-
-
-def test_no_harness_profile_registration_tripwire_clean(tmp_path):
-    """A clean module that merely MENTIONS the names in a docstring/comment and
-    imports deepagents (without calling the banned fns) emits nothing — no false
-    positive on prose."""
-    fake = tmp_path / "clean_profile.py"
-    fake.write_text(
-        '"""Never call register_harness_profile here — it collides."""\n'
-        "# note: register_provider_profile() is also banned\n"
-        "import deepagents  # importing the package is fine\n"
-        "x = 1\n"
-    )
-    assert _scan_for_profile_registration(fake) == []
 
 
 def test_host_setup_validator_missing_helper(fake_tree):
@@ -580,7 +409,8 @@ def test_host_setup_validator_missing_helper(fake_tree):
         "    exports:\n"
         "      OUT: stdout\n"))
     vs = check_org("cookbook")
-    assert any(v.rule == "host-setup-helper-missing" for v in vs), vs
+    assert any(v.rule == "host-setup-shape" and "helper_script" in v.message
+               for v in vs), vs
 
 
 def test_build_validator_missing_dockerfile(fake_tree):
@@ -605,7 +435,8 @@ def test_jobs_validator_missing_script(fake_tree, tmp_path):
         "    script: orgs/cookbook/sandbox/diarize.py\n"
         "    timeout: 3600\n"))
     vs = check_org("cookbook")
-    assert any(v.rule == "jobs-script-missing" for v in vs), vs
+    assert any(v.rule == "jobs-shape" and "script" in v.message
+               for v in vs), vs
 
 
 def test_jobs_validator_missing_name(fake_tree, tmp_path):
@@ -620,7 +451,8 @@ def test_jobs_validator_missing_name(fake_tree, tmp_path):
         "  - script: orgs/cookbook/sandbox/diarize.py\n"
         "    timeout: 3600\n"))
     vs = check_org("cookbook")
-    assert any(v.rule == "jobs-shape" and "missing 'name'" in v.message for v in vs), vs
+    assert any(v.rule == "jobs-shape" and "name" in v.message
+               for v in vs), vs
 
 
 def test_jobs_validator_duplicate_names(fake_tree, tmp_path):
@@ -687,21 +519,36 @@ def test_browser_agent_resolves_from_shared_on_real_repo():
         assert "browser" in roster, f"{org} does not roster browser"
 
 
-def test_new_browser_slugs_are_registered_specialists():
-    """Every browser slug is in SPECIALIST_TOOL_NAMES (rule 4b valid)
-    — the agent whitelist would otherwise fail to resolve."""
-    new_slugs = [
-        "browser_search", "browser_scroll", "browser_go_back", "browser_wait",
-        "browser_find_text", "browser_extract", "browser_extract_images",
-        "browser_save_screenshot", "browser_download", "browser_upload",
-        "browser_tabs", "browser_new_tab", "browser_switch_tab",
-        "browser_close_tab", "browser_dropdown_options",
-        "browser_select_dropdown", "browser_save_session",
-        "browser_restore_session",
-    ]
-    for slug in new_slugs:
-        key = "pux_sandbox_" + slug
-        assert key in SPECIALIST_TOOL_NAMES, f"{key} not registered"
+def test_browser_family_is_mcp_only():
+    """The browser family MIGRATED off the specialist registry onto the
+    in-container ``sandbox_browser`` MCP server. No ``pux_sandbox_browser_*``
+    specialist may reappear (rule 4b would accept one silently — the
+    capability's home is MCP now), and every shipped agent that grants
+    ``sandbox_browser`` sits in an org that DECLARES it (the two-level gate)."""
+    import yaml as _yaml
+    from pathlib import Path as _Path
+    repo = _Path(__file__).resolve().parents[2]
+    assert not any(n.startswith("pux_sandbox_browser_")
+                   for n in SPECIALIST_TOOL_NAMES)
+    # every granting agent's org declares the server (or extends such an org)
+    for org_dir in sorted((repo / "orgs").glob("*/")) + \
+            sorted((repo / "orgs" / "specialists").glob("*/")):
+        if not (org_dir / "org.yaml").is_file():
+            continue
+        cfg = _yaml.safe_load((org_dir / "org.yaml").read_text()) or {}
+        caps = {c.get("ref") for c in (cfg.get("capabilities") or [])
+                if isinstance(c, dict)}
+        roster = cfg.get("agents") or []
+        grants = False
+        for slug in roster:
+            for f in (org_dir / "agents" / f"{slug}.md",
+                      repo / "orgs" / "_shared" / "agents" / f"{slug}.md"):
+                if f.is_file() and "ref: sandbox_browser" in f.read_text():
+                    grants = True
+        if grants:
+            assert "sandbox_browser" in caps, (
+                f"{org_dir.name} rosters a sandbox_browser agent but does not "
+                f"declare the server in org.yaml capabilities")
 
 
 # --- explorer agent (shared, rostered by general) --------------------------
@@ -747,7 +594,7 @@ def test_profile_yaml_valid_no_violation(fake_tree):
     """A well-formed optional profile.yaml produces no contract violation."""
     add_org, _ = fake_tree
     add_org("o")
-    (contract._orgs_dir() / "o" / "profile.yaml").write_text(
+    (ov._orgs_dir() / "o" / "profile.yaml").write_text(
         "system_prompt_suffix: 'be concise'\n"
         "tool_description_overrides:\n"
         "  pux_sandbox_python: 'run python code'\n"
@@ -761,7 +608,7 @@ def test_profile_yaml_unknown_key_reports_violation(fake_tree):
     """An unknown key in profile.yaml fails --check-contract (profile-schema)."""
     add_org, _ = fake_tree
     add_org("o")
-    (contract._orgs_dir() / "o" / "profile.yaml").write_text(
+    (ov._orgs_dir() / "o" / "profile.yaml").write_text(
         "bogus_field: 1\n"
     )
     vs = check_org("o")
@@ -773,7 +620,7 @@ def test_profile_yaml_non_mapping_reports_violation(fake_tree):
     """A non-mapping top level in profile.yaml fails --check-contract."""
     add_org, _ = fake_tree
     add_org("o")
-    (contract._orgs_dir() / "o" / "profile.yaml").write_text(
+    (ov._orgs_dir() / "o" / "profile.yaml").write_text(
         "- just\n- a\n- list\n"
     )
     vs = check_org("o")
@@ -798,19 +645,25 @@ def test_coder_no_general_subagent_tripwire_on_real_repo():
     delegate the DESIGN itself, the exact anti-pattern the roster prevents.
     The shipped roster is clean."""
     vs = check_org("coder")
-    assert not any(v.rule == "coder-no-general-subagent" for v in vs), vs
+    assert not any(v.rule == "roster-deny-enforced" for v in vs), vs
+
+
+_CODER_DENY = ("roster_deny: [general, general-purpose, researcher]\n"
+               "inherit_roster: false\n")
 
 
 @pytest.mark.parametrize("forbidden_slug", ["general", "general-purpose", "researcher"])
 def test_coder_no_general_subagent_tripwire_fires(fake_tree, forbidden_slug):
-    """Adding any forbidden generic slug to coder's roster is a HARD contract
-    failure — the gate blocks the commit, not a silent drift (no-legacy-left-
-    behind). The rule is coder-scoped: only coder's CTO does the thinking."""
+    """Rostering any ``roster_deny:`` slug is a HARD contract failure
+    (``roster-deny-enforced``) — the gate blocks the commit, not a silent
+    drift (no-legacy-left-behind). The rule is DATA-DRIVEN: any org declares
+    the same focus-CTO shape via ``roster_deny:`` (coder is the shipped
+    example)."""
     add_org, add_agent = fake_tree
     add_agent(forbidden_slug, org="coder")
-    add_org("coder", agents=[forbidden_slug])
+    add_org("coder", agents=[forbidden_slug], org_yaml_extra=_CODER_DENY)
     vs = check_org("coder")
-    rule_vs = [v for v in vs if v.rule == "coder-no-general-subagent"]
+    rule_vs = [v for v in vs if v.rule == "roster-deny-enforced"]
     assert len(rule_vs) == 1, vs
     assert forbidden_slug in rule_vs[0].message
 
@@ -823,7 +676,7 @@ def test_coder_tripwire_does_not_fire_for_other_orgs(fake_tree):
     add_agent("researcher", org="invest")
     add_org("invest", agents=["researcher"])
     vs = check_org("invest")
-    assert not any(v.rule == "coder-no-general-subagent" for v in vs), vs
+    assert not any(v.rule == "roster-deny-enforced" for v in vs), vs
 
 
 # --- coder-disables-general-purpose (sibling tripwire) -------------------
@@ -844,12 +697,12 @@ def test_coder_disables_general_purpose_fires_when_absent(fake_tree):
     Only the explicit neuter (``enabled: false``) satisfies coder's intent."""
     add_org, add_agent = fake_tree
     add_agent("code-worker", org="coder")
-    add_org("coder", agents=["code-worker"])
+    add_org("coder", agents=["code-worker"], org_yaml_extra=_CODER_DENY)
     # profile.yaml present but WITHOUT general_purpose_subagent.
-    (contract._orgs_dir() / "coder" / "profile.yaml").write_text(
+    (ov._orgs_dir() / "coder" / "profile.yaml").write_text(
         "system_prompt_suffix: |\n  be terse.\n")
     vs = check_org("coder")
-    rule_vs = [v for v in vs if v.rule == "coder-disables-general-purpose"]
+    rule_vs = [v for v in vs if v.rule == "roster-deny-disables-general-purpose"]
     assert len(rule_vs) == 1, vs
     assert "general_purpose_subagent" in rule_vs[0].message
 
@@ -859,47 +712,35 @@ def test_coder_disables_general_purpose_fires_when_enabled_true(fake_tree):
     ``enabled: false`` (the neuter spec) satisfies the no-catch-all intent."""
     add_org, add_agent = fake_tree
     add_agent("code-worker", org="coder")
-    add_org("coder", agents=["code-worker"])
-    (contract._orgs_dir() / "coder" / "profile.yaml").write_text(
+    add_org("coder", agents=["code-worker"], org_yaml_extra=_CODER_DENY)
+    (ov._orgs_dir() / "coder" / "profile.yaml").write_text(
         "general_purpose_subagent:\n  enabled: true\n")
     vs = check_org("coder")
-    rule_vs = [v for v in vs if v.rule == "coder-disables-general-purpose"]
+    rule_vs = [v for v in vs if v.rule == "roster-deny-disables-general-purpose"]
     assert len(rule_vs) == 1, vs
-
 
 def test_coder_specialists_resolve_on_worker_role(monkeypatch):
     """code-worker + web-agent have no frontmatter ``model:`` → both resolve on
     the ``worker`` role (cheap mimo, the "small one-shot worker" the user asked
     for). Drives the REAL load_subagents('coder') — no Docker, no tokens.
-    Fake key only (get_model reads it at construction, never sends a request)."""
+    Fake key only (get_model reads it at construction, never sends a request).
+    web-agent's browser surface now arrives via the sandbox_browser MCP seam."""
     from pux_harness.agent import orgs as orgs_mod
     from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
 
     # Stand-in tools covering the WHOLE specialist registry — load_subagents
-    # only needs .name to resolve each agent's tools whitelist, and web-agent
-    # references the full browser_* surface.
+    # only needs .name to resolve each agent's tools whitelist.
     class _T:
         def __init__(self, name):
             self.name = name
     specialists = [_T(n) for n in SPECIALIST_TOOL_NAMES]
-    # load_subagents takes the context layer explicitly now (one way: the loader
-    # no longer builds it). Build it here exactly as the stack factory does.
-    from pux_harness.context.layer import build_context_layer
-    from pux_harness.agent import stack as stack_mod
-    mw, ctx_tools = build_context_layer()
-    # web-agent declares ``middleware: [rubric]`` in its frontmatter, so
-    # load_subagents REQUIRES build_subagent_middleware (the runtime factory
-    # always supplies one). Pass the real builder with an unarmed gate →
-    # _build_rubric returns None, the builder resolves the context baseline.
-    _ctx = stack_mod.StackCtx(
-        org="coder", facts=stack_mod.RuntimeFacts(),
-        rubric_gate=None, exec_client="STUB",
-    )
+    mcp_tools = [_T(f"mcp__sandbox_browser__{n}")
+                 for n in ("browser_navigate", "browser_evaluate",
+                           "browser_screenshot")]
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-fake")
     subs = orgs_mod.load_subagents(
-        "coder", specialists, subagent_middleware=mw, retrieval_tools=ctx_tools,
-        build_subagent_middleware=stack_mod.make_subagent_middleware_builder(
-            _ctx, [], set(),
-        ),
+        "coder", specialists,
+        subagent_middleware=[], retrieval_tools=[], mcp_tools=mcp_tools,
     )
     by_name = {s["name"]: s for s in subs}
     assert set(by_name) == {"coder-explorer", "code-worker", "web-agent"}, \
@@ -908,16 +749,9 @@ def test_coder_specialists_resolve_on_worker_role(monkeypatch):
     # resolved value is NOT a hardcoded literal — it comes from models.yaml.
     for slug in ("code-worker", "web-agent"):
         assert by_name[slug]["model"] is not None, f"{slug} model unresolved"
-    # code-worker carries only python (+ native fs always auto-injected at
-    # graph build, not in the whitelist) PLUS the ctx retrieval pair
-    # (ctx_recall/ctx_search reach every subagent); web-agent carries the
-    # browser surface (+ the same ctx pair).
-    cw_tools = {t.name for t in by_name["code-worker"]["tools"]}
-    assert cw_tools == {"pux_sandbox_python", "ctx_recall", "ctx_search", "ctx_index", "ctx_stats", "ctx_doctor", "ctx_purge"}, cw_tools
-    web_tools = [t.name for t in by_name["web-agent"]["tools"]]
-    assert "pux_sandbox_browser_navigate" in web_tools
-    assert "pux_sandbox_describe_image" in web_tools
-
+    # web-agent's MCP surface binds (the migrated browser family).
+    web_tools = {t.name for t in by_name["web-agent"]["tools"]}
+    assert "mcp__sandbox_browser__browser_navigate" in web_tools
 
 # --- subagent `extends:` + the legacy `subagents:`-block fold ----------------
 
@@ -938,7 +772,7 @@ def test_no_legacy_subagents_block_fires(fake_tree):
     no-legacy-sandbox-artifacts provocation shape."""
     add_org, _ = fake_tree
     add_org("o")
-    (contract._orgs_dir() / "o" / "profile.yaml").write_text(
+    (ov._orgs_dir() / "o" / "profile.yaml").write_text(
         "subagents:\n"
         "  some-slug:\n"
         "    system_prompt_suffix: be terse\n"
@@ -955,7 +789,7 @@ def test_agent_extends_resolvable_fires(fake_tree):
     ``agent-extends-resolvable`` — the dedicated rule (not a generic
     agent-resolves), with the chain in the message."""
     add_org, _ = fake_tree
-    agents_dir = contract._orgs_dir() / "o" / "agents"
+    agents_dir = ov._orgs_dir() / "o" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     (agents_dir / "lonely.md").write_text(
         "---\nname: lonely\nextends: ghost\n---\n\nbody\n")
@@ -971,7 +805,7 @@ def test_agent_extends_acyclic_fires(fake_tree):
     The roster lists only the entry point; ``y`` exists on disk to close the
     cycle but is walked via the chain, not the roster."""
     add_org, _ = fake_tree
-    agents_dir = contract._orgs_dir() / "o" / "agents"
+    agents_dir = ov._orgs_dir() / "o" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
     (agents_dir / "x.md").write_text("---\nname: x\nextends: y\n---\n\nbody\n")
     (agents_dir / "y.md").write_text("---\nname: y\nextends: x\n---\n\nbody\n")

@@ -27,7 +27,8 @@ from pathlib import Path
 
 import pytest
 
-from pux_harness.agent import contract, orgs
+from pux_harness.agent import orgs
+from pux_harness.validation import audit
 
 from tests.conftest import add_agent, add_org, write_profile
 
@@ -166,21 +167,8 @@ def test_load_profile_tool_description_overrides_per_key(fake_orgs_tree: Path) -
     }
 
 
-def test_load_middleware_overrides_child_inherits_and_extends(fake_orgs_tree: Path) -> None:
-    from pux_harness.agent.profile import load_middleware_overrides
-    add_org(fake_orgs_tree, "base", body="# Base\n")
-    write_profile(fake_orgs_tree, "base",
-                   "middleware:\n  supervisor:\n    remove: [routing]\n")
-    add_org(fake_orgs_tree, "child", body="# Child\n", extends="base")
-    write_profile(fake_orgs_tree, "child",
-                   "middleware:\n  supervisor:\n    add: [audit]\n")
-    ov = load_middleware_overrides("child")
-    assert "routing" in ov.supervisor_remove      # inherited
-    assert "audit" in ov.supervisor_add           # own
-
-
 def test_load_rubric_gate_child_inherits_and_overrides(fake_orgs_tree: Path) -> None:
-    from pux_harness.agent.profile import load_rubric_gate
+    from pux_harness.agent.stack import load_rubric_gate
     add_org(fake_orgs_tree, "base", body="# Base\n")
     write_profile(fake_orgs_tree, "base",
                    "rubric:\n  enabled: true\n  max_iterations: 3\n"
@@ -217,7 +205,7 @@ def test_build_system_prompt_via_shim_inherits_overlay(fake_orgs_tree: Path) -> 
 
 def test_contract_org_extends_resolvable_no_such_org(fake_orgs_tree: Path) -> None:
     add_org(fake_orgs_tree, "orphan", body="# O\n", extends="ghost")
-    rules = {v.rule for v in contract.check_org("orphan")}
+    rules = {v.rule for v in audit.audit_org("orphan")}
     assert "org-extends-resolvable" in rules
 
 
@@ -225,21 +213,21 @@ def test_contract_org_extends_resolvable_parent_needs_agents_md(fake_orgs_tree: 
     # parent dir exists but has no AGENTS.md -> not a valid base org.
     (fake_orgs_tree / "orgs" / "naked").mkdir(parents=True)
     add_org(fake_orgs_tree, "child", body="# C\n", extends="naked")
-    rules = {v.rule for v in contract.check_org("child")}
+    rules = {v.rule for v in audit.audit_org("child")}
     assert "org-extends-resolvable" in rules
 
 
 def test_contract_org_extends_acyclic(fake_orgs_tree: Path) -> None:
     add_org(fake_orgs_tree, "a", body="# A\n", extends="b")
     add_org(fake_orgs_tree, "b", body="# B\n", extends="a")
-    rules = {v.rule for v in contract.check_org("a")}
+    rules = {v.rule for v in audit.audit_org("a")}
     assert "org-extends-acyclic" in rules
 
 
 def test_contract_org_extends_policy_warns_on_policyless_child(fake_orgs_tree: Path) -> None:
     add_org(fake_orgs_tree, "base", body="# Base\n")
     add_org(fake_orgs_tree, "child", body="# Child\n", extends="base")  # no policy
-    vs = contract.check_org("child")
+    vs = audit.audit_org("child")
     warns = [v for v in vs if v.rule == "org-extends-policy"]
     assert len(warns) == 1, vs
     assert warns[0].severity == "warn"
@@ -249,14 +237,14 @@ def test_contract_org_extends_policy_no_warn_when_child_has_policy(fake_orgs_tre
     add_org(fake_orgs_tree, "base", body="# Base\n")
     add_org(fake_orgs_tree, "child", body="# Child\n", extends="base",
              policy="egress:\n  allow: []\n")
-    vs = contract.check_org("child")
+    vs = audit.audit_org("child")
     assert not any(v.rule == "org-extends-policy" for v in vs), vs
 
 
 def test_contract_no_policy_warn_for_non_extending_org(fake_orgs_tree: Path) -> None:
     # a standalone org with no policy is fine (existing behavior preserved).
     add_org(fake_orgs_tree, "solo", body="# Solo\n")
-    vs = contract.check_org("solo")
+    vs = audit.audit_org("solo")
     assert not any(v.rule == "org-extends-policy" for v in vs), vs
 
 
@@ -268,7 +256,7 @@ def test_contract_inherited_roster_resolves_via_rule3(fake_orgs_tree: Path) -> N
     add_org(fake_orgs_tree, "base", body="# Base\n", agents=["alpha"])
     add_agent(fake_orgs_tree, "alpha", "base")
     add_org(fake_orgs_tree, "child", body="# Child\n", extends="base")
-    errs = [v for v in contract.check_org("child") if v.severity == "error"]
+    errs = [v for v in audit.audit_org("child") if v.severity == "error"]
     assert errs == [], f"inherited slug should resolve cleanly: {errs}"
 
 
@@ -279,7 +267,7 @@ def test_contract_clean_child_inherits_clean_parent(fake_orgs_tree: Path) -> Non
     add_agent(fake_orgs_tree, "alpha", "base")
     add_org(fake_orgs_tree, "child", body="# Child\n", agents=["beta"], extends="base")
     add_agent(fake_orgs_tree, "beta", "child")
-    vs = contract.check_org("child")
+    vs = audit.audit_org("child")
     assert [v for v in vs if v.severity == "error"] == []
     # both the inherited + the own slug resolved (no agent-resolves).
     assert not any(v.rule == "agent-resolves" for v in vs)

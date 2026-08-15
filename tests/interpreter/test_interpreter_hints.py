@@ -16,7 +16,7 @@ import pytest
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Command
 
-from pux_harness.context.interpreter_hints import (
+from deepagents_context.interpreter_hints import (
     InterpreterHintsMiddleware,
     _classify,
     _build_hint,

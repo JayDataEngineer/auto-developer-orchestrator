@@ -141,17 +141,17 @@ def _write_profile(fake_tree: Path, body: str) -> None:
 def test_ask_user_flag_absent_means_disabled(fake_tree):
     """No ``ask_user:`` flag (and no profile.yaml at all) → False. The
     byte-identical default: no ask_user tool anywhere in the stack."""
-    assert profile.load_ask_user_enabled("p") is False
+    assert hitl.load_ask_user_enabled("p") is False
 
 
 def test_ask_user_flag_true_opts_in(fake_tree):
     _write_profile(fake_tree, "ask_user: true\n")
-    assert profile.load_ask_user_enabled("p") is True
+    assert hitl.load_ask_user_enabled("p") is True
 
 
 def test_ask_user_flag_false_is_disabled(fake_tree):
     _write_profile(fake_tree, "ask_user: false\n")
-    assert profile.load_ask_user_enabled("p") is False
+    assert hitl.load_ask_user_enabled("p") is False
 
 
 def test_ask_user_flag_non_bool_raises(fake_tree):
@@ -159,4 +159,4 @@ def test_ask_user_flag_non_bool_raises(fake_tree):
     ``validate_profile`` so it breaks ``--check-contract`` too."""
     _write_profile(fake_tree, "ask_user: maybe\n")
     with pytest.raises(TypeError):
-        profile.load_ask_user_enabled("p")
+        hitl.load_ask_user_enabled("p")

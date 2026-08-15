@@ -19,3 +19,6 @@ roster_deny: [general, general-purpose, researcher]
 # orgs/_shared/tool_servers.yaml.
 capabilities:
   - {kind: mcp, ref: github}
+  # web-agent e2e verification surface (migrated off the deleted browser
+  # specialist group — same capability via the native MCP path).
+  - {kind: mcp, ref: sandbox_browser}

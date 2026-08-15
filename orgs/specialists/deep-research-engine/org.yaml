@@ -9,4 +9,8 @@ agents: [dre-auditor, dre-synthesizer, dre-writer]
 # call — the harness holds a persistent MCP connection.
 capabilities:
   - {kind: mcp, ref: web_research}
+  # arms the ``browser`` agent inherited from general's roster (the browser
+  # family migrated off the specialist registry onto this in-container MCP
+  # server) — security-scoped, so never inherited via ``extends:``.
+  - {kind: mcp, ref: sandbox_browser}
   - {kind: mcp, ref: surreal}

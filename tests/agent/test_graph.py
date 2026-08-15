@@ -25,32 +25,27 @@ from pux_harness.agent.stack import StackPlan
 
 @pytest.fixture(autouse=True)
 def reset_singletons():
-    """Reset module-level singletons between tests."""
-    graph_mod._exec = None
-    graph_mod._backend = None
+    """Reset the process-wide sandbox singleton (``pux_harness.sandbox.exec``)
+    between tests — ``graph.shared_backend`` delegates to it."""
+    import pux_harness.sandbox.exec as _exec_mod
+    _exec_mod._backend = None
     yield
-    graph_mod._exec = None
-    graph_mod._backend = None
+    _exec_mod._backend = None
 
 
-# --- shared_exec / shared_backend ---------------------------------------------
-
-
-def test_shared_exec_creates_once():
-    with patch("pux_harness.agent.graph.get_exec_client") as mock_get:
-        mock_get.return_value = MagicMock()
-        e1 = graph_mod.shared_exec()
-        e2 = graph_mod.shared_exec()
-        assert e1 is e2
-        mock_get.assert_called_once()
+# --- shared_backend (the process-wide BaseSandbox singleton) -----------------
 
 
 def test_shared_backend_creates_once():
-    with patch("pux_harness.agent.graph.get_exec_client") as mock_get:
-        mock_get.return_value = MagicMock()
+    """One ``BaseSandbox`` per process: ``graph.shared_backend`` delegates to
+    ``pux_harness.sandbox.exec.shared_backend`` (lazy — OpenShell or local);
+    two calls yield the SAME object and the constructor runs once."""
+    with patch("pux_harness.sandbox.exec._make_backend") as mock_make:
+        mock_make.return_value = MagicMock(name="backend")
         b1 = graph_mod.shared_backend()
         b2 = graph_mod.shared_backend()
         assert b1 is b2
+        mock_make.assert_called_once()
 
 
 # --- build_graph: the thin delegation ---------------------------------------
@@ -61,7 +56,6 @@ def test_build_graph_delegates_to_stack_and_threads_plan(monkeypatch):
     the resolved ``StackPlan`` straight into ``create_deep_agent`` alongside
     the memory backend + checkpointer. It does NO assembly of its own."""
     mock_model = MagicMock(name="base_model")
-    mock_exec = MagicMock(name="exec")
     mock_backend = MagicMock(name="backend")
     mock_specialists = [MagicMock(name="spec1"), MagicMock(name="spec2")]
     mock_memory_backend = MagicMock(name="memory_backend")
@@ -76,9 +70,8 @@ def test_build_graph_delegates_to_stack_and_threads_plan(monkeypatch):
     )
 
     monkeypatch.setattr(graph_mod, "get_model", lambda *a, **k: mock_model)
-    monkeypatch.setattr(graph_mod, "shared_exec", lambda: mock_exec)
     monkeypatch.setattr(graph_mod, "shared_backend", lambda: mock_backend)
-    monkeypatch.setattr(graph_mod, "build_native_specialists",
+    monkeypatch.setattr(graph_mod, "make_specialist_tools",
                         lambda *a, **k: mock_specialists)
     monkeypatch.setattr(graph_mod, "load_profile", lambda org: None)
     monkeypatch.setattr(graph_mod, "load_rubric_gate", lambda org: None)
@@ -104,7 +97,7 @@ def test_build_graph_delegates_to_stack_and_threads_plan(monkeypatch):
     assert captured_stack_kwargs["specialists"] is mock_specialists
     assert captured_stack_kwargs["profile"] is None
     assert captured_stack_kwargs["rubric_gate"] is None
-    assert captured_stack_kwargs["exec_client"] is mock_exec
+    assert captured_stack_kwargs["sandbox"] is mock_backend
 
     # create_deep_agent got the plan's fields verbatim + memory + checkpointer.
     mock_create.assert_called_once()

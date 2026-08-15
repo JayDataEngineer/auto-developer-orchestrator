@@ -7,3 +7,5 @@ agents: [researcher, browser, explorer, web-search]
 capabilities:
   - {kind: mcp, ref: web_research}
   - {kind: mcp, ref: github}
+  # browser agent surface (migrated off the deleted browser specialist group).
+  - {kind: mcp, ref: sandbox_browser}

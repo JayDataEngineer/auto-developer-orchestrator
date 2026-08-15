@@ -31,9 +31,10 @@ def project_root() -> Path:
 def fake_orgs_tree(tmp_path: Path, monkeypatch):
     """Scratch orgs/ tree with both contract._orgs_dir and orgs._orgs_dir
     patched. _shared/agents is pre-created. Returns tmp_path."""
-    from pux_harness.agent import contract, orgs
+    from pux_harness.agent import orgs
+    from pux_harness.validation import audit as ov
     (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
-    monkeypatch.setattr(contract, "_orgs_dir", lambda: tmp_path / "orgs")
+    monkeypatch.setattr(ov, "_orgs_dir", lambda: tmp_path / "orgs")
     monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
     return tmp_path
 

@@ -9,7 +9,7 @@ text-only model reaches vision through a typed tool call instead of crashing.
 """
 from langchain_core.messages import ToolMessage
 
-from pux_harness.context.read_file_vision import (
+from deepagents_context.read_file_vision import (
     ReadFileVisionMiddleware,
     _has_binary_blocks,
 )
@@ -361,7 +361,7 @@ def test_auto_describe_async():
 # --- Layer 2: wrap_model_call safety net ---
 
 from langchain_core.messages import HumanMessage as _HM
-from pux_harness.context.read_file_vision import _strip_binary_blocks
+from deepagents_context.read_file_vision import _strip_binary_blocks
 
 # Alias so test functions can use HumanMessage without polluting the top-level
 # import section (ToolMessage is already imported at the top).

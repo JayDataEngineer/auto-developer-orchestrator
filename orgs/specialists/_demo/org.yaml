@@ -4,4 +4,5 @@ agents: [researcher, browser]
 # MCP is security-scoped + NEVER inherited via ``extends:``. web_research is
 # redeclared here to arm the ``web-search`` agent inherited from general.
 capabilities:
+  - {kind: mcp, ref: sandbox_browser}
   - {kind: mcp, ref: web_research}

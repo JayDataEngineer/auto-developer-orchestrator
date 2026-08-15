@@ -6,3 +6,6 @@ agents: [telegram-drafter]
 # inherited from general. Host-side server (HTTP) — no policy.yaml egress needed.
 capabilities:
   - {kind: mcp, ref: web_research}
+  # arms the ``browser`` agent inherited from general's roster (browser family migrated off the specialist
+  # registry onto this in-container MCP server); security-scoped, so redeclared rather than inherited.
+  - {kind: mcp, ref: sandbox_browser}

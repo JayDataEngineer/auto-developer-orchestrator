@@ -7,3 +7,6 @@ agents: [invest-researcher, invest-trader]
 capabilities:
   - {kind: mcp, ref: equibles}
   - {kind: mcp, ref: web_research}
+  # arms the ``browser`` agent inherited from general's roster (browser family migrated off the specialist
+  # registry onto this in-container MCP server); security-scoped, so redeclared rather than inherited.
+  - {kind: mcp, ref: sandbox_browser}

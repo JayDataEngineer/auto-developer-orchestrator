@@ -36,7 +36,7 @@ browser:
 # screenshot inspection). Without this declaration the opt-in default would
 # leave the supervisor with NO specialist tools.
 tool_surface:
-  groups: [browser, media]
+  groups: [media]
 
 # Pre-run: warm the in-container SeleniumBase Chrome so the first browser tool
 # call doesn't pay the SeleniumBase CDP-attach cold start. sb_server runs in the

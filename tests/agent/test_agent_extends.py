@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 from langchain_core.tools import BaseTool
 
-from pux_harness.agent import contract, orgs as orgs_mod
+from pux_harness.agent import orgs as orgs_mod
 
 
 class _FakeTool(BaseTool):
@@ -78,7 +78,7 @@ def _add_org(root: Path, name: str, *, agents: list[str] | None = None) -> Path:
 
 def _ctx() -> dict:
     """The context layer the stack factory threads into every subagent."""
-    from pux_harness.context.layer import build_context_layer
+    from deepagents_context import build_context_layer
     mw, tools = build_context_layer()
     return {"subagent_middleware": mw, "retrieval_tools": tools}
 
@@ -87,7 +87,6 @@ def _ctx() -> dict:
 def fake_tree(tmp_path: Path, monkeypatch):
     (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
     monkeypatch.setattr(orgs_mod, "_orgs_dir", lambda: tmp_path / "orgs")
-    monkeypatch.setattr(contract, "_orgs_dir", lambda: tmp_path / "orgs")
     return tmp_path
 
 
@@ -120,23 +119,6 @@ def test_per_agent_base_system_prompt_replaces_body(fake_tree):
     _add_org(root, "o", agents=["a"])
     with pytest.raises(ValueError, match="base_system_prompt.*removed"):
         orgs_mod.load_subagents("o", [], **_ctx())
-
-
-def test_per_agent_excluded_tools(fake_tree):
-    """Per-agent ``excluded_tools`` drops a tool from THAT agent only (an
-    unlisted sibling keeps it) — the prune is per-agent, not org-wide."""
-    root = fake_tree
-    _write_agent(root, "alpha", org="o", tools=["browser_navigate"],
-                 fm_extra="excluded_tools: [pux_sandbox_browser_navigate]")
-    _write_agent(root, "beta", org="o", tools=["browser_navigate"])
-    _add_org(root, "o", agents=["alpha", "beta"])
-    specialists = [_FakeTool(name="pux_sandbox_browser_navigate",
-                             description="navigate")]
-    subs = {s["name"]: s for s in orgs_mod.load_subagents("o", specialists, **_ctx())}
-    alpha = {t.name for t in subs["alpha"]["tools"]}
-    beta = {t.name for t in subs["beta"]["tools"]}
-    assert "pux_sandbox_browser_navigate" not in alpha, alpha
-    assert "pux_sandbox_browser_navigate" in beta, beta
 
 
 def test_per_agent_tool_description_overrides(fake_tree):

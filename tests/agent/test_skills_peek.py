@@ -27,7 +27,7 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from pux_harness.agent import contract, orgs, stack
+from pux_harness.agent import orgs, stack
 from pux_harness.sandbox.tools import REGISTRY, SPECIALIST_TOOL_NAMES
 
 
@@ -64,15 +64,32 @@ def fake_tree(tmp_path: Path, monkeypatch):
 @pytest.fixture
 def stub_factory(monkeypatch):
     """Stub build_stack's heavy deps so the resolver + plan assembly run real
-    without Docker / real middleware / model init (mirrors test_stack.py)."""
-    monkeypatch.setattr(stack, "build_context_layer", lambda **kw: ([], []))
-    monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
-    monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
-    monkeypatch.setattr(stack, "AuditMiddleware", lambda **kw: "AUDIT")
+    without Docker / real middleware / model init (mirrors test_stack.py). The
+    middleware classes import INSIDE the builders from deepagents_context —
+    stub at their home modules."""
+    import deepagents_context as _dc
+    monkeypatch.setattr(_dc, "build_context_layer", lambda **kw: ([], []))
+    monkeypatch.setattr(
+        __import__("deepagents_context.sandbox_routing",
+                   fromlist=["RoutingMiddleware"]),
+        "RoutingMiddleware", lambda: "ROUTE")
+    monkeypatch.setattr(
+        __import__("deepagents_context.session_guide",
+                   fromlist=["SessionGuideMiddleware"]),
+        "SessionGuideMiddleware", lambda: "GUIDE")
+    monkeypatch.setattr(_dc.prompt_capture, "PromptCaptureMiddleware",
+                        lambda: "PROMPT")
+    monkeypatch.setattr(
+        __import__("deepagents_context.read_file_vision",
+                   fromlist=["ReadFileVisionMiddleware"]),
+        "ReadFileVisionMiddleware", lambda **kw: "READFILE")
+    monkeypatch.setattr(stack, "ModelRetryMiddleware", lambda **kw: "RETRY")
     monkeypatch.setattr(stack, "RubricMiddleware", lambda **kw: "RUBRIC")
+    monkeypatch.setattr(stack, "driver_multimodal", lambda **kw: False)
     monkeypatch.setattr(stack, "get_model", lambda *a, **k: "MODEL")
     monkeypatch.setattr(stack, "build_grader_tools", lambda *a, **k: ["g1"])
     monkeypatch.setattr(orgs, "get_model", lambda *a, **k: "WORKER_MODEL")
+    monkeypatch.setattr(stack, "_orgs_dir", orgs._orgs_dir)
 
 
 # --- build_stack threads supervisor_skills (the wiring) --------------------
@@ -84,7 +101,7 @@ def test_build_stack_supervisor_skills_is_container_absolute_shared(fake_tree, s
     ``orgs/_shared/skills`` present, the supervisor gets exactly that root."""
     plan = stack.build_stack(
         "p", specialists=list(_SPECIALISTS), profile=None,
-        rubric_gate=None, exec_client="EXEC",
+        rubric_gate=None, sandbox="EXEC",
     )
     assert plan.supervisor_skills == ["/sandbox/workspace/orgs/_shared/skills"]
 
@@ -95,7 +112,7 @@ def test_build_stack_supervisor_skills_grows_with_own_org_skills(fake_tree, stub
     (fake_tree / "orgs" / "p" / "skills").mkdir(parents=True)
     plan = stack.build_stack(
         "p", specialists=list(_SPECIALISTS), profile=None,
-        rubric_gate=None, exec_client="EXEC",
+        rubric_gate=None, sandbox="EXEC",
     )
     assert plan.supervisor_skills == [
         "/sandbox/workspace/orgs/_shared/skills",
@@ -115,7 +132,7 @@ def test_build_stack_no_skills_org_is_empty(tmp_path: Path, monkeypatch, stub_fa
     (d / "org.yaml").write_text("agents: []\n")
     plan = stack.build_stack(
         "q", specialists=list(_SPECIALISTS), profile=None,
-        rubric_gate=None, exec_client="EXEC",
+        rubric_gate=None, sandbox="EXEC",
     )
     assert plan.supervisor_skills == []
 
@@ -136,9 +153,8 @@ def test_build_graph_threads_skills_none_when_empty(monkeypatch):
         supervisor_skills=[],  # empty -> skills=None
     )
     monkeypatch.setattr(graph_mod, "get_model", lambda *a, **k: MagicMock())
-    monkeypatch.setattr(graph_mod, "shared_exec", lambda: MagicMock())
     monkeypatch.setattr(graph_mod, "shared_backend", lambda: MagicMock())
-    monkeypatch.setattr(graph_mod, "build_native_specialists", lambda *a, **k: [])
+    monkeypatch.setattr(graph_mod, "make_specialist_tools", lambda *a, **k: [])
     monkeypatch.setattr(graph_mod, "load_profile", lambda org: None)
     monkeypatch.setattr(graph_mod, "load_rubric_gate", lambda org: None)
     monkeypatch.setattr(graph_mod, "build_stack", lambda org, **kw: fake_plan)
@@ -168,24 +184,3 @@ def test_load_skill_absent_from_registry_and_specialist_names():
     # middleware); only the body-LOAD specialist was removed.
     assert "pux_sandbox_list_skills" in SPECIALIST_TOOL_NAMES
 
-
-def test_contract_skills_peek_tripwire_clean_by_default():
-    """The ``skills-peek-via-read-file`` rule is silent today (load_skill is
-    gone). This is the green baseline for the reintroduction test below."""
-    violations = [v for v in contract.check_harness()
-                  if v.rule == "skills-peek-via-read-file"]
-    assert violations == []
-
-
-def test_contract_skills_peek_tripwire_fires_on_reintroduction(monkeypatch):
-    """If ``pux_sandbox_load_skill`` sneaks back into the derived specialist
-    surface, the contract rule fires a HARD error — the registry IS the single
-    source of tool truth, so a tool not in ``SPECIALIST_TOOL_NAMES`` is not a
-    specialist surface. Re-introduction must be loud (no-legacy-left-behind)."""
-    poisoned = SPECIALIST_TOOL_NAMES | {"pux_sandbox_load_skill"}
-    monkeypatch.setattr(contract, "SPECIALIST_TOOL_NAMES", poisoned)
-    violations = [v for v in contract.check_harness()
-                  if v.rule == "skills-peek-via-read-file"]
-    assert len(violations) == 1
-    assert violations[0].severity == "error"
-    assert "load_skill" in violations[0].message

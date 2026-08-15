@@ -3,8 +3,7 @@ name: "game-studio-narrative-designer"
 description: "Game Studio Narrative Designer — the creative voice. Writes dialogue, builds lore, shapes characters, brainstorms story. Two modes: brainstorm (loose ideas) and write (drafts to departments/narrative/). Read-only on code + pipeline."
 capabilities:
   - {kind: tool, ref: python}
-  - {kind: tool, ref: browser_navigate}
-  - {kind: tool, ref: browser_screenshot}
+  - {kind: mcp, ref: sandbox_browser}
   - {kind: tool, ref: describe_image}
   - {kind: skill, ref: orgs/specialists/game-studio/skills}
 ---

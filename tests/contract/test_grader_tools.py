@@ -12,14 +12,16 @@ Docker-free: the factories only CAPTURE ``exec_client`` at build time and call
 """
 from __future__ import annotations
 
+import types
+
 import pytest
 
 from pux_harness.sandbox import tools
 
 
 class _FakeExec:
-    """Stand-in for ``DockerExecClient``; records each command, returns a
-    queued (output, exit_code) per call (or a single reply for all calls)."""
+    """Stand-in for deepagents ``BaseSandbox``; records each command, returns a
+    queued ``ExecuteResponse``-like per call (or a single reply for all calls)."""
 
     def __init__(self, replies=None):
         self.calls: list[str] = []
@@ -28,11 +30,12 @@ class _FakeExec:
         self._replies = replies
         self._single = isinstance(replies, tuple)
 
-    def exec(self, command, *, timeout=None):  # noqa: A003 — mirror real sig
+    def execute(self, command, *, timeout=None):  # BaseSandbox.execute sig
         self.calls.append(command)
-        if self._single:
-            return self._replies
-        return self._replies.pop(0) if self._replies else ("", 0)
+        out, code = (self._replies if self._single
+                     else (self._replies.pop(0) if self._replies else ("", 0)))
+        # minimal ExecuteResponse duck-type (output + exit_code attrs)
+        return types.SimpleNamespace(output=out, exit_code=code)
 
 
 def _grader_tools(exec_client):

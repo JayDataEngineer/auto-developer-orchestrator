@@ -1,38 +1,11 @@
 ---
 name: "web-agent"
 description: "E2e web verification specialist for the Dev-Bot engineering org — drives the deployed site Dev-Bot just built: loads pages, asserts elements exist, fills and submits forms, drives strokes/drags/canvas-pixel checks/keyboard shortcuts, captures screenshot evidence, and returns a structured PASS/FAIL/PARTIAL report. Use to verify a web deliverable actually works in a real browser, or dispatch with mode:audit for exploratory testing."
+# Browser surface migrated from the deleted pux_sandbox_browser_*
+# specialist tools to the NATIVE sandbox_browser MCP server
+# (in-container SeleniumBase; 42 tools incl. the CDP bridges).
 capabilities:
-  - {kind: tool, ref: browser_navigate}
-  - {kind: tool, ref: browser_search}
-  - {kind: tool, ref: browser_click}
-  - {kind: tool, ref: browser_type}
-  - {kind: tool, ref: browser_scroll}
-  - {kind: tool, ref: browser_screenshot}
-  - {kind: tool, ref: browser_save_screenshot}
-  - {kind: tool, ref: browser_evaluate}
-  - {kind: tool, ref: browser_extract_images}
-  - {kind: tool, ref: browser_download}
-  - {kind: tool, ref: browser_find_text}
-  - {kind: tool, ref: browser_go_back}
-  - {kind: tool, ref: browser_wait}
-  - {kind: tool, ref: browser_new_tab}
-  - {kind: tool, ref: browser_switch_tab}
-  - {kind: tool, ref: browser_close_tab}
-  - {kind: tool, ref: browser_tabs}
-  - {kind: tool, ref: browser_dropdown_options}
-  - {kind: tool, ref: browser_select_dropdown}
-  - {kind: tool, ref: browser_extract}
-  - {kind: tool, ref: browser_upload}
-  - {kind: tool, ref: browser_save_session}
-  - {kind: tool, ref: browser_restore_session}
-  - {kind: tool, ref: browser_drag}
-  - {kind: tool, ref: browser_hover}
-  - {kind: tool, ref: browser_press}
-  - {kind: tool, ref: browser_click_at}
-  - {kind: tool, ref: browser_scroll_into_view}
-  - {kind: tool, ref: browser_a11y}
-  - {kind: tool, ref: browser_iframe}
-  - {kind: tool, ref: describe_image}
+  - {kind: mcp, ref: sandbox_browser}
 middleware: [rubric]
 rubric: |
   Grade whether the browser task was actually VERIFIED, not just attempted.

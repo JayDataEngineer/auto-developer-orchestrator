@@ -11,6 +11,7 @@ agents: [game-studio-creative, game-studio-design-researcher, game-studio-docs-w
 # server contributes zero tools + ERROR log and the org still builds, but the
 # agent's ref then fails loud at build time (tools absent).
 capabilities:
+  - {kind: mcp, ref: sandbox_browser}
   - {kind: mcp, ref: godot-mcp-runtime}
   # web_research arms the ``web-search`` agent inherited from general (MCP is
   # security-scoped + never inherited via extends:; redeclared here for it).

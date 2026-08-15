@@ -81,6 +81,13 @@ DEFAULT_TASKS: dict[str, str] = {
         "use the native `read_file` tool, then report how many messages the campaign "
         "contains. Report the count verbatim."
     ),
+    "media-studio": (
+        "What specialist agents does the media-studio org ship? Delegate to the "
+        "`media-studio-director` subagent — do NOT look yourself. Have it use the "
+        "native `execute` tool: "
+        "`ls -1 /sandbox/workspace/orgs/specialists/media-studio/agents`. "
+        "Report the entries verbatim."
+    ),
     "video-production": (
         "What ships under /sandbox/workspace/orgs/specialists/video-production/skills/? Delegate to "
         "the `video-scriptwriter` subagent — do NOT look yourself. Have it use the "

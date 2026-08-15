@@ -13,7 +13,7 @@
 # runtime path fails loud if a var is unset, and McpSessionManager.open() then
 # logs ERROR + contributes zero tools for that server (per-server isolation —
 # one unset var can't brick the org). Set the documented PUX_MCP_* vars in
-# your shell / env manager before `pux serve|acp|direct`.
+# your shell / env manager before `pux direct`.
 
 # ── ray_inference (Ray in-tree MCP) ──────────────────────────────────────────
 # Source: this stack — server/mcp_inference.py in the Ray repo.

@@ -29,8 +29,8 @@ import pytest
 from langchain_openai import ChatOpenAI
 
 from pux_harness.agent import orgs
-from pux_harness.context.layer import build_context_layer
-from pux_harness.context.middleware import ContextMiddleware
+from deepagents_context import build_context_layer
+from deepagents_context.middleware import ContextMiddleware
 
 
 class _FakeTool:
@@ -298,29 +298,33 @@ def test_org_yaml_top_level_must_be_mapping(fake_tree):
 
 # --- Shared browser agent + its full whitelist -----------------------------
 
-def test_real_browser_whitelist_resolves(monkeypatch):
-    """The shipped browser agent (orgs/_shared/agents/browser.md) is rostered by
-    `general`; its full ~24-tool whitelist resolves against the REAL specialist
-    registry (every slug is a registered pux_sandbox_* tool). load_subagents
-    would raise KeyError on any unresolved slug, so reaching the assertions
-    proves the whole whitelist binds."""
-    from pux_harness.sandbox.tools import build_native_specialists
+def test_real_browser_agent_binds_mcp_surface():
+    """The shipped browser agent (orgs/_shared/agents/browser.md, rostered by
+    ``general``) MIGRATED off the deleted browser specialist group onto the
+    in-container ``sandbox_browser`` MCP server — capability preserved, surface
+    moved to native MCP (SeleniumBase FastMCP, 42 tools incl. the CDP bridges).
+    Its frontmatter grants ``- {kind: mcp, ref: sandbox_browser}`` and general's
+    org.yaml declares the server, so this proves the full two-level grant path
+    binds against the REAL tree: every armed ``mcp__sandbox_browser__*`` tool
+    lands on the browser subagent's whitelist (an undeclared ref raises
+    KeyError), and NO ``pux_sandbox_browser_*`` specialist remains."""
+    from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES
 
-    specialists = build_native_specialists("DUMMY", None, None)
-    subs = orgs.load_subagents("general", specialists, **_ctx())
+    armed = [
+        _FakeTool(f"mcp__sandbox_browser__{n}")
+        for n in ("browser_navigate", "browser_search", "browser_click",
+                  "browser_type", "browser_screenshot", "browser_evaluate",
+                  "browser_new_tab", "browser_save_session")
+    ]
+    subs = orgs.load_subagents(
+        "general", _specialists(), mcp_tools=armed, **_ctx())
     browser = next(s for s in subs if s["name"] == "browser")
     names = {t.name for t in browser["tools"]}
-    # Representative coverage across navigate / search / screenshot / tabs /
-    # sessions / vision — every browser family is present + resolved.
-    for slug in (
-        "browser_navigate", "browser_search", "browser_click", "browser_type",
-        "browser_scroll", "browser_screenshot", "browser_save_screenshot",
-        "browser_evaluate", "browser_extract_images", "browser_download",
-        "browser_new_tab", "browser_switch_tab", "browser_close_tab",
-        "browser_save_session", "browser_restore_session",
-        "describe_image",
-    ):
-        assert "pux_sandbox_" + slug in names, f"{slug} not resolved"
+    assert {t.name for t in armed} <= names
+    # The registry carries no browser specialists anymore — the whole family
+    # lives behind the MCP grant now.
+    assert not any(
+        n.startswith("pux_sandbox_browser_") for n in SPECIALIST_TOOL_NAMES)
 
 
 # --- extends: inheritance through the REAL load_subagents path --------------

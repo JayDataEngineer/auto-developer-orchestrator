@@ -8,7 +8,7 @@ stubbed; the profile-loading + application logic under test runs for real.
 
 What must hold:
 - ``system_prompt_suffix`` lands on BOTH the CTO prompt AND each subagent's
-  prompt (org-wide override reaches the shared browser agent, not just CTO).
+  prompt (org-wide override reaches the shared desktop agent, not just CTO).
 - ``tool_description_overrides`` rewrites the named tool's description in BOTH
   the main tool list AND the subagent's resolved whitelist.
 - ``excluded_tools`` is filtered from BOTH places.
@@ -26,7 +26,8 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
 from pux_harness.agent import graph, orgs, profile, stack
-from pux_harness.context.layer import build_context_layer
+from pux_harness.agent import stack as stack_mod
+from deepagents_context import build_context_layer
 
 
 # --- fakes -----------------------------------------------------------------
@@ -44,8 +45,8 @@ def _mk_tool(name: str, desc: str) -> StructuredTool:
 
 _SPECIALISTS = [
     _mk_tool("pux_sandbox_python", "run python"),
-    _mk_tool("pux_sandbox_browser_save_session", "save session (original desc)"),
-    _mk_tool("pux_sandbox_browser_navigate", "navigate to a url"),
+    _mk_tool("pux_sandbox_desktop_screenshot", "screenshot (original desc)"),
+    _mk_tool("pux_sandbox_desktop_click", "click a desktop pixel"),
 ]
 
 
@@ -69,7 +70,7 @@ def _ctx() -> dict:
 # baseline lives here, once. (The capture/offload behavior itself is proven in
 # test_context_offload.py — here it's stubbed away to keep the profile test
 # focused on the wiring shape.)
-_BASELINE_MIDDLEWARE = ["ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE", "CACHE"]
+_BASELINE_MIDDLEWARE = ["ROUTE", "GUIDE", "PROMPT", "RETRY", "READFILE"]
 
 
 @pytest.fixture
@@ -80,27 +81,40 @@ def fake_tree(tmp_path: Path, monkeypatch):
     (tmp_path / "orgs").mkdir()
     (tmp_path / "orgs" / "_shared" / "agents").mkdir(parents=True)
     (tmp_path / "orgs" / "_shared" / "skills").mkdir(parents=True)
+    # the GP text file is the single source for the general-purpose subagent —
+    # ship it in the scratch tree + reset the module cache (read-once per proc)
+    (tmp_path / "orgs" / "_shared" / "general_purpose.md").write_text(
+        "---\n"
+        "default_description: GP-DESC\n"
+        "default_prompt: GP-PROMPT\n"
+        "disabled_description: disabled general-purpose subagent\n"
+        "disabled_prompt: disabled general-purpose prompt\n"
+        "---\nbody\n")
+    monkeypatch.setattr(orgs, "_GP_TEXT", None)
     monkeypatch.setattr(orgs, "_orgs_dir", lambda: tmp_path / "orgs")
+    # build_stack's own ``_orgs_dir`` is a from-import binding — repoint it at
+    # the fake tree so the policy/profile reads inside the factory agree.
+    monkeypatch.setattr(stack, "_orgs_dir", lambda: tmp_path / "orgs")
     # BrowserVisionMiddleware is env-gated (default ON); pin it OFF so the
     # baseline tests below see EXACTLY _BASELINE_MIDDLEWARE (the always-mounted
     # routing+session_guide pair). The vision mount is proven in test_stack.py.
     monkeypatch.setenv("PUX_BROWSER_VISION", "0")
 
-    # org "p" with a CTO overlay + a browser-like specialist.
+    # org "p" with a CTO overlay + a desktop-like specialist.
     d = tmp_path / "orgs" / "p"
     d.mkdir(parents=True)
     (d / "AGENTS.md").write_text("# p\n\nCTO prose, no frontmatter.\n")
     (d / "org.yaml").write_text(
-        "agents: [browserish]\n"
+        "agents: [desktopish]\n"
     )
     bdir = d / "agents"
     bdir.mkdir()
-    (bdir / "browserish.md").write_text(
+    (bdir / "desktopish.md").write_text(
         "---\n"
-        'name: "browserish"\n'
+        'name: "desktopish"\n'
         'description: "browses"\n'
-        'tools: ["browser_save_session", "browser_navigate"]\n'
-        "---\n\nbrowser body.\n"
+        'tools: ["desktop_screenshot", "desktop_click"]\n'
+        "---\n\ndesktop body.\n"
     )
     return tmp_path
 
@@ -127,45 +141,36 @@ def captured_build(monkeypatch):
     cap: dict[str, Any] = {}
 
     monkeypatch.setattr(graph, "get_model", lambda *a, **k: "MODEL")
-    monkeypatch.setattr(graph, "shared_exec", lambda: "EXEC")
     monkeypatch.setattr(graph, "shared_backend", lambda: "BACKEND")
-    monkeypatch.setattr(graph, "build_native_specialists",
+    monkeypatch.setattr(graph, "make_specialist_tools",
                         lambda *a, **k: list(_SPECIALISTS))
-    # The middleware assembly moved into ``stack.build_stack`` (the
-    # factory), so the build_context_layer + RoutingMiddleware +
-    # SessionGuideMiddleware stubs target the ``stack`` module's namespace
-    # (where ``build_stack`` looks them up), NOT ``graph``'s. ``graph.py`` is
-    # now thin — it imports none of those (the no-legacy-middleware-in-graph
-    # contract tripwire enforces that). Stubbed to empty/baseline so the
-    # no-gate middleware is just ROUTE+GUIDE; the capture/offload behavior is
-    # proven separately in test_context_offload.py. ``stack`` resolves the
-    # grader model via its OWN ``get_model`` import when a rubric gate arms —
-    # stub that too so the rubric tests see ``"MODEL"``.
-    monkeypatch.setattr(stack, "build_context_layer", lambda **kw: ([], []))
-    monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
-    monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
-    # PromptCaptureMiddleware is default-ON; stub to marker.
-    monkeypatch.setattr(stack, "PromptCaptureMiddleware", lambda: "PROMPT")
-    # ModelRetryMiddleware is default-ON for every supervisor (mounted after
-    # routing+session_guide); stub it to the ``"RETRY"`` marker so the no-gate
-    # baseline stays a clean list of marker strings (not a raw object).
-    monkeypatch.setattr(stack, "ModelRetryMiddleware", lambda *a, **k: "RETRY")
-    # AnthropicPromptCachingMiddleware + _FullPrefixCachingMiddleware are
-    # default-ON; stub both to marker (the builder calls the subclass by name).
-    monkeypatch.setattr(stack, "AnthropicPromptCachingMiddleware",
-                        lambda **kw: "CACHE")
-    monkeypatch.setattr(stack, "_FullPrefixCachingMiddleware",
-                        lambda **kw: "CACHE")
-    # ReadFileVisionMiddleware is default-ON for EVERY scope (supervisor +
-    # subagent) — it auto-describes image/binary ToolMessages so non-multimodal
-    # drivers don't HTTP-400. Stub it to a marker so the baseline list stays a
-    # clean list of strings. Mirrors the same stub in test_stack.py.
-    monkeypatch.setattr(stack, "ReadFileVisionMiddleware",
-                        lambda **kw: "READFILE")
-    # driver_strong_orchestrator gates CodeInterpreterMiddleware — stub False
-    # so no real middleware object mounts in the baseline.
-    monkeypatch.setattr(stack, "driver_strong_orchestrator", lambda **kw: False)
+    # The middleware classes import INSIDE the stack builders from their home
+    # modules (deepagents_context) — stub them at home, not on ``stack`` (the
+    # names no longer live there). graph.py imports none of them (thin).
+    import deepagents_context as _dc
+    monkeypatch.setattr(_dc, "build_context_layer", lambda **kw: ([], []))
+    monkeypatch.setattr(
+        __import__("deepagents_context.sandbox_routing",
+                   fromlist=["RoutingMiddleware"]),
+        "RoutingMiddleware", lambda: "ROUTE")
+    monkeypatch.setattr(
+        __import__("deepagents_context.session_guide",
+                   fromlist=["SessionGuideMiddleware"]),
+        "SessionGuideMiddleware", lambda: "GUIDE")
+    monkeypatch.setattr(_dc.prompt_capture, "PromptCaptureMiddleware",
+                        lambda: "PROMPT")
+    monkeypatch.setattr(
+        __import__("deepagents_context.read_file_vision",
+                   fromlist=["ReadFileVisionMiddleware"]),
+        "ReadFileVisionMiddleware", lambda **kw: "READFILE")
+    monkeypatch.setattr(stack, "ModelRetryMiddleware",
+                        lambda *a, **k: "RETRY")
+    monkeypatch.setattr(stack, "RubricMiddleware", lambda **kw: "RUBRIC")
+    monkeypatch.setattr(stack, "driver_multimodal", lambda **kw: False)
     monkeypatch.setattr(stack, "get_model", lambda *a, **k: "MODEL")
+    monkeypatch.setattr(stack, "build_grader_tools",
+                        lambda *a, **k: ["g1", "g2", "g3"])
+    monkeypatch.setattr(orgs, "get_model", lambda *a, **k: "WORKER_MODEL")
     monkeypatch.setattr(
         graph, "create_deep_agent",
         lambda **kw: cap.update(kw) or "GRAPH",
@@ -188,8 +193,8 @@ def test_suffix_lands_on_cto_and_subagent(fake_tree, captured_build):
         monkeypatch_target.undo()
 
     assert captured_build["system_prompt"].endswith("SUFFIX_MARKER")
-    # The browserish subagent inherits the suffix too.
-    sub = next(s for s in captured_build["subagents"] if s["name"] == "browserish")
+    # The desktopish subagent inherits the suffix too.
+    sub = next(s for s in captured_build["subagents"] if s["name"] == "desktopish")
     assert sub["system_prompt"].endswith("SUFFIX_MARKER")
 
 
@@ -201,7 +206,7 @@ def test_tool_description_override_applies_everywhere(fake_tree, captured_build)
     override reaches the SUBAGENT, which is where the specialist actually lives
     for an org with no tool_surface block.)"""
     cfg = _cfg(overrides={
-        "pux_sandbox_browser_save_session": "OVERRIDE_MARKER",
+        "pux_sandbox_desktop_screenshot": "OVERRIDE_MARKER",
     })
     mp = pytest.MonkeyPatch()
     mp.setattr(graph, "load_profile", lambda org: cfg)
@@ -210,16 +215,20 @@ def test_tool_description_override_applies_everywhere(fake_tree, captured_build)
     finally:
         mp.undo()
 
-    sub = next(s for s in captured_build["subagents"] if s["name"] == "browserish")
+    sub = next(s for s in captured_build["subagents"] if s["name"] == "desktopish")
     ssub = next(t for t in sub["tools"]
-                if t.name == "pux_sandbox_browser_save_session")
+                if t.name == "pux_sandbox_desktop_screenshot")
     assert ssub.description == "OVERRIDE_MARKER"
 
 
 def test_excluded_tool_filtered_everywhere(fake_tree, captured_build):
-    """excluded_tools drops the named tool from BOTH the main list and the
-    subagent whitelist."""
-    cfg = _cfg(excluded={"pux_sandbox_browser_save_session"})
+    """excluded_tools is enforced via deepagents' native
+    ``_ToolExclusionMiddleware`` — mounted LATE on the supervisor stack AND on
+    the subagent's own middleware — stripping the tool from every model request
+    (the lists keep it; the model can never see or call it)."""
+    from deepagents.graph import _ToolExclusionMiddleware
+
+    cfg = _cfg(excluded={"pux_sandbox_desktop_screenshot"})
     mp = pytest.MonkeyPatch()
     mp.setattr(graph, "load_profile", lambda org: cfg)
     try:
@@ -227,14 +236,16 @@ def test_excluded_tool_filtered_everywhere(fake_tree, captured_build):
     finally:
         mp.undo()
 
-    names = {t.name for t in captured_build["tools"]}
-    assert "pux_sandbox_browser_save_session" not in names
-
-    sub = next(s for s in captured_build["subagents"] if s["name"] == "browserish")
-    sub_names = {t.name for t in sub["tools"]}
-    assert "pux_sandbox_browser_save_session" not in sub_names
-    # Non-excluded tools survive.
-    assert "pux_sandbox_browser_navigate" in sub_names
+    target = frozenset({"pux_sandbox_desktop_screenshot"})
+    sup_hits = [m for m in captured_build["middleware"]
+                if isinstance(m, _ToolExclusionMiddleware)]
+    assert sup_hits and sup_hits[0]._excluded == target
+    sub = next(s for s in captured_build["subagents"] if s["name"] == "desktopish")
+    sub_hits = [m for m in sub["middleware"]
+                if isinstance(m, _ToolExclusionMiddleware)]
+    assert sub_hits and sub_hits[0]._excluded == target
+    # The OTHER specialist survives — exclusion is surgical.
+    assert "pux_sandbox_desktop_click" in {t.name for t in sub["tools"]}
 
 
 def test_base_system_prompt_replaces(fake_tree, captured_build):
@@ -272,15 +283,15 @@ def test_no_profile_is_byte_identical(fake_tree, captured_build):
     assert names == set()
     # The subagent surface is still the FULL specialist set — scoping is
     # supervisor-only.
-    sub = next(s for s in captured_build["subagents"] if s["name"] == "browserish")
+    sub = next(s for s in captured_build["subagents"] if s["name"] == "desktopish")
     sub_names = {t.name for t in sub["tools"]}
-    assert {"pux_sandbox_browser_save_session",
-            "pux_sandbox_browser_navigate"} <= sub_names
+    assert {"pux_sandbox_desktop_screenshot",
+            "pux_sandbox_desktop_click"} <= sub_names
 
 
-def test_build_graph_requests_base_and_multimodal_roles(fake_tree, monkeypatch):
-    """Wiring proof (prepare-wiring-e2e-gap): build_graph drives
-    the model-role spec through the REAL entry point — it asks get_model for the
+def test_build_graph_requests_base_and_multimodal_roles(fake_tree, captured_build, monkeypatch):
+    """Wiring proof (prepare-wiring-e2e-gap): build_graph drives the
+    model-role spec through the REAL entry point — it asks get_model for the
     ``base`` role (the CTO driver) AND the ``multimodal`` role (describe_image,
     decoupled from base) with the org threaded through. Not assumed from a
     stub that swallows kwargs — captured here by recording the call args."""
@@ -291,18 +302,6 @@ def test_build_graph_requests_base_and_multimodal_roles(fake_tree, monkeypatch):
         return f"MODEL-{role}"
 
     monkeypatch.setattr(graph, "get_model", _fake_get_model)
-    monkeypatch.setattr(graph, "shared_exec", lambda: "EXEC")
-    monkeypatch.setattr(graph, "shared_backend", lambda: "BACKEND")
-    monkeypatch.setattr(graph, "build_native_specialists",
-                        lambda *a, **k: list(_SPECIALISTS))
-    # Middleware assembly lives in ``stack.build_stack``; stub the
-    # stack-level names so the factory runs to completion. This test only
-    # asserts which roles ``graph.get_model`` was asked for at the graph layer
-    # — not the middleware shape (that's captured_build's job elsewhere).
-    monkeypatch.setattr(stack, "build_context_layer", lambda **kw: ([], []))
-    monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTING")
-    monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "SESSION")
-    monkeypatch.setattr(graph, "create_deep_agent", lambda **kw: "GRAPH")
     monkeypatch.setattr(graph, "load_profile", lambda org: None)
 
     graph.build_graph("p", checkpointer=None)
@@ -401,8 +400,8 @@ def test_load_rubric_gate_parses_block(fake_tree):
         "  max_iterations: 5\n"
         "  default: 'ship it'\n"
     )
-    gate = profile.load_rubric_gate("p")
-    assert gate == profile.RubricGate(enabled=True, max_iterations=5, default="ship it")
+    gate = stack_mod.load_rubric_gate("p")
+    assert gate == stack_mod.RubricGate(enabled=True, max_iterations=5, default="ship it")
 
 
 def test_load_rubric_gate_none_when_no_block(fake_tree):
@@ -411,13 +410,13 @@ def test_load_rubric_gate_none_when_no_block(fake_tree):
     (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
         "system_prompt_suffix: 'hi'\n"
     )
-    assert profile.load_rubric_gate("p") is None
+    assert stack_mod.load_rubric_gate("p") is None
 
 
 def test_load_rubric_gate_none_when_no_profile(fake_tree):
     """No profile.yaml at all -> no gate."""
-    assert profile.load_rubric_gate("p") is None
-    assert profile.load_rubric_gate("general") is None
+    assert stack_mod.load_rubric_gate("p") is None
+    assert stack_mod.load_rubric_gate("general") is None
 
 
 def test_default_rubric_returns_text(fake_tree):
@@ -427,7 +426,7 @@ def test_default_rubric_returns_text(fake_tree):
         "  enabled: true\n"
         "  default: 'GRADE ME'\n"
     )
-    assert profile.default_rubric("p") == "GRADE ME"
+    assert stack_mod.default_rubric("p") == "GRADE ME"
 
 
 def test_default_rubric_none_when_disabled(fake_tree):
@@ -438,7 +437,7 @@ def test_default_rubric_none_when_disabled(fake_tree):
         "  enabled: false\n"
         "  default: 'GRADE ME'\n"
     )
-    assert profile.default_rubric("p") is None
+    assert stack_mod.default_rubric("p") is None
 
 
 def test_default_rubric_none_when_no_default(fake_tree):
@@ -448,7 +447,7 @@ def test_default_rubric_none_when_no_default(fake_tree):
         "rubric:\n"
         "  enabled: true\n"
     )
-    assert profile.default_rubric("p") is None
+    assert stack_mod.default_rubric("p") is None
 
 
 def test_rubric_block_peeled_from_profile_config(fake_tree):
@@ -465,7 +464,7 @@ def test_rubric_block_peeled_from_profile_config(fake_tree):
     assert cfg is not None
     assert cfg.system_prompt_suffix == "SUFFIX"   # profile still loads
     # The gate reads independently from the same file.
-    assert profile.load_rubric_gate("p").default == "ship it"
+    assert stack_mod.load_rubric_gate("p").default == "ship it"
 
 
 def test_load_rubric_gate_rejects_legacy_grader_model(fake_tree):
@@ -477,8 +476,8 @@ def test_load_rubric_gate_rejects_legacy_grader_model(fake_tree):
         "  enabled: true\n"
         "  grader_model: glm-5.2\n"
     )
-    with pytest.raises(TypeError, match="grader_model moved"):
-        profile.load_rubric_gate("p")
+    with pytest.raises(TypeError, match="unknown key.*grader_model"):
+        stack_mod.load_rubric_gate("p")
 
 
 def test_load_rubric_gate_rejects_bad_max_iterations(fake_tree):
@@ -489,7 +488,7 @@ def test_load_rubric_gate_rejects_bad_max_iterations(fake_tree):
         "  max_iterations: 'three'\n"
     )
     with pytest.raises(TypeError, match="max_iterations"):
-        profile.load_rubric_gate("p")
+        stack_mod.load_rubric_gate("p")
 
 
 # --- load_profile / validate_profile ---------------------------------------
@@ -505,7 +504,8 @@ def test_load_profile_reads_real_twitter_profile():
     cfg = profile.load_profile("twitter-agent")
     assert cfg is not None
     assert "draft" in (cfg.system_prompt_suffix or "")
-    assert "pux_sandbox_browser_save_session" in cfg.tool_description_overrides
+    assert ("mcp__sandbox_browser__browser_save_session"
+            in cfg.tool_description_overrides)
 
 
 def test_load_profile_parses_written_yaml(fake_tree):
@@ -555,31 +555,21 @@ def test_load_profile_rejects_non_mapping(fake_tree):
         profile.load_profile("p")
 
 
-def test_validate_profile_round_trips(fake_tree):
-    """validate_profile returns the cfg (or None) and raises on malformed —
-    the contract checker's entry point."""
-    (fake_tree / "orgs" / "p" / "profile.yaml").write_text(
-        "system_prompt_suffix: 's'\n"
-    )
-    assert profile.validate_profile("p") is not None
-    assert profile.validate_profile("general") is None  # no profile -> None
-
-
 def test_load_subagents_default_profile_none_preserves_behavior(fake_tree):
     """load_subagents(org, tools) with no profile arg preserves the specialist
-    whitelist resolution (the regression contract) — the browserish subagent
+    whitelist resolution (the regression contract) — the desktopish subagent
     gets exactly its two declared ``browser_*`` tools. Additionally
     threads the unified context layer into every subagent, so the retrieval
     tools ``ctx_recall`` + ``ctx_search`` are appended to the whitelist too
     (graph.py retracts the old "main-agent-only" claim — verified against
     deepagents 0.6.12)."""
     subs = orgs.load_subagents("p", _SPECIALISTS, **_ctx())
-    sub = next(s for s in subs if s["name"] == "browserish")
-    assert sub["system_prompt"] == "browser body."
+    sub = next(s for s in subs if s["name"] == "desktopish")
+    assert sub["system_prompt"] == "desktop body."
     names = {t.name for t in sub["tools"]}
     # The declared specialist whitelist resolved faithfully.
-    assert {"pux_sandbox_browser_save_session",
-            "pux_sandbox_browser_navigate"} <= names
+    assert {"pux_sandbox_desktop_screenshot",
+            "pux_sandbox_desktop_click"} <= names
     # The context retrieval surface reaches every subagent.
     assert {"ctx_recall", "ctx_search"} <= names
     # No surprise specialists leak in (python is NOT in this subagent's whitelist).
@@ -587,21 +577,25 @@ def test_load_subagents_default_profile_none_preserves_behavior(fake_tree):
 
 
 def test_load_subagents_applies_profile(fake_tree):
-    """Direct proof at the load_subagents layer: suffix + override + exclude
-    land on the subagent even without going through build_graph."""
+    """Direct proof at the load_subagents layer: suffix + override land on the
+    subagent, and excluded_tools mounts the native _ToolExclusionMiddleware on
+    the subagent — even without going through build_graph."""
+    from deepagents.graph import _ToolExclusionMiddleware
+
     cfg = _cfg(
         suffix="EXTRA",
-        overrides={"pux_sandbox_browser_save_session": "REDONE"},
-        excluded={"pux_sandbox_browser_navigate"},
+        overrides={"pux_sandbox_desktop_screenshot": "REDONE"},
+        excluded={"pux_sandbox_desktop_click"},
     )
     subs = orgs.load_subagents("p", _SPECIALISTS, profile=cfg, **_ctx())
-    sub = next(s for s in subs if s["name"] == "browserish")
+    sub = next(s for s in subs if s["name"] == "desktopish")
     assert sub["system_prompt"].endswith("EXTRA")
-    names = {t.name for t in sub["tools"]}
-    assert "pux_sandbox_browser_navigate" not in names
-    kept = next(t for t in sub["tools"]
-                if t.name == "pux_sandbox_browser_save_session")
-    assert kept.description == "REDONE"
+    sshot = next(t for t in sub["tools"]
+                 if t.name == "pux_sandbox_desktop_screenshot")
+    assert sshot.description == "REDONE"
+    hits = [m for m in sub["middleware"]
+            if isinstance(m, _ToolExclusionMiddleware)]
+    assert hits and hits[0]._excluded == frozenset({"pux_sandbox_desktop_click"})
 
 
 # --- build_graph threads ``facts`` to the ask_user gate (Phase C seam) ------

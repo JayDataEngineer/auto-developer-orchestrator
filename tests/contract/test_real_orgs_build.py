@@ -15,17 +15,20 @@ universal override + inheritance system.
 """
 from __future__ import annotations
 
+import importlib
+
 from pathlib import Path
 
 import pytest
 
 from pux_harness.agent import orgs, stack
-from pux_harness.agent.profile import load_ask_user_enabled, load_dynamic_tools_enabled
+from pux_harness.agent.hitl import load_ask_user_enabled
+from pux_harness.sandbox.policy import load_dynamic_tools_enabled
 from pux_harness.agent.orgs import _org_path, _orgs_dir, discover_orgs, org_agent_slugs
 from pux_harness.sandbox.policy import NoPolicy, load as _load_policy, resolve_tool_allowlist as _supervisor_allowed
-from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES, build_native_specialists
+from pux_harness.sandbox.tools import SPECIALIST_TOOL_NAMES, make_specialist_tools as build_native_specialists
 from pux_harness.sandbox.tools import dynamic
-from pux_harness.sandbox.tools._shared import PUX_PREFIX
+from pux_harness.sandbox.tools._pux import PUX_PREFIX
 from pux_harness.sandbox.tools.declared import declared_tool_names
 
 # The real org list, resolved at collection time from the real orchestrator
@@ -52,27 +55,24 @@ def stubbed_factory(monkeypatch):
     CLASSES + the context layer) so the resolver + plan assembly run against
     REAL org config without Docker / real middleware / model init. The ORG
     config (roster / profile / prompt / specialists) stays real."""
-    monkeypatch.setattr(stack, "build_context_layer", lambda **kw: ([], []))
-    monkeypatch.setattr(stack, "RoutingMiddleware", lambda: "ROUTE")
-    monkeypatch.setattr(stack, "SessionGuideMiddleware", lambda: "GUIDE")
-    monkeypatch.setattr(stack, "AuditMiddleware", lambda **kw: "AUDIT")
+    import deepagents_context as _dc  # middleware classes import INSIDE the builders
+    monkeypatch.setattr(_dc, "build_context_layer", lambda **kw: ([], []))
+    monkeypatch.setattr(_dc.sandbox_routing, "RoutingMiddleware", lambda: "ROUTE")
+    monkeypatch.setattr(_dc.session_guide, "SessionGuideMiddleware", lambda: "GUIDE")
+    monkeypatch.setattr(_dc.audit, "AuditMiddleware", lambda **kw: "AUDIT")
     monkeypatch.setattr(stack, "RubricMiddleware", lambda **kw: "RUBRIC")
     # model_retry is default-on for every supervisor (#84) — stub it so the
     # build emits a stable marker instead of a real ModelRetryMiddleware
     # (distinct object per build would break the idempotency check). tool_retry
     # is opt-in/gated, but stubbed for symmetry.
+    monkeypatch.setattr(importlib.import_module("deepagents_context.read_file_vision"),
+                         "ReadFileVisionMiddleware", lambda **kw: "READFILE")
     monkeypatch.setattr(stack, "ModelRetryMiddleware", lambda **kw: "RETRY")
-    monkeypatch.setattr(stack, "ToolRetryMiddleware", lambda **kw: "TOOLRETRY")
     # prompt_capture is default-on for every supervisor — stub it so the
     # build emits a stable marker instead of a real PromptCaptureMiddleware
     # (distinct object per build would break the idempotency check).
-    monkeypatch.setattr(stack, "PromptCaptureMiddleware", lambda **kw: "PROMPT")
-    # ``prompt_caching`` (_FullPrefixCachingMiddleware) is default-on for every
-    # supervisor + subagent (#prompt-caching) — stub the CLASS the builder
-    # constructs so the build emits a stable marker instead of a real instance
-    # (distinct memory address per build would break idempotency, and the real
-    # repr leaks past the registry-only audit below).
-    monkeypatch.setattr(stack, "_FullPrefixCachingMiddleware", lambda **kw: "CACHE")
+    monkeypatch.setattr(_dc.prompt_capture, "PromptCaptureMiddleware", lambda **kw: "PROMPT")
+
     # ``interpreter`` (CodeInterpreterMiddleware) auto-mounts for every shipped
     # org — all resolve a strength:pro base model (driver_strong_orchestrator
     # keys on the REAL resolve_model_id, not this stubbed get_model, so the
@@ -86,12 +86,12 @@ def stubbed_factory(monkeypatch):
     # ``interpreter`` (armed iff interpreter is armed) — stub it the same way
     # so the build emits a stable marker instead of a real instance (distinct
     # object per build would break the idempotency check).
-    monkeypatch.setattr(stack, "InterpreterHintsMiddleware", lambda **kw: "HINTS")
+    monkeypatch.setattr(importlib.import_module("deepagents_context.interpreter_hints"),
+                         "InterpreterHintsMiddleware", lambda **kw: "HINTS")
     # read_file_vision is default-on for every scope — stub it + driver_multimodal
     # so the build emits a stable marker instead of a real ReadFileVisionMiddleware
     # (which would call driver_multimodal → resolve_model_id → real model init).
     monkeypatch.setattr(stack, "driver_multimodal", lambda **kw: False)
-    monkeypatch.setattr(stack, "ReadFileVisionMiddleware", lambda **kw: "READFILE")
     monkeypatch.setattr(stack, "get_model", lambda *a, **k: "MODEL")
     monkeypatch.setattr(stack, "build_grader_tools", lambda *a, **k: ["g1"])
     monkeypatch.setattr(orgs, "get_model", lambda *a, **k: "WORKER_MODEL")
@@ -99,7 +99,7 @@ def stubbed_factory(monkeypatch):
 
 def _real_specialists():
     """The FULL real specialist surface (all 39 tools) — not a 2-tool stub."""
-    return build_native_specialists(exec_client=_EXEC)
+    return build_native_specialists(_EXEC)
 
 
 def _declared_surface(org: str) -> set[str]:
@@ -164,8 +164,8 @@ def _build_real_org(org: str, stubbed_factory) -> stack.StackPlan:
         org,
         specialists=_real_specialists(),
         profile=profile_mod.load_profile(org),
-        rubric_gate=profile_mod.load_rubric_gate(org),
-        exec_client=_EXEC,
+        rubric_gate=stack.load_rubric_gate(org),
+        sandbox=_EXEC,
     )
 
 
@@ -324,8 +324,8 @@ def test_every_real_org_accepts_mcp_tools_through_the_seam(org, stubbed_factory)
         org,
         specialists=_real_specialists(),
         profile=profile_mod.load_profile(org),
-        rubric_gate=profile_mod.load_rubric_gate(org),
-        exec_client=_EXEC,
+        rubric_gate=stack.load_rubric_gate(org),
+        sandbox=_EXEC,
         mcp_tools=[mcp_tool],
     )
     names = {t.name for t in plan.supervisor_tools}
@@ -371,72 +371,4 @@ def test_every_real_org_resolves_its_skills_roots(org, stubbed_factory):
     # resolver is specifically meant to pre-filter).
     assert plan.supervisor_skills == expected, (
         f"{org}: skills roots {plan.supervisor_skills} != expected {expected}")
-
-
-def test_browser_agent_skills_resolve_and_are_well_formed(stubbed_factory):
-    """The REAL browser-agent ships three situational skills (captcha-bypass,
-    session-warmup, advanced-interactions) moved out of AGENTS.md for token
-    economy. This proves (a) the org-specific skills root lands on the plan, and
-    (b) every SKILL.md under it has valid frontmatter the SkillsMiddleware
-    loader accepts (``name`` matches the directory, ``description`` present).
-    If a skill dir is deleted, a SKILL.md is malformed, or the resolver stops
-    discovering the org root, this fires."""
-    plan = _build_real_org("browser-agent", stubbed_factory)
-    own_root = "/sandbox/workspace/orgs/specialists/browser-agent/skills"
-    assert own_root in plan.supervisor_skills, (
-        "browser-agent: own skills root missing from plan "
-        f"{plan.supervisor_skills}")
-
-    # Every SKILL.md under the REAL org skills dir must be well-formed.
-    import re
-    skills_dir = _org_path("browser-agent") / "skills"
-    assert skills_dir.is_dir(), "browser-agent: skills/ dir missing"
-    skill_files = sorted(skills_dir.glob("*/SKILL.md"))
-    assert skill_files, "browser-agent: no SKILL.md files under skills/"
-    for skill_file in skill_files:
-        skill_name = skill_file.parent.name  # the directory IS the skill name
-        text = skill_file.read_text()
-        # YAML frontmatter fence
-        assert text.startswith("---\n"), (
-            f"browser-agent/{skill_name}: missing YAML frontmatter fence")
-        # name field must match the directory (deepagents _validate_skill_name)
-        m = re.search(r"^name:\s*(.+?)\s*$", text, re.MULTILINE)
-        assert m, f"browser-agent/{skill_name}: no 'name:' in frontmatter"
-        assert m.group(1) == skill_name, (
-            f"browser-agent/{skill_name}: name {m.group(1)!r} != dir {skill_name!r}")
-        # description must be present (the progressive-disclosure index entry)
-        assert re.search(r"^description:\s*\S", text, re.MULTILINE), (
-            f"browser-agent/{skill_name}: missing/empty 'description:'")
-
-
-def test_browser_agent_carries_browser_specialists_on_supervisor(stubbed_factory):
-    """browser-agent's supervisor IS the browser agent (``agents: []`` — no
-    subagents), so its ``tool_surface.groups: [browser, media]`` policy MUST put
-    the browser specialists directly on the supervisor surface (not behind a
-    subagent delegation). This is the contract that the browser-agent can be
-    driven as a top-level org by an external caller (Hermes via MCP-SSE) without
-    a routing hop. Reading the REAL built plan here (the policy read is proven
-    in test_policy.py) keeps this about the assembled surface."""
-    plan = _build_real_org("browser-agent", stubbed_factory)
-    browser_tools = {
-        t.name for t in plan.supervisor_tools
-        if t.name.startswith("pux_sandbox_browser_")
-    }
-    # The full browser specialist set is 35 tools (test_browser_tools.py pins
-    # the exact roster). Assert a healthy subset is present directly on the
-    # supervisor — the exact count is pinned upstream, so a representative
-    # core is enough here (navigate/click/type/screenshot/uc are the load-bearing
-    # ones for the autopilot loop + captcha ladder).
-    must_have = {
-        "pux_sandbox_browser_navigate", "pux_sandbox_browser_click",
-        "pux_sandbox_browser_type", "pux_sandbox_browser_screenshot",
-        "pux_sandbox_browser_uc", "pux_sandbox_browser_solve_captcha",
-        "pux_sandbox_browser_evaluate", "pux_sandbox_browser_save_session",
-        "pux_sandbox_browser_restore_session",
-    }
-    missing = must_have - browser_tools
-    assert not missing, (
-        f"browser-agent: browser specialists missing from supervisor: {missing}")
-    assert "ask_user" in {t.name for t in plan.supervisor_tools}, (
-        "browser-agent: ask_user not on supervisor (Hermes resume-answer path)")
 

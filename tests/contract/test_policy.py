@@ -47,113 +47,6 @@ def test_load_empty_org_name(tmp_path: Path) -> None:
         policy.load("", "/tmp")
 
 
-def test_load_valid_yaml(tmp_path: Path) -> None:
-    body = """
-workspace:
-  mounts:
-    - host: ${HOME}
-      container: /workspace/home
-      mode: ro
-  run_as_host_user: true
-egress:
-  allow:
-    - host: 1.2.3.4
-      port: 443
-    - host: example.com
-      ports: [80, 443]
-credentials:
-  required: [ALPHA]
-  optional: [BETA]
-"""
-    p = policy.load("acme", _write_policy(tmp_path, "acme", body))
-    assert p.workspace.run_as_host_user is True
-    assert len(p.workspace.mounts) == 1
-    assert p.workspace.mounts[0].container == "/workspace/home"
-    assert len(p.egress.allow) == 2
-    assert p.egress.allow[0].protocol == "tcp"  # default tcp
-    assert p.credentials.required == ["ALPHA"]
-
-
-def test_load_malformed_yaml(tmp_path: Path) -> None:
-    # Tabs are explicitly invalid in YAML — guaranteed parser failure.
-    with pytest.raises(policy.PolicyError):
-        policy.load("broken", _write_policy(tmp_path, "broken", "workspace:\n\tmounts: oops\n"))
-
-
-def test_load_sandbox_image_and_tier(tmp_path: Path) -> None:
-    body = """
-sandbox:
-  image: video-production-video-producer:latest
-  tier: isolated
-"""
-    p = policy.load("video-production", _write_policy(tmp_path, "video-production", body))
-    assert p.sandbox.image == "video-production-video-producer:latest"
-    assert p.sandbox.tier == "isolated"
-
-
-def test_load_sandbox_deps_apt_and_pip(tmp_path: Path) -> None:
-    body = """
-sandbox:
-  deps:
-    apt:
-      - ripgrep
-      - jq
-    pip:
-      - rich
-      - httpx==0.27
-"""
-    p = policy.load("deps-org", _write_policy(tmp_path, "deps-org", body))
-    assert p.sandbox.deps.apt == ["ripgrep", "jq"]
-    assert p.sandbox.deps.pip == ["rich", "httpx==0.27"]
-
-
-def test_load_sandbox_deps_default_empty(tmp_path: Path) -> None:
-    # No deps block -> both lists empty (today's default; install hook no-ops).
-    body = """
-sandbox:
-  tier: isolated
-"""
-    p = policy.load("nodeps", _write_policy(tmp_path, "nodeps", body))
-    assert p.sandbox.deps.apt == []
-    assert p.sandbox.deps.pip == []
-
-
-def test_load_sandbox_display_watch_off_by_default(tmp_path: Path) -> None:
-    # No display block -> watch off (the security default: x11vnc is -nopw, so
-    # the watchable desktop is opt-in only and never auto-published).
-    body = """
-sandbox:
-  tier: isolated
-"""
-    p = policy.load("nodisplay", _write_policy(tmp_path, "nodisplay", body))
-    assert p.sandbox.display.watch is False
-    assert p.sandbox.display.backend == "standard"
-
-
-def test_load_sandbox_display_watch_on(tmp_path: Path) -> None:
-    body = """
-sandbox:
-  display:
-    watch: true
-    backend: kasm
-"""
-    p = policy.load("watch-org", _write_policy(tmp_path, "watch-org", body))
-    assert p.sandbox.display.watch is True
-    assert p.sandbox.display.backend == "kasm"
-
-
-def test_load_sandbox_display_rejects_unknown_backend(tmp_path: Path) -> None:
-    # An unknown backend would silently map to the wrong VNC-web port -> loud.
-    body = """
-sandbox:
-  display:
-    watch: true
-    backend: spice
-"""
-    with pytest.raises(policy.PolicyError, match="backend 'spice'"):
-        policy.load("bad-backend", _write_policy(tmp_path, "bad-backend", body))
-
-
 def test_load_empty_file_is_empty_policy(tmp_path: Path) -> None:
     # An empty (but present) policy.yaml is valid — opts in with no sections.
     p = policy.load("blank", _write_policy(tmp_path, "blank", ""))
@@ -164,257 +57,12 @@ def test_load_unknown_top_level_keys_ignored(tmp_path: Path) -> None:
     # Go's yaml.v3 ignores unknown keys (lenient). The Python port matches;
     # the *contract* (contract.py rule 5) adds the strict unknown-section check.
     p = policy.load(
-        "loose", _write_policy(tmp_path, "loose", "bogus: whatever\nsandbox:\n  tier: isolated\n")
+        "loose", _write_policy(tmp_path, "loose", "bogus: whatever\nsandbox:\n  image: img:latest\n")
     )
-    assert p.sandbox.tier == "isolated"
+    assert p.sandbox.image == "img:latest"
 
 
 # --- validate_env + env_vars --------------------------------------------------
-
-
-def test_validate_env_all_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REQUIRED_ONE", "a")
-    monkeypatch.setenv("REQUIRED_TWO", "b")
-    p = policy.Policy(credentials=policy.Credentials(required=["REQUIRED_ONE", "REQUIRED_TWO"]))
-    policy.validate_env(p)  # must not raise
-
-
-def test_validate_env_missing_lists_all(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PRESENT_ONE", "x")
-    p = policy.Policy(
-        credentials=policy.Credentials(required=["PRESENT_ONE", "MISSING_ONE", "MISSING_TWO"])
-    )
-    with pytest.raises(policy.MissingCreds) as ei:
-        policy.validate_env(p)
-    assert ei.value.missing == ["MISSING_ONE", "MISSING_TWO"]
-
-
-def test_validate_env_none_is_noop() -> None:
-    policy.validate_env(None)  # must not raise
-
-
-def test_env_vars_required_and_optional(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("REQ", "rv")
-    monkeypatch.setenv("OPT_SET", "ov")
-    # OPT_UNSET intentionally not set.
-    p = policy.Policy(
-        credentials=policy.Credentials(required=["REQ"], optional=["OPT_SET", "OPT_UNSET"])
-    )
-    got = set(policy.env_vars(p))
-    assert got == {"REQ=rv", "OPT_SET=ov"}
-
-
-def test_env_vars_cookies_env_injected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TWITTER_COOKIES_B64", "eyJmb28iOiAiYmFyIn0=")
-    p = policy.Policy(browser=policy.BrowserSpec(cookies_env="TWITTER_COOKIES_B64"))
-    out = policy.env_vars(p)
-    assert "TWITTER_COOKIES_B64=eyJmb28iOiAiYmFyIn0=" in out
-    assert "SEED_COOKIES_ENV=TWITTER_COOKIES_B64" in out
-
-
-def test_env_vars_cookies_env_absent_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Declared but operator didn't export it = silent skip, no partial entries.
-    monkeypatch.delenv("TWITTER_COOKIES_B64", raising=False)
-    p = policy.Policy(browser=policy.BrowserSpec(cookies_env="TWITTER_COOKIES_B64"))
-    assert "SEED_COOKIES_ENV=TWITTER_COOKIES_B64" not in policy.env_vars(p)
-
-
-def test_env_vars_cookies_env_dedup_when_also_required(monkeypatch: pytest.MonkeyPatch) -> None:
-    # When cookies_env is also in credentials.required, the value is injected
-    # exactly once (via the required-creds path) — not duplicated by the
-    # browser.cookies_env path. SEED_COOKIES_ENV pointer is still added.
-    monkeypatch.setenv("TWITTER_COOKIES_B64", "eyJmb28iOiAiYmFyIn0=")
-    p = policy.Policy(
-        credentials=policy.Credentials(required=["TWITTER_COOKIES_B64"]),
-        browser=policy.BrowserSpec(cookies_env="TWITTER_COOKIES_B64"),
-    )
-    out = policy.env_vars(p)
-    # Value appears exactly once.
-    val_entries = [e for e in out if e.startswith("TWITTER_COOKIES_B64=")]
-    assert len(val_entries) == 1
-    assert val_entries[0] == "TWITTER_COOKIES_B64=eyJmb28iOiAiYmFyIn0="
-    # Pointer is always added.
-    assert "SEED_COOKIES_ENV=TWITTER_COOKIES_B64" in out
-
-
-def test_env_vars_none_is_empty() -> None:
-    assert policy.env_vars(None) == []
-
-
-# --- resolve_mounts -----------------------------------------------------------
-
-
-def test_resolve_mounts_placeholder_expansion(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("MY_VAR", "/tmp/expanded")
-    p = policy.Policy(
-        workspace=policy.Workspace(
-            mounts=[policy.Mount(host="${MY_VAR}", container="/workspace/x", mode="rw")]
-        )
-    )
-    out = policy.resolve_mounts(p)
-    assert len(out) == 1
-    assert out[0].host == "/tmp/expanded"
-
-
-def test_resolve_mounts_unset_var_fails_loud() -> None:
-    p = policy.Policy(
-        workspace=policy.Workspace(
-            mounts=[policy.Mount(host="${UNSET_MOUNT_VAR}", container="/workspace/x")]
-        )
-    )
-    with pytest.raises(policy.UnresolvedMount) as ei:
-        policy.resolve_mounts(p)
-    assert ei.value.missing_var == "UNSET_MOUNT_VAR"
-    assert ei.value.unresolved == "${UNSET_MOUNT_VAR}"
-    assert ei.value.container == "/workspace/x"
-
-
-def test_resolve_mounts_relative_container_rejected() -> None:
-    p = policy.Policy(
-        workspace=policy.Workspace(
-            mounts=[policy.Mount(host="/abs/path", container="relative/path")]
-        )
-    )
-    with pytest.raises(policy.PolicyError):
-        policy.resolve_mounts(p)
-
-
-def test_resolve_mounts_bad_mode_rejected() -> None:
-    p = policy.Policy(
-        workspace=policy.Workspace(
-            mounts=[policy.Mount(host="/abs/path", container="/workspace/x", mode="execute")]
-        )
-    )
-    with pytest.raises(policy.PolicyError):
-        policy.resolve_mounts(p)
-
-
-def test_resolve_mounts_default_mode_rw() -> None:
-    p = policy.Policy(
-        workspace=policy.Workspace(
-            mounts=[policy.Mount(host="/abs/path", container="/workspace/x")]
-        )
-    )
-    out = policy.resolve_mounts(p)
-    assert out[0].mode == "rw"
-
-
-def test_resolve_mounts_none_is_empty() -> None:
-    assert policy.resolve_mounts(None) == []
-
-
-# --- egress_rules -------------------------------------------------------------
-
-
-def test_egress_rules_literal_ip() -> None:
-    p = policy.Policy(egress=policy.Egress(allow=[policy.Rule(host="1.2.3.4", port=443)]))
-    assert policy.egress_rules(p) == "1.2.3.4 443\n"
-
-
-def test_egress_rules_ipv6_literal() -> None:
-    p = policy.Policy(egress=policy.Egress(allow=[policy.Rule(host="::1", port=443)]))
-    assert policy.egress_rules(p) == "::1 443\n"
-
-
-def test_egress_rules_container_resolved_host() -> None:
-    # host.docker.internal is a Docker-internal /etc/hosts entry — must pass
-    # through verbatim, NOT hit DNS (would fail offline), NOT get a refresh
-    # comment (the refresh script would try to re-resolve it host-side + fail).
-    p = policy.Policy(
-        egress=policy.Egress(allow=[policy.Rule(host="host.docker.internal", port=8000)])
-    )
-    assert policy.egress_rules(p) == "host.docker.internal 8000\n"
-
-
-def test_egress_rules_container_resolved_mixed() -> None:
-    # A host.docker.internal rule must not poison an adjacent rule with a stray
-    # refresh comment; literal IPs stay comment-free too.
-    p = policy.Policy(
-        egress=policy.Egress(
-            allow=[
-                policy.Rule(host="host.docker.internal", port=8000),
-                policy.Rule(host="1.2.3.4", port=443),
-            ]
-        )
-    )
-    out = policy.egress_rules(p)
-    for line in out.splitlines():
-        if "host.docker.internal" in line:
-            assert not line.startswith("#"), f"container-resolved host got a comment: {line!r}"
-    assert "host.docker.internal 8000" in out
-    assert "1.2.3.4 443" in out
-
-
-def test_egress_rules_ports_list_fanout() -> None:
-    p = policy.Policy(
-        egress=policy.Egress(allow=[policy.Rule(host="10.0.0.1", ports=[80, 443, 8080])])
-    )
-    assert policy.egress_rules(p) == "10.0.0.1 80\n10.0.0.1 443\n10.0.0.1 8080\n"
-
-
-def test_egress_rules_dns_resolution_real() -> None:
-    # Hits real DNS — intentional. Skip rather than fail if offline.
-    p = policy.Policy(egress=policy.Egress(allow=[policy.Rule(host="localhost", port=80)]))
-    try:
-        out = policy.egress_rules(p)
-    except policy.PolicyError:
-        pytest.skip("DNS resolution failed (likely offline)")
-    assert out, "expected non-empty rules"
-
-
-def test_egress_rules_dns_failure_is_error() -> None:
-    p = policy.Policy(
-        egress=policy.Egress(allow=[policy.Rule(host="this-host-does-not-exist.invalid", port=443)])
-    )
-    with pytest.raises(policy.PolicyError):
-        policy.egress_rules(p)
-
-
-def test_egress_rules_port_out_of_range() -> None:
-    p = policy.Policy(egress=policy.Egress(allow=[policy.Rule(host="1.2.3.4", port=99999)]))
-    with pytest.raises(policy.PolicyError):
-        policy.egress_rules(p)
-
-
-def test_egress_rules_no_port() -> None:
-    p = policy.Policy(egress=policy.Egress(allow=[policy.Rule(host="1.2.3.4")]))
-    with pytest.raises(policy.PolicyError):
-        policy.egress_rules(p)
-
-
-def test_egress_rules_empty_policy_returns_empty() -> None:
-    assert policy.egress_rules(policy.Policy()) == ""
-
-
-def test_egress_rules_none_is_empty() -> None:
-    assert policy.egress_rules(None) == ""
-
-
-def test_egress_rules_dns_host_gets_refresh_comment() -> None:
-    # A DNS-resolved hostname emits a "# host: <name>" comment first (for the
-    # periodic DNS refresh script). localhost resolves to 127.0.0.1/::1 offline.
-    p = policy.Policy(egress=policy.Egress(allow=[policy.Rule(host="localhost", port=80)]))
-    try:
-        out = policy.egress_rules(p)
-    except policy.PolicyError:
-        pytest.skip("DNS resolution failed (likely offline)")
-    assert out.splitlines()[0] == "# host: localhost"
-
-
-# --- resolve_tier -------------------------------------------------------------
-
-
-def test_resolve_tier_no_override() -> None:
-    assert policy.resolve_tier(policy.Policy(), "bridged") == "bridged"
-    assert policy.resolve_tier(None, "isolated") == "isolated"
-
-
-def test_resolve_tier_override_wins() -> None:
-    p = policy.Policy(sandbox=policy.SandboxSpec(tier="isolated"))
-    assert policy.resolve_tier(p, "bridged") == "isolated"
-
-
-# --- host_setup + sandbox.build -----------------------------------------------
 
 
 def test_load_host_setup_parses(tmp_path: Path) -> None:
@@ -438,7 +86,7 @@ host_setup:
 
 
 def test_load_host_setup_absent_is_empty(tmp_path: Path) -> None:
-    p = policy.load("none", _write_policy(tmp_path, "none", "sandbox:\n  tier: isolated\n"))
+    p = policy.load("none", _write_policy(tmp_path, "none", "sandbox:\n  image: img:latest\n"))
     assert p.host_setup == []
     assert policy.host_setup_hooks(p) == []
 
@@ -515,9 +163,9 @@ def test_known_policy_sections_includes_host_setup() -> None:
     # contract.py consults this; host_setup must be a known section or a
     # twitter/video-production policy.yaml carrying it would trip the
     # unknown-section rule.
-    from pux_harness.agent import contract
+    from pux_harness.validation.schemas import KNOWN_POLICY_SECTIONS
 
-    assert "host_setup" in contract.KNOWN_POLICY_SECTIONS
+    assert "host_setup" in KNOWN_POLICY_SECTIONS
 
 
 # --- protocols (agent-facing client surfaces) ---------------------------------
@@ -531,7 +179,7 @@ def test_load_protocols_parses(tmp_path: Path) -> None:
 
 def test_load_protocols_absent_is_empty(tmp_path: Path) -> None:
     # No `protocols:` -> empty list (resolve_protocols supplies the default).
-    p = policy.load("acme", _write_policy(tmp_path, "acme", "sandbox:\n  tier: isolated\n"))
+    p = policy.load("acme", _write_policy(tmp_path, "acme", "sandbox:\n  image: img:latest\n"))
     assert p.protocols == []
 
 
@@ -551,63 +199,28 @@ def test_load_protocols_entry_not_a_string_coerced(tmp_path: Path) -> None:
     assert p.protocols == ["acp", "42"]
 
 
-def test_resolve_protocols_default_when_empty() -> None:
-    # Absent/empty -> DEFAULT (both surfaces) — backward-compatible with every
-    # org that predates the `protocols:` section.
-    assert policy.resolve_protocols(policy.Policy()) == ["acp", "agui"]
-    assert policy.resolve_protocols(policy.Policy(protocols=[])) == ["acp", "agui"]
-
-
-def test_resolve_protocols_declared_passthrough() -> None:
-    # Declared non-empty -> returned AS-IS, so a coding org can narrow to ACP only
-    # (and the AG-UI mount skips it). No silent re-addition of the default.
-    assert policy.resolve_protocols(policy.Policy(protocols=["acp"])) == ["acp"]
-
-
 def test_known_protocols_is_the_default_set() -> None:
-    # KNOWN_PROTOCOLS is the contract validator's allowlist; it must equal the
-    # default surface set so the contract never rejects a defaulted policy.
+    # KNOWN_PROTOCOLS is the validator's allowlist; it equals DEFAULT_PROTOCOLS
+    # so the contract never rejects a defaulted policy.
     assert set(policy.DEFAULT_PROTOCOLS) == set(policy.KNOWN_PROTOCOLS)
-    assert "acp" in policy.KNOWN_PROTOCOLS and "agui" in policy.KNOWN_PROTOCOLS
+    assert set(policy.KNOWN_PROTOCOLS) == {"agui"}
 
 
 # --- shipped policies (integration) ------------------------------------------
 
 
 def test_shipped_policies_parse_cleanly() -> None:
-    """Every orgs/<name>/policy.yaml shipped in the repo loads + resolves
-    through the new engine — catches drift between the Go schema and the YAML
-    operators actually write. Mirrors Go's TestLoad_ShippedPolicies."""
+    """Every shipped org's policy.yaml loads through the real loader without a
+    schema error (the Go port's TestLoad_ShippedPolicies equivalent — minus the
+    deleted validate_env/resolve_mounts/egress_rules surfaces)."""
     repo_root = Path(__file__).resolve().parents[2]
-    orgs_dir = repo_root / "orgs"
-    if not orgs_dir.is_dir():
-        pytest.skip(f"no orgs dir at {orgs_dir} — running outside repo?")
     count = 0
-    for org_dir in sorted(orgs_dir.iterdir()):
-        if not org_dir.is_dir():
-            continue
+    for org_dir in sorted((repo_root / "orgs").glob("*/")) + \
+            sorted((repo_root / "orgs" / "specialists").glob("*/")):
         if not (org_dir / "policy.yaml").is_file():
             continue
         count += 1
-        p = policy.load(org_dir.name, repo_root)
-        # Go's TestLoad_ShippedPolicies does `_ = ValidateEnv(p)` — it discards
-        # the missing-creds error (the test env legitimately lacks ALPACA keys
-        # etc.) and only asserts the call doesn't blow up on the shipped schema.
-        # MissingCreds is that expected signal; a PolicyError (schema bug) still
-        # fails the test.
-        try:
-            policy.validate_env(p)
-        except policy.MissingCreds:
-            pass
-        # ResolveMounts must not error on shipped policies — none use ${VAR}
-        # placeholders (the only occurrence is commented in _demo).
-        policy.resolve_mounts(p)
-        # EgressRules resolves DNS; shipped policies may cite host-side services
-        # (host.docker.internal sentinel, or real hosts) — log, don't fail on DNS.
-        try:
-            policy.egress_rules(p)
-        except policy.PolicyError:
-            pass
+        policy.load(org_dir.name, repo_root)  # raises PolicyError on drift
     if count == 0:
         pytest.skip("no shipped policy.yaml files found")
 

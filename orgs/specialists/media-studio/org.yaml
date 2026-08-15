@@ -10,3 +10,6 @@ agents: [media-studio-director, media-studio-pipeline-engineer, media-studio-art
 capabilities:
   - {kind: mcp, ref: ray_inference}
   - {kind: mcp, ref: web_research}
+  # arms the ``browser`` agent inherited from general's roster (browser family migrated off the specialist
+  # registry onto this in-container MCP server); security-scoped, so redeclared rather than inherited.
+  - {kind: mcp, ref: sandbox_browser}

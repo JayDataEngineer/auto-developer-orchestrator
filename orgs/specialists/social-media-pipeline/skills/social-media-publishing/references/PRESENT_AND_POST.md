@@ -36,7 +36,7 @@ There is no in-harness picker UI. `ask_user` is transport-aware:
   `useInterrupt` card surfaces the question + options; the human's reply
   (a selected option or typed text) resumes the run and becomes the tool's
   return value.
-- **Editor (ACP — Zed/Toad):** the editor's permission popover has no free-text
+- **Editor (Zed/Toad):** the editor's permission popover has no free-text
   field, so the tool poses the question as chat text and ENDS the turn. The
   human's next message is the reply. The supervisor prompt makes you stop after
   asking — do not call further tools until they answer.

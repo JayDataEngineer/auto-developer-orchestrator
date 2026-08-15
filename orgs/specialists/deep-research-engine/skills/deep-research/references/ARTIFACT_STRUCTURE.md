@@ -140,7 +140,7 @@ entities/
 ## Provenance (REQUIRED on every artifact)
 
 Every file you write under `artifacts/` starts with this HTML-comment block
-(invisible in rendered markdown, machine-parseable by `pux bundle`):
+(invisible in rendered markdown, machine-parseable):
 
 ```markdown
 <!--

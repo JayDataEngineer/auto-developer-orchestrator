@@ -16,3 +16,5 @@ agents: [twitter-drafter]
 capabilities:
   - {kind: mcp, ref: web_research}
   - {kind: mcp, ref: nitter}
+  # Supervisor browser write-surface (migrated off the deleted browser group).
+  - {kind: mcp, ref: sandbox_browser}
