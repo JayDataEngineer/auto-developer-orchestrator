@@ -149,10 +149,18 @@ def test_model_resolved_via_get_model(fake_tree):
     assert sub["model"].model_name == "glm-5.2"
 
 
+
+def _worker_wire_id() -> str:
+    """The shipped worker-role WIRE id (spec-driven — no id pinned, so a tier
+    edit like the 08-15 dead-key repoint doesn't rot these tests)."""
+    from pux_harness.agent import model as _m
+    return _m.wire_id_for(
+        _m._spec()["tiers"][_m._spec()["default_tier"]]["worker_model"])
+
 def test_model_omitted_uses_worker_role(fake_tree):
     """No ``model`` field -> the subagent runs on the WORKER role (Phase
     17.B.0), resolved through models.yaml + org profile + env. The shipped
-    worker default is mimo-v2.5; an org can override it via the top-level
+    worker default comes from models.yaml; an org can override it via the top-level
     ``models:`` map without touching the agent file."""
     root = fake_tree
     _agent_md("bare", root, tools=["python"])
@@ -160,7 +168,7 @@ def test_model_omitted_uses_worker_role(fake_tree):
 
     sub = orgs.load_subagents("o", _specialists(), **_ctx())[0]
     assert isinstance(sub["model"], ChatOpenAI)
-    assert sub["model"].model_name == "xiaomi/mimo-v2.5"  # wire_id
+    assert sub["model"].model_name == _worker_wire_id()
 
 
 def test_model_omitted_worker_role_org_override(fake_tree):
@@ -234,7 +242,7 @@ def test_md_agent_loads(fake_tree):
         "ctx_stats", "ctx_doctor", "ctx_purge",
     }
     assert sub["skills"] == ["/sandbox/workspace/orgs/_shared/skills"]
-    assert sub["model"].model_name == "xiaomi/mimo-v2.5"  # wire_id
+    assert sub["model"].model_name == _worker_wire_id()
     # Each subagent carries the unified ContextMiddleware (capture +
     # offload in one pass) so the layer intercepts its own tool calls — the old
     # main-agent-only claim is retracted (file docstring above).
