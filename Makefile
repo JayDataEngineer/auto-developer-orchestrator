@@ -10,7 +10,7 @@
 # Remote infra (NOT managed here — bring your own GPU box):
 #   Ray cluster on Tailscale — LLM, TTS, 3D, music, ComfyUI.
 
-.PHONY: help infra infra-core infra-nitter infra-status infra-down infra-destroy infra-logs hooks clean sandbox-config sandbox sandbox-status sandbox-stop aegra aegra-patch aegra-status aegra-stop aegra-log aegra-sandbox-image aegra-sandbox-status aegra-sandbox-kill
+.PHONY: help infra infra-core infra-nitter infra-status infra-down infra-destroy infra-logs hooks clean sandbox-config sandbox sandbox-status sandbox-stop scoping-check aegra aegra-patch aegra-status aegra-stop aegra-log aegra-sandbox-image aegra-sandbox-status aegra-sandbox-kill
 
 INFRA_COMPOSE := docker compose -f docker-compose.infra.yml
 
@@ -128,6 +128,9 @@ profiles-check: ## Dry-run every profile (roster + skills + MCP scoping)
 		$(DCODE_PY) profiles/run.py $$p --dry-run 2>/dev/null | \
 			grep -E "^(roster|skills|mcp servers|mcp tools|model)" ; \
 	done
+
+scoping-check: ## Prove the MCP scoping bridge holds (deny-list tripwire — see docs/isolation-patterns.md)
+	@$(DCODE_PY) profiles/scoping_check.py
 
 # Extra flags reach the launcher directly, e.g.:
 #   $(DCODE_PY) profiles/run.py coding -M provider:model -m "fix the bug"

@@ -1,0 +1,167 @@
+# The no-MCP subagent tier.
+#
+# Registered under the model key below; scoped agents opt in via
+# frontmatter `model: openai:glm-5-turbo` (a real model on the same
+# z.ai gateway, one no other session uses, so the key can never hit
+# the main agent). excluded_tools is a DENY list of every MCP tool
+# name this workspace can serve, so scoped agents keep the built-ins
+# (execute/read/write/task) and lose every MCP tool.
+#
+# This list FAILS OPEN: a server that adds a tool after capture leaks
+# into scoped agents. `make scoping-check` is the tripwire.
+#
+# Known open hole: `equibles` (down at capture time, external, no
+# in-repo source to enumerate) — the check flags it if it ever serves
+# tools into a scoped session. NOT excluded: built-in dcode tools.
+key: openai:glm-5-turbo
+excluded_tools:
+  # godot-mcp-runtime (36) — live capture 2026-08-16 (dcode resolve, prefixed)
+  - godot-mcp-runtime_add_autoload
+  - godot-mcp-runtime_add_node
+  - godot-mcp-runtime_attach_project
+  - godot-mcp-runtime_attach_script
+  - godot-mcp-runtime_batch_scene_operations
+  - godot-mcp-runtime_connect_signal
+  - godot-mcp-runtime_create_scene
+  - godot-mcp-runtime_delete_nodes
+  - godot-mcp-runtime_detach_project
+  - godot-mcp-runtime_disconnect_signal
+  - godot-mcp-runtime_duplicate_node
+  - godot-mcp-runtime_export_mesh_library
+  - godot-mcp-runtime_get_debug_output
+  - godot-mcp-runtime_get_node_properties
+  - godot-mcp-runtime_get_node_signals
+  - godot-mcp-runtime_get_project_files
+  - godot-mcp-runtime_get_project_info
+  - godot-mcp-runtime_get_project_settings
+  - godot-mcp-runtime_get_scene_dependencies
+  - godot-mcp-runtime_get_scene_tree
+  - godot-mcp-runtime_get_ui_elements
+  - godot-mcp-runtime_launch_editor
+  - godot-mcp-runtime_list_autoloads
+  - godot-mcp-runtime_list_projects
+  - godot-mcp-runtime_load_sprite
+  - godot-mcp-runtime_remove_autoload
+  - godot-mcp-runtime_run_project
+  - godot-mcp-runtime_run_script
+  - godot-mcp-runtime_save_scene
+  - godot-mcp-runtime_search_project
+  - godot-mcp-runtime_set_node_properties
+  - godot-mcp-runtime_simulate_input
+  - godot-mcp-runtime_stop_project
+  - godot-mcp-runtime_take_screenshot
+  - godot-mcp-runtime_update_autoload
+  - godot-mcp-runtime_validate
+
+  # opensandbox (19) — live capture 2026-08-16 (dcode resolve, prefixed)
+  - opensandbox_command_interrupt
+  - opensandbox_command_run
+  - opensandbox_file_create_directories
+  - opensandbox_file_delete
+  - opensandbox_file_delete_directories
+  - opensandbox_file_move
+  - opensandbox_file_read
+  - opensandbox_file_replace_contents
+  - opensandbox_file_search
+  - opensandbox_file_write
+  - opensandbox_sandbox_connect
+  - opensandbox_sandbox_create
+  - opensandbox_sandbox_get_endpoint
+  - opensandbox_sandbox_get_info
+  - opensandbox_sandbox_get_metrics
+  - opensandbox_sandbox_healthcheck
+  - opensandbox_sandbox_kill
+  - opensandbox_sandbox_list
+  - opensandbox_sandbox_renew
+
+  # surreal (14) — live capture 2026-08-16 (dcode resolve, prefixed)
+  - surreal_create
+  - surreal_delete
+  - surreal_gql
+  - surreal_graphql
+  - surreal_info
+  - surreal_insert
+  - surreal_list
+  - surreal_query
+  - surreal_relate
+  - surreal_run
+  - surreal_select
+  - surreal_update
+  - surreal_upsert
+  - surreal_use
+
+  # web_research (3) — live capture 2026-08-16 (dcode resolve, prefixed)
+  - web_research_fetch
+  - web_research_research
+  - web_research_search
+
+  # github (44) — docker stdio handshake ghcr.io/github/github-mcp-server (default toolsets)
+  - github_add_comment_to_pending_review
+  - github_add_issue_comment
+  - github_add_reply_to_pull_request_comment
+  - github_assign_copilot_to_issue
+  - github_create_branch
+  - github_create_or_update_file
+  - github_create_pull_request
+  - github_create_repository
+  - github_delete_file
+  - github_fork_repository
+  - github_get_commit
+  - github_get_file_contents
+  - github_get_label
+  - github_get_latest_release
+  - github_get_me
+  - github_get_release_by_tag
+  - github_get_tag
+  - github_get_team_members
+  - github_get_teams
+  - github_issue_read
+  - github_issue_write
+  - github_list_branches
+  - github_list_commits
+  - github_list_issue_fields
+  - github_list_issue_types
+  - github_list_issues
+  - github_list_pull_requests
+  - github_list_releases
+  - github_list_repository_collaborators
+  - github_list_tags
+  - github_merge_pull_request
+  - github_pull_request_read
+  - github_pull_request_review_write
+  - github_push_files
+  - github_request_copilot_review
+  - github_search_code
+  - github_search_commits
+  - github_search_issues
+  - github_search_pull_requests
+  - github_search_repositories
+  - github_search_users
+  - github_sub_issue_write
+  - github_update_pull_request
+  - github_update_pull_request_branch
+
+  # ray_inference (11) — allowedTools trim declared in profiles/{game,media}/.mcp.json
+  - ray_inference_describe_model
+  - ray_inference_describe_pipeline
+  - ray_inference_generate
+  - ray_inference_get_pipeline_status
+  - ray_inference_list_models
+  - ray_inference_list_pipeline_runs
+  - ray_inference_list_pipelines
+  - ray_inference_resume_pipeline
+  - ray_inference_start_pipeline
+  - ray_inference_stop_pipeline
+  - ray_inference_validate_pipeline
+
+  # nitter (10) — tool defs in infra/nitter/src/server.py
+  - nitter_health
+  - nitter_search
+  - nitter_tweet_details
+  - nitter_tweet_replies
+  - nitter_user_followers
+  - nitter_user_following
+  - nitter_user_media
+  - nitter_user_profile
+  - nitter_user_replies
+  - nitter_user_tweets

@@ -71,8 +71,58 @@ toolstack out of the session and into a sandbox.
 | L0 | workspace `.mcp.json` — every server in every session | available; wrong for lanes |
 | L1 | profile `.mcp.json` — only the lane's servers load | **in place** (all six profiles) |
 | L2 | per-server trim: `allowedTools` in `.mcp.json` | **in place** (ray: 11 tools; web_research: 3) |
+| L2.5 | model-keyed harness exclusion — the bridge below | **in place** (3 agents scoped, `make scoping-check`) |
 | L3 | per-subagent `tools:` / `skills:` frontmatter | **not native** — upstream PR prepared (`feat/subagent-tools-skills-frontmatter`, langchain-ai/deepagents `libs/code/`) |
 | L4 | spatial: server never enters any session (S3 + async subagent) | **in place** (browser) |
+
+## The L2.5 bridge — model-keyed harness exclusion (shipped)
+
+dcode re-runs harness-profile resolution against each subagent's **own**
+model, and a profile's `excluded_tools` installs `_ToolExclusionMiddleware`
+on exactly that subagent. That is deepagents' sanctioned seam, and it is
+addressable *today* through frontmatter — no patches:
+
+- An agent opts into the no-MCP tier with `model: openai:glm-5-turbo` —
+  a real model on the same z.ai gateway (`.env`: `OPENAI_BASE_URL` +
+  `OPENAI_API_KEY`, mirroring the pux-openai provider) that no session
+  uses as its main model, so the key can never hit a main agent.
+- `plugins/tool-scoping` registers the profile under that key via the
+  `deepagents.harness_profiles` entry-point group, from
+  `HarnessProfileConfig` YAML. The deny-list holds **137 MCP tool names**
+  (godot 36, opensandbox 19, surreal 14, web_research 3, github 44, ray
+  11, nitter 10 — each captured live, from config trims, from in-repo
+  source, or via a docker stdio handshake).
+- Scoped agents keep the built-ins (`execute`/`read`/`write`/`task`,
+  async-task middleware) and lose **every** MCP tool. Scoped today:
+  `game-studio-docs-writer`, `task-planner` (game + coding),
+  `web-agent` (coding — its browser work rides the browser-specialist
+  async subagent, which is middleware, not MCP).
+
+**Limits, stated plainly:**
+- Deny-lists fail **open**. A server that adds a tool after capture leaks
+  into scoped agents — so `make scoping-check`
+  (`profiles/scoping_check.py`) is the tripwire: it rebuilds every
+  profile through dcode's own assembly, asserts every scoped agent's
+  *effective* MCP set is empty, that no unscoped agent picked up an
+  exclusion middleware (key collision), that the deny-list covers every
+  live tool name, and WARNs on declared-but-empty servers (a down server
+  must never masquerade as "scoped clean").
+- The key is the **model**, not the agent: scoping is per-agent only
+  because each scoped agent carries a distinct model string. Two tiers
+  with different exclusion sets need two model strings.
+- Agent files are shared across profiles (symlink union), so a scoped
+  agent is scoped **everywhere it is rostered**. That is why
+  `web-search` stays unscoped: research needs its web_research tools,
+  and the frontmatter cannot distinguish profiles.
+- `general-purpose` (auto-added by core) inherits the main model and is
+  not addressable by the bridge — same known hole as L3's non-goals.
+- `equibles` is the one uncovered server (down at capture, external, no
+  in-repo source) — the check flags it the day it serves tools.
+
+**Retirement:** when the upstream L3 PR lands, replace each `model:` line
+with an explicit `tools:` allowlist, delete the plugin, the `.env`
+gateway mirror, and this section; `make scoping-check` then changes to
+assert allowlists instead of exclusions.
 
 ## Decision rules
 
@@ -114,7 +164,7 @@ Uniform in every profile — `general-purpose` included, and including the
 agents whose prompts name no server at all (coding 0/6, social 0/3,
 media 3/5 name one).
 
-## Target state per profile (authored, blocked on L3 landing)
+## Target state per profile (authored; the zero-MCP rows are SHIPPED via the L2.5 bridge, the rest blocked on L3)
 
 The mapping below is the intent we will author as `tools:` frontmatter
 the day the upstream PR ships. It follows each specialist's role, not
@@ -129,7 +179,7 @@ filesystem scaffolding — a deliberate downgrade from "inherits 50 tools".
 - renderer → ray + godot (take_screenshot, run_project, get_debug_output)
 - art-specialist → ray + surreal
 - creative, design-researcher, narrative-designer → surreal
-- docs-writer, task-planner → `tools: []`
+- docs-writer, task-planner → no MCP tools (**shipped** — L2.5 bridge)
 
 **media** (from 14–25/subagent): artist → ray + surreal;
 pipeline-engineer → ray + surreal; director → surreal; video-renderer →
@@ -142,8 +192,13 @@ web_research; researcher, explorer → web_research + surreal.
 invest-trader → equibles + surreal; researcher → web_research + surreal.
 
 **coding**: code-worker → github + opensandbox; coder-explorer,
-explorer → github; web-agent, web-search, task-planner → `tools: []`
-(S2's factory stays with the worker that executes untrusted code).
+explorer → github; web-agent, task-planner → no MCP tools (**shipped** —
+L2.5 bridge; S2's factory stays with the worker that executes untrusted
+code); web-search keeps its tools — it is rostered in research too,
+where web_research is its whole function, and agent files are shared
+across profiles so frontmatter cannot scope it per-profile (a
+profile-local agent copy would be the L3-era fix if coding ever needs
+it scoped).
 
 **social**: twitter-drafter → nitter + surreal; smp-writer,
 telegram-drafter → surreal.
@@ -160,3 +215,11 @@ the PR's non-goals.
 - S2: `make sandbox` (server on :8080), `make sandbox-status`.
 - S3: `make aegra-sandbox-image` once, then `make aegra` / `aegra-status`
   / `aegra-sandbox-kill`.
+- L2.5: `uv pip install --python "$(uv tool dir)/deepagents-code/bin/python"
+  ./plugins/tool-scoping` (same re-run-after-upgrade rule as S1), then
+  `make scoping-check` — run it after any `.mcp.json`, `allowedTools`, or
+  server upgrade: the deny-list is capture-based and fails open. After a
+  server change, regenerate with
+  `plugins/tool-scoping/regenerate.py` and **reinstall** (the venv holds a
+  copy, not a link — editing the repo YAML alone changes nothing at
+  runtime).

@@ -143,15 +143,16 @@ schemas or attack surface justify paying the delegation round-trip.
 [`docs/isolation-patterns.md`](docs/isolation-patterns.md)** — the pattern
 catalog: three sandbox tiers (S1 session / S2 on-demand via MCP / S3
 workload container), the MCP segmentation ladder (L0 workspace → L1 profile
-→ L2 server trim → L3 per-subagent `tools:` frontmatter → L4 spatial), the
-measured audit behind them (MCP inheritance is uniform: game = 50 schemas
-in all 11 subagents, docs-writer included), and the per-profile target
-state we author the day the upstream L3 PR ships. That PR — per-subagent
-`tools:`/`skills:` frontmatter for dcode — is prepared on
-`feat/subagent-tools-skills-frontmatter` in the deepagents checkout
-(E2E-proven, 12.6k tests green, not pushed); until it lands, segmentation
-below the profile level is inexpressible in dcode, and the catalog says so
-instead of pretending the persona prompts scope anything.
+→ L2 server trim → L2.5 model-keyed subagent exclusion → L3 per-subagent
+`tools:` frontmatter → L4 spatial), the measured audit behind them (MCP
+inheritance is uniform: game = 50 schemas in all 11 subagents,
+docs-writer included), and the per-profile target state. The zero-MCP
+rows of that target state are **shipped** via the L2.5 bridge
+(`plugins/tool-scoping` + `model: openai:glm-5-turbo` frontmatter +
+`make scoping-check` as the fail-open tripwire); the rest wait on the
+upstream L3 PR — per-subagent `tools:`/`skills:` frontmatter for dcode,
+prepared on `feat/subagent-tools-skills-frontmatter` in the deepagents
+checkout (E2E-proven, 12.6k tests green, not pushed).
 
 
 ## Host-side infrastructure
@@ -268,7 +269,16 @@ dcode plugin list                         # shows enabled state
   providers (config.toml) resolve for the **main** agent only — subagent
   `model:` frontmatter goes through langchain's provider inference, so it
   must name a langchain-known provider or be omitted (inherit the runtime
-  model). The four media/game-studio specialists omit it.
+  model). Three agents use that seam deliberately:
+  `model: openai:glm-5-turbo` opts into the **no-MCP tier**
+  (`game-studio-docs-writer`, `task-planner`, `web-agent`) — a harness
+  profile registered by `plugins/tool-scoping` strips every MCP tool from
+  exactly those subagents (see docs/isolation-patterns.md, L2.5). The
+  `openai:` prefix resolves against the same z.ai gateway as the main
+  model via `OPENAI_BASE_URL`/`OPENAI_API_KEY` in `.env`; after a dcode
+  upgrade, reinstall both plugins:
+  `uv pip install --python "$(uv tool dir)/deepagents-code/bin/python" ./plugins/opensandbox ./plugins/tool-scoping`
+  and run `make scoping-check`.
 
 ## History
 

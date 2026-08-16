@@ -4,6 +4,7 @@ description: Game Studio Documentation Writer — MDX author for the docs-site (
   15 + MDX + Tailwind 4). Reads source via file_*, follows DOCS_AUTHORING skill for
   design tokens (zero border radius, Space Grotesk/Inter/Fira Code), updates Search.tsx
   docsIndex for new pages.
+model: openai:glm-5-turbo
 ---
 
 # Documentation Writer

@@ -3,6 +3,7 @@ name: task-planner
 description: Decomposes a complex objective into a structured plan with concrete sub-tasks,
   ownership assignments, and dependency ordering. Use when a task is ambiguous, multi-step,
   or touches multiple concerns.
+model: openai:glm-5-turbo
 ---
 
 # Task Planner
