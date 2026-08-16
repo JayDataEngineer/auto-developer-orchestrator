@@ -20,6 +20,8 @@ resolution). Everything dcode reads is **authored in place**:
   provider).
 - **`.deepagents/AGENTS.md`** — workspace instructions, appended to the main
   agent's system prompt every session.
+- **`profiles/<name>/`** — scoped dcode project roots (roster subset + persona
+  + lane-specific `.mcp.json`) launched by `profiles/run.py` — see Profiles.
 - **`.mcp.json`** — the project's MCP servers (dcode gates them behind
   workspace trust on first run).
 - **root `AGENTS.md`** — this repo's developer guide (combined by dcode).
@@ -30,6 +32,38 @@ Run it:
 dcode                       # the TUI, the full 30-agent roster, all skills
 dcode -n "task..."          # non-interactive
 ```
+
+## Profiles (scoped sessions, 100% native)
+
+Every session seeing the whole 30-agent roster and 8 MCP servers is the
+default — **profiles scope it**. A profile is a dcode *project root* under
+`profiles/<name>`: a subagent roster (`.deepagents/agents/`, symlinked to the
+authored union — one source of truth), a persona `AGENTS.md`, skills, and its
+own `.mcp.json`, so only that lane's servers ever load.
+
+```bash
+make coding                 # 7 agents  · github + opensandbox + sandbox_browser
+make research               # 6 agents  · web_research, surreal, equibles, nitter, browser
+make invest                 # 3 agents  · equibles, web_research, surreal
+make game                   # 11 agents · godot-mcp-runtime, ray_inference, surreal
+make media                  # 5 agents  · ray_inference, surreal
+make social                 # 4 agents  · nitter, sandbox_browser, surreal
+make profiles-check         # dry-run every profile (roster + skills + MCP counts)
+```
+
+`profiles/run.py` is the whole launcher — dcode's own seams and nothing else:
+`ProjectContext(user_cwd=repo, project_root=profiles/<name>)` (the explicit
+constructor, since git-root discovery would scope to the repo),
+`resolve_and_load_mcp_tools`, `create_model` (resolves the `pux-openai`
+class_path provider), `create_cli_agent`, `run_textual_app`. Zero monkey
+patches; the TUI, graph, subagents and tools are dcode's, 1:1.
+
+First launch of a profile asks once whether to trust its MCP servers
+(approved rows persist in `~/.deepagents/config.toml`, scoped to the profile
+root + server fingerprint — a committed `.mcp.json` can never self-approve;
+change a server definition and it re-prompts). Extra flags reach the launcher
+directly: `profiles/run.py coding -M provider:model -m "task..."`.
+
 
 ## Host-side infrastructure
 
@@ -94,6 +128,7 @@ osb sandbox create --image python:3.12   # the upstream CLI, same server
 | Path | What |
 |------|------|
 | `.deepagents/` | the authored dcode surface (agents, skills, workspace instructions) |
+| `profiles/` | scoped dcode project roots + the native-API launcher (`run.py`) |
 | `.mcp.json` | MCP servers (env placeholders like `${MCP_WEB_RESEARCH_URL}` resolve from the environment) |
 | `plugins/` | the in-repo dcode marketplace (see below) — install with `dcode plugin install <name>@orchestrator` |
 | `infra/` | MCP-server infrastructure (media-mcp, nitter) + compose files |

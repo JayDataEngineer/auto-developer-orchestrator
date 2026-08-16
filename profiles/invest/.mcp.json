@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "equibles": {
+      "type": "http",
+      "url": "${MCP_EQUIBLES_URL}"
+    },
+    "web_research": {
+      "type": "http",
+      "url": "${MCP_WEB_RESEARCH_URL}",
+      "allowedTools": [
+        "search",
+        "fetch",
+        "research"
+      ]
+    },
+    "surreal": {
+      "type": "http",
+      "url": "${MCP_SURREAL_URL}",
+      "headers": {
+        "surreal-ns": "research",
+        "surreal-db": "main",
+        "Authorization": "Basic ${MCP_SURREAL_AUTH}"
+      }
+    }
+  }
+}

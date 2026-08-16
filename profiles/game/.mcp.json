@@ -1,0 +1,40 @@
+{
+  "mcpServers": {
+    "godot-mcp-runtime": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "godot-mcp-runtime"
+      ],
+      "env": {
+        "GODOT_PATH": "${GODOT_PATH}"
+      }
+    },
+    "ray_inference": {
+      "type": "http",
+      "url": "${MCP_RAY_URL}",
+      "allowedTools": [
+        "list_models",
+        "describe_model",
+        "generate",
+        "list_pipelines",
+        "describe_pipeline",
+        "validate_pipeline",
+        "start_pipeline",
+        "get_pipeline_status",
+        "stop_pipeline",
+        "resume_pipeline",
+        "list_pipeline_runs"
+      ]
+    },
+    "surreal": {
+      "type": "http",
+      "url": "${MCP_SURREAL_URL}",
+      "headers": {
+        "surreal-ns": "research",
+        "surreal-db": "main",
+        "Authorization": "Basic ${MCP_SURREAL_AUTH}"
+      }
+    }
+  }
+}

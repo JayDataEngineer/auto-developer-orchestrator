@@ -1,0 +1,35 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "github-mcp-server",
+      "args": [
+        "stdio"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "opensandbox": {
+      "command": "opensandbox-mcp",
+      "args": [
+        "--domain",
+        "localhost:8080",
+        "--protocol",
+        "http"
+      ]
+    },
+    "sandbox_browser": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--no-project",
+        "--with",
+        "fastmcp",
+        "--with",
+        "seleniumbase",
+        "python",
+        "/home/user/Documents/programs/vendor/dev/auto-developer-orchestrator/plugins/browser/mc_browser.py"
+      ]
+    }
+  }
+}
