@@ -63,26 +63,37 @@ async def _live_servers() -> dict[str, list[str]]:
 
 
 def _github_names() -> list[str]:
-    """tools/list over stdio against the official docker image."""
-    handshake = (
-        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":'
-        '"2025-03-26","capabilities":{},"clientInfo":{"name":"enum","version":"0"}}}\n'
-        '{"jsonrpc":"2.0","method":"notifications/initialized"}\n'
-        '{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n'
-    )
-    proc = subprocess.run(
+    """tools/list over stdio against the official docker image (Popen + live
+    reads — closing stdin early makes the Go server exit before answering)."""
+    proc = subprocess.Popen(
         ["docker", "run", "-i", "--rm",
          "-e", "GITHUB_PERSONAL_ACCESS_TOKEN=enumerate-only",
          "ghcr.io/github/github-mcp-server:latest", "stdio"],
-        input=handshake, capture_output=True, text=True, timeout=120)
-    for line in proc.stdout.splitlines():
-        try:
-            msg = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if msg.get("id") == 2:
-            return sorted(f"github_{t['name']}" for t in msg["result"]["tools"])
-    raise RuntimeError(f"github tools/list handshake failed: {proc.stderr[-300:]}")
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, text=True)
+    try:
+        for payload in (
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-03-26", "capabilities": {},
+                "clientInfo": {"name": "enum", "version": "0"}}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ):
+            proc.stdin.write(json.dumps(payload) + "\n")
+            proc.stdin.flush()
+        while True:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if msg.get("id") == 2:
+                return sorted(f"github_{t['name']}" for t in msg["result"]["tools"])
+    finally:
+        proc.kill()
+    raise RuntimeError("github tools/list handshake failed: no id=2 response")
 
 
 def _config_trimmed(prefix: str, server: str) -> list[str]:
@@ -102,6 +113,24 @@ def _nitter_names() -> list[str]:
     return sorted(f"nitter_{n}" for n in re.findall(r"@mcp\.tool\s*\nasync def (\w+)\(", src))
 
 
+# The Equibles checkout this deployment builds from (meta-mcp catalog:
+# ~/Documents/programs/vendor/mcp/equibles-mcp, served on 127.0.0.1:43181
+# by its docker-compose.override.yml).
+EQUIBLES_SRC = Path.home() / "Documents" / "programs" / "vendor" / "mcp" / "equibles-mcp"
+
+
+def _equibles_names() -> list[str]:
+    """Source-scan the C# tool attributes — superset of what any build serves."""
+    tools_dir = EQUIBLES_SRC / "src"
+    if not tools_dir.is_dir():
+        return []
+    names = set()
+    for cs in tools_dir.rglob("*.cs"):
+        names.update(re.findall(r'Name = "([A-Za-z0-9_]+)"',
+                                re.sub(r"\[McpServerToolType\]", "", cs.read_text())))
+    return sorted(f"equibles_{n}" for n in names)
+
+
 async def main() -> int:
     _load_env()
     live = await _live_servers()
@@ -110,17 +139,18 @@ async def main() -> int:
     # Live captures first (dcode-prefixed names as served).
     for name in sorted(live):
         sections.append((name, live[name], "live dcode resolve"))
-    # github: docker handshake (local binary absent).
-    sections.append(("github", _github_names(),
-                     "docker stdio handshake ghcr.io/github/github-mcp-server"))
-    # nitter: in-repo source (container flaky).
+    # Fallbacks for servers that did not serve tools this run:
+    if "github" not in live:
+        sections.append(("github", _github_names(),
+                         "docker stdio handshake ghcr.io/github/github-mcp-server"))
     if "nitter" not in live:
         sections.append(("nitter", _nitter_names(), "tool defs in infra/nitter/src/server.py"))
-    # ray: down at capture; the config trim is the exhaustive surface.
     if "ray_inference" not in live:
         sections.append(("ray_inference", _config_trimmed("ray_inference", "ray_inference"),
                          "allowedTools trim declared in .mcp.json"))
-    # equibles: no enumeration source — surfaced by make scoping-check when up.
+    if "equibles" not in live:
+        sections.append(("equibles", _equibles_names(),
+                         "C# tool attributes in vendor/mcp/equibles-mcp"))
 
     lines = [
         "# The no-MCP subagent tier.",
@@ -138,9 +168,9 @@ async def main() -> int:
         "#",
         f"# Regenerated: {__import__('datetime').date.today():%Y-%m-%d}.",
         "#",
-        "# Known open hole: `equibles` (down at capture time, external, no",
-        "# in-repo source to enumerate) — the check flags it if it ever serves",
-        "# tools into a scoped session. NOT excluded: built-in dcode tools.",
+        "# NOT excluded: built-in dcode tools. Every declared server has an",
+        "# enumeration source: live resolve, .mcp.json trims, in-repo source,",
+        "# the Equibles C# checkout, or the official github docker image.",
         f"key: {PROFILE_KEY}",
         "excluded_tools:",
     ]
@@ -156,8 +186,7 @@ async def main() -> int:
     print(f"regenerated {path.relative_to(REPO)}: {total} tools across {len(sections)} servers")
     for server in ("github", "equibles", "ray_inference", "nitter"):
         if server not in live:
-            print(f"  NOTE: '{server}' was NOT live — captured from its fallback source" if server != "equibles"
-                  else "  NOTE: 'equibles' has NO enumeration source — uncovered until it serves tools")
+            print(f"  NOTE: '{server}' was NOT live — captured from its fallback source")
     return 0
 
 

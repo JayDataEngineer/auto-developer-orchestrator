@@ -88,10 +88,11 @@ addressable *today* through frontmatter — no patches:
   uses as its main model, so the key can never hit a main agent.
 - `plugins/tool-scoping` registers the profile under that key via the
   `deepagents.harness_profiles` entry-point group, from
-  `HarnessProfileConfig` YAML. The deny-list holds **137 MCP tool names**
-  (godot 36, opensandbox 19, surreal 14, web_research 3, github 44, ray
-  11, nitter 10 — each captured live, from config trims, from in-repo
-  source, or via a docker stdio handshake).
+  `HarnessProfileConfig` YAML. The deny-list holds **199 MCP tool names**
+  (equibles 62, github 44, godot 36, opensandbox 19, surreal 14,
+  web_research 3, ray 11, nitter 10 — captured live, from `.mcp.json`
+  trims, from in-repo source, from the Equibles C# checkout, or via a
+  docker stdio handshake).
 - Scoped agents keep the built-ins (`execute`/`read`/`write`/`task`,
   async-task middleware) and lose **every** MCP tool. Scoped today:
   `game-studio-docs-writer`, `task-planner` (game + coding),
@@ -105,8 +106,10 @@ addressable *today* through frontmatter — no patches:
   profile through dcode's own assembly, asserts every scoped agent's
   *effective* MCP set is empty, that no unscoped agent picked up an
   exclusion middleware (key collision), that the deny-list covers every
-  live tool name, and WARNs on declared-but-empty servers (a down server
-  must never masquerade as "scoped clean").
+  live tool name, that every `${VAR}` placeholder in every `.mcp.json`
+  resolves (an unset URL is a silently-dead server), and WARNs on
+  declared-but-empty servers (a down server must never masquerade as
+  "scoped clean").
 - The key is the **model**, not the agent: scoping is per-agent only
   because each scoped agent carries a distinct model string. Two tiers
   with different exclusion sets need two model strings.
@@ -116,8 +119,19 @@ addressable *today* through frontmatter — no patches:
   and the frontmatter cannot distinguish profiles.
 - `general-purpose` (auto-added by core) inherits the main model and is
   not addressable by the bridge — same known hole as L3's non-goals.
-- `equibles` is the one uncovered server (down at capture, external, no
-  in-repo source) — the check flags it the day it serves tools.
+- Every server has an enumeration source — no open holes: live capture
+  (godot, opensandbox, surreal, web_research, github, nitter, equibles),
+  the `.mcp.json` trims (ray), the in-repo nitter source, the Equibles
+  C# checkout (`~/Documents/programs/vendor/mcp/equibles-mcp`, served
+  on :43181 by its compose override — `make infra-equibles`), or the
+  official github docker image. `equibles` was captured live after the
+  stack was stood up (62 tools served, 64 declared); `ray_inference` is
+  the only server not running locally (Tailscale GPU cluster,
+  bring-your-own) and its 11 declared tools are in the list.
+- A second silent-death mode the check now fails on: an unset `${VAR}`
+  placeholder in any `.mcp.json` (that is exactly how nitter sat at
+  0 tools for days **behind a healthy container** — the URL variable was
+  never set). The placeholder sweep is a hard failure, not a warn.
 
 **Retirement:** when the upstream L3 PR lands, replace each `model:` line
 with an explicit `tools:` allowlist, delete the plugin, the `.env`

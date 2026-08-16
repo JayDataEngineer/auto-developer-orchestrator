@@ -17,7 +17,10 @@ scoped agents. This check rebuilds every profile through dcode's own assembly
      toolset (spec tools − excluded) is empty — leaked names are printed;
   4. no unscoped agent carries any exclusion middleware (that would mean a
      profile key collided with a real session model);
-  5. declared-but-empty servers are WARNed (down servers masquerade as
+  5. every ${VAR} placeholder in every .mcp.json resolves in the environment
+     (an unset URL silently serves zero tools — that is how nitter sat at
+     0 tools for days behind a healthy container: hard FAIL, not a warn);
+  6. declared-but-empty servers are WARNed (down servers masquerade as
      "scoped clean"; the check names them so it can't be mistaken for passing).
 
 Run: make scoping-check   (or: $(dcode python) profiles/scoping_check.py)
@@ -53,6 +56,21 @@ def _load_env() -> None:
     os.environ.setdefault("OPENAI_API_KEY", "scoping-check-not-invoked")
 
 
+def _check_placeholders(failures: list[str]) -> None:
+    """Every ${VAR} in every .mcp.json must resolve — unset = silent 0 tools."""
+    import re
+
+    env_keys = {k for k, v in os.environ.items() if v}
+    mcp_files = [REPO / ".mcp.json", *sorted((REPO / "profiles").glob("*/.mcp.json"))]
+    for f in mcp_files:
+        for var in sorted(set(re.findall(r"\$\{(\w+)\}", f.read_text()))):
+            if var not in env_keys:
+                failures.append(
+                    f"{f.relative_to(REPO)}: placeholder ${{{var}}} is NOT set in the "
+                    f"environment — the server silently serves 0 tools (this is how "
+                    f"nitter sat dark behind a healthy container)")
+
+
 async def main() -> int:
     _load_env()
 
@@ -70,6 +88,9 @@ async def main() -> int:
 
     failures: list[str] = []
     warnings: list[str] = []
+
+    # ── 0. every MCP URL placeholder resolves ──────────────────────────────
+    _check_placeholders(failures)
 
     # ── 1. the profile registered and is complete ──────────────────────────
     _ensure_builtin_profiles_loaded()
@@ -109,9 +130,10 @@ async def main() -> int:
                     owner[getattr(t, "name", str(t))] = info.name
                     live.add(getattr(t, "name", str(t)))
                 if not info.tools:
-                    warnings.append(f"{prof}: server '{info.name}' declared but served 0 tools "
-                                    f"(down or misconfigured — its tools are NOT covered by the "
-                                    f"deny-list capture)")
+                    warnings.append(f"{prof}: server '{info.name}' served 0 tools — down or "
+                                    f"misconfigured. The deny-list covers its captured/declared "
+                                    f"names; run plugins/tool-scoping/regenerate.py when it "
+                                    f"returns to verify against the live surface")
             all_live_names |= live
 
             roster = {s["name"]: s.get("model") for s in

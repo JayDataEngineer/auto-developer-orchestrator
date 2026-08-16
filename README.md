@@ -160,6 +160,8 @@ checkout (E2E-proven, 12.6k tests green, not pushed).
 ```bash
 make infra                  # SurrealDB (:8000) + media-mcp (:8101)
 make infra-core             # SurrealDB only
+make infra-nitter           # nitter-mcp (:41730, read-only Twitter)
+make infra-equibles         # Equibles financial terminal (:43181, self-hosted from vendor/mcp/equibles-mcp)
 make aegra-sandbox-image    # browser-specialist workload image (once)
 make aegra                  # browser-specialist deployment (Aegra :2026)
 ```
@@ -169,11 +171,15 @@ make aegra                  # browser-specialist deployment (Aegra :2026)
 | **SurrealDB** | `localhost:8000` | deep-research, game-studio, social-media (the shared knowledge graph) |
 | **media-mcp** | `localhost:8101` | deep-research (ASR + diarization + vision) — built from the `infra/media-mcp` submodule |
 | **nitter-mcp** | `localhost:41730` | twitter reads (opt-in: `make infra-nitter`; needs accounts in `infra/nitter/.env`) — built from `infra/nitter/` |
+| **Equibles** | `localhost:43181` | invest/research financial data (SEC, 13F, insiders, congress, FRED, prices) — self-hosted upstream stack (`make infra-equibles`, from `~/Documents/programs/vendor/mcp/equibles-mcp`); the whole deployment — URLs, ports, the meta-mcp catalog of sibling servers — lives in that folder |
 | **Aegra** | `localhost:2026` | the isolated browser-specialist subagent (own Postgres on 5433; browser itself in an OpenSandbox container) — see below |
 
 Remote services (Ray cluster, Forge, ComfyUI, CompreFace) are bring-your-own;
 the skills name the env vars they read. `.env.example` documents the keys the
-MCP servers and scripts consume.
+MCP servers and scripts consume. The github MCP is the official
+`github-mcp-server` binary (`~/.local/bin`, from GitHub releases) reading
+`GITHUB_TOKEN`; `make scoping-check` fails loudly if any server's URL
+placeholder is unset or a declared server serves zero tools.
 
 ## Sandbox (upstream OpenSandbox platform)
 

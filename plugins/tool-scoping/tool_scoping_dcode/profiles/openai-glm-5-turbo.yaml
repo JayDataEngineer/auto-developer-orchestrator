@@ -8,94 +8,81 @@
 # (execute/read/write/task) and lose every MCP tool.
 #
 # This list FAILS OPEN: a server that adds a tool after capture leaks
-# into scoped agents. `make scoping-check` is the tripwire.
+# into scoped agents. `make scoping-check` is the tripwire; regenerate
+# with plugins/tool-scoping/regenerate.py after any server change.
 #
-# Known open hole: `equibles` (down at capture time, external, no
-# in-repo source to enumerate) — the check flags it if it ever serves
-# tools into a scoped session. NOT excluded: built-in dcode tools.
+# Regenerated: 2026-08-16.
+#
+# NOT excluded: built-in dcode tools. Every declared server has an
+# enumeration source: live resolve, .mcp.json trims, in-repo source,
+# the Equibles C# checkout, or the official github docker image.
 key: openai:glm-5-turbo
 excluded_tools:
-  # godot-mcp-runtime (36) — live capture 2026-08-16 (dcode resolve, prefixed)
-  - godot-mcp-runtime_add_autoload
-  - godot-mcp-runtime_add_node
-  - godot-mcp-runtime_attach_project
-  - godot-mcp-runtime_attach_script
-  - godot-mcp-runtime_batch_scene_operations
-  - godot-mcp-runtime_connect_signal
-  - godot-mcp-runtime_create_scene
-  - godot-mcp-runtime_delete_nodes
-  - godot-mcp-runtime_detach_project
-  - godot-mcp-runtime_disconnect_signal
-  - godot-mcp-runtime_duplicate_node
-  - godot-mcp-runtime_export_mesh_library
-  - godot-mcp-runtime_get_debug_output
-  - godot-mcp-runtime_get_node_properties
-  - godot-mcp-runtime_get_node_signals
-  - godot-mcp-runtime_get_project_files
-  - godot-mcp-runtime_get_project_info
-  - godot-mcp-runtime_get_project_settings
-  - godot-mcp-runtime_get_scene_dependencies
-  - godot-mcp-runtime_get_scene_tree
-  - godot-mcp-runtime_get_ui_elements
-  - godot-mcp-runtime_launch_editor
-  - godot-mcp-runtime_list_autoloads
-  - godot-mcp-runtime_list_projects
-  - godot-mcp-runtime_load_sprite
-  - godot-mcp-runtime_remove_autoload
-  - godot-mcp-runtime_run_project
-  - godot-mcp-runtime_run_script
-  - godot-mcp-runtime_save_scene
-  - godot-mcp-runtime_search_project
-  - godot-mcp-runtime_set_node_properties
-  - godot-mcp-runtime_simulate_input
-  - godot-mcp-runtime_stop_project
-  - godot-mcp-runtime_take_screenshot
-  - godot-mcp-runtime_update_autoload
-  - godot-mcp-runtime_validate
+  # equibles (62) — live dcode resolve
+  - equibles_CompareFinancialFact
+  - equibles_GetAverageTrueRange
+  - equibles_GetBollingerBands
+  - equibles_GetCftcPositioning
+  - equibles_GetCongressionalTrades
+  - equibles_GetConsensusHoldings
+  - equibles_GetEconomicCalendar
+  - equibles_GetEconomicIndicator
+  - equibles_GetExemptOfferings
+  - equibles_GetFailsToDeliver
+  - equibles_GetFdaCatalysts
+  - equibles_GetFinancialFact
+  - equibles_GetFinancialStatement
+  - equibles_GetFundCloneBacktest
+  - equibles_GetFundHoldings
+  - equibles_GetFundOperations
+  - equibles_GetFundOverlap
+  - equibles_GetFundProfile
+  - equibles_GetFundsHoldingStock
+  - equibles_GetInsiderOwnership
+  - equibles_GetInsiderTransactions
+  - equibles_GetInstitutionPortfolio
+  - equibles_GetInstitutionQuarterlyActivity
+  - equibles_GetInstitutionSectorAllocation
+  - equibles_GetInstitutionSummary
+  - equibles_GetInvestmentAdviser
+  - equibles_GetLargestShortVolume
+  - equibles_GetLatestCftcData
+  - equibles_GetLatestEconomicData
+  - equibles_GetLatestPrices
+  - equibles_GetMarketWide13FActivity
+  - equibles_GetMemberNetWorth
+  - equibles_GetMemberTrades
+  - equibles_GetMostHeldStocks
+  - equibles_GetOffExchangeVolume
+  - equibles_GetOnBalanceVolume
+  - equibles_GetOwnershipHistory
+  - equibles_GetProposedSales
+  - equibles_GetPutCallRatios
+  - equibles_GetRevenueBreakdown
+  - equibles_GetShortInterest
+  - equibles_GetShortInterestSnapshot
+  - equibles_GetShortSqueezeScores
+  - equibles_GetShortVolume
+  - equibles_GetStochasticOscillator
+  - equibles_GetStockPrices
+  - equibles_GetTopBuyersSellers
+  - equibles_GetTopHolders
+  - equibles_GetVixHistory
+  - equibles_ListCompanyDocuments
+  - equibles_ReadDocumentLines
+  - equibles_SearchCftcMarkets
+  - equibles_SearchCompanyDocuments
+  - equibles_SearchCongressMembers
+  - equibles_SearchDocument
+  - equibles_SearchDocumentKeyword
+  - equibles_SearchDocuments
+  - equibles_SearchEconomicIndicators
+  - equibles_SearchFunds
+  - equibles_SearchInsiders
+  - equibles_SearchInstitutions
+  - equibles_SearchInvestmentAdvisers
 
-  # opensandbox (19) — live capture 2026-08-16 (dcode resolve, prefixed)
-  - opensandbox_command_interrupt
-  - opensandbox_command_run
-  - opensandbox_file_create_directories
-  - opensandbox_file_delete
-  - opensandbox_file_delete_directories
-  - opensandbox_file_move
-  - opensandbox_file_read
-  - opensandbox_file_replace_contents
-  - opensandbox_file_search
-  - opensandbox_file_write
-  - opensandbox_sandbox_connect
-  - opensandbox_sandbox_create
-  - opensandbox_sandbox_get_endpoint
-  - opensandbox_sandbox_get_info
-  - opensandbox_sandbox_get_metrics
-  - opensandbox_sandbox_healthcheck
-  - opensandbox_sandbox_kill
-  - opensandbox_sandbox_list
-  - opensandbox_sandbox_renew
-
-  # surreal (14) — live capture 2026-08-16 (dcode resolve, prefixed)
-  - surreal_create
-  - surreal_delete
-  - surreal_gql
-  - surreal_graphql
-  - surreal_info
-  - surreal_insert
-  - surreal_list
-  - surreal_query
-  - surreal_relate
-  - surreal_run
-  - surreal_select
-  - surreal_update
-  - surreal_upsert
-  - surreal_use
-
-  # web_research (3) — live capture 2026-08-16 (dcode resolve, prefixed)
-  - web_research_fetch
-  - web_research_research
-  - web_research_search
-
-  # github (44) — docker stdio handshake ghcr.io/github/github-mcp-server (default toolsets)
+  # github (44) — live dcode resolve
   - github_add_comment_to_pending_review
   - github_add_issue_comment
   - github_add_reply_to_pull_request_comment
@@ -141,7 +128,99 @@ excluded_tools:
   - github_update_pull_request
   - github_update_pull_request_branch
 
-  # ray_inference (11) — allowedTools trim declared in profiles/{game,media}/.mcp.json
+  # godot-mcp-runtime (36) — live dcode resolve
+  - godot-mcp-runtime_add_autoload
+  - godot-mcp-runtime_add_node
+  - godot-mcp-runtime_attach_project
+  - godot-mcp-runtime_attach_script
+  - godot-mcp-runtime_batch_scene_operations
+  - godot-mcp-runtime_connect_signal
+  - godot-mcp-runtime_create_scene
+  - godot-mcp-runtime_delete_nodes
+  - godot-mcp-runtime_detach_project
+  - godot-mcp-runtime_disconnect_signal
+  - godot-mcp-runtime_duplicate_node
+  - godot-mcp-runtime_export_mesh_library
+  - godot-mcp-runtime_get_debug_output
+  - godot-mcp-runtime_get_node_properties
+  - godot-mcp-runtime_get_node_signals
+  - godot-mcp-runtime_get_project_files
+  - godot-mcp-runtime_get_project_info
+  - godot-mcp-runtime_get_project_settings
+  - godot-mcp-runtime_get_scene_dependencies
+  - godot-mcp-runtime_get_scene_tree
+  - godot-mcp-runtime_get_ui_elements
+  - godot-mcp-runtime_launch_editor
+  - godot-mcp-runtime_list_autoloads
+  - godot-mcp-runtime_list_projects
+  - godot-mcp-runtime_load_sprite
+  - godot-mcp-runtime_remove_autoload
+  - godot-mcp-runtime_run_project
+  - godot-mcp-runtime_run_script
+  - godot-mcp-runtime_save_scene
+  - godot-mcp-runtime_search_project
+  - godot-mcp-runtime_set_node_properties
+  - godot-mcp-runtime_simulate_input
+  - godot-mcp-runtime_stop_project
+  - godot-mcp-runtime_take_screenshot
+  - godot-mcp-runtime_update_autoload
+  - godot-mcp-runtime_validate
+
+  # nitter (10) — live dcode resolve
+  - nitter_health
+  - nitter_search
+  - nitter_tweet_details
+  - nitter_tweet_replies
+  - nitter_user_followers
+  - nitter_user_following
+  - nitter_user_media
+  - nitter_user_profile
+  - nitter_user_replies
+  - nitter_user_tweets
+
+  # opensandbox (19) — live dcode resolve
+  - opensandbox_command_interrupt
+  - opensandbox_command_run
+  - opensandbox_file_create_directories
+  - opensandbox_file_delete
+  - opensandbox_file_delete_directories
+  - opensandbox_file_move
+  - opensandbox_file_read
+  - opensandbox_file_replace_contents
+  - opensandbox_file_search
+  - opensandbox_file_write
+  - opensandbox_sandbox_connect
+  - opensandbox_sandbox_create
+  - opensandbox_sandbox_get_endpoint
+  - opensandbox_sandbox_get_info
+  - opensandbox_sandbox_get_metrics
+  - opensandbox_sandbox_healthcheck
+  - opensandbox_sandbox_kill
+  - opensandbox_sandbox_list
+  - opensandbox_sandbox_renew
+
+  # surreal (14) — live dcode resolve
+  - surreal_create
+  - surreal_delete
+  - surreal_gql
+  - surreal_graphql
+  - surreal_info
+  - surreal_insert
+  - surreal_list
+  - surreal_query
+  - surreal_relate
+  - surreal_run
+  - surreal_select
+  - surreal_update
+  - surreal_upsert
+  - surreal_use
+
+  # web_research (3) — live dcode resolve
+  - web_research_fetch
+  - web_research_research
+  - web_research_search
+
+  # ray_inference (11) — allowedTools trim declared in .mcp.json
   - ray_inference_describe_model
   - ray_inference_describe_pipeline
   - ray_inference_generate
@@ -153,15 +232,3 @@ excluded_tools:
   - ray_inference_start_pipeline
   - ray_inference_stop_pipeline
   - ray_inference_validate_pipeline
-
-  # nitter (10) — tool defs in infra/nitter/src/server.py
-  - nitter_health
-  - nitter_search
-  - nitter_tweet_details
-  - nitter_tweet_replies
-  - nitter_user_followers
-  - nitter_user_following
-  - nitter_user_media
-  - nitter_user_profile
-  - nitter_user_replies
-  - nitter_user_tweets

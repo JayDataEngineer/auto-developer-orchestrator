@@ -10,7 +10,7 @@
 # Remote infra (NOT managed here — bring your own GPU box):
 #   Ray cluster on Tailscale — LLM, TTS, 3D, music, ComfyUI.
 
-.PHONY: help infra infra-core infra-nitter infra-status infra-down infra-destroy infra-logs hooks clean sandbox-config sandbox sandbox-status sandbox-stop scoping-check aegra aegra-patch aegra-status aegra-stop aegra-log aegra-sandbox-image aegra-sandbox-status aegra-sandbox-kill
+.PHONY: help infra infra-core infra-nitter infra-equibles infra-status infra-down infra-destroy infra-logs hooks clean sandbox-config sandbox sandbox-status sandbox-stop scoping-check aegra aegra-patch aegra-status aegra-stop aegra-log aegra-sandbox-image aegra-sandbox-status aegra-sandbox-kill
 
 INFRA_COMPOSE := docker compose -f docker-compose.infra.yml
 
@@ -42,6 +42,16 @@ infra-core: ## Start SurrealDB only (lighter — skip media-mcp)
 infra-nitter: ## Start nitter-mcp (opt-in — needs Twitter accounts in infra/nitter/.env)
 	$(INFRA_COMPOSE) up -d nitter-mcp
 	@echo "nitter-mcp at http://127.0.0.1:41730/mcp (READ-ONLY Twitter GraphQL)"
+
+# The Equibles financial-data terminal is self-hosted from the vendor
+# checkout (upstream daniel3303/Equibles, AGPL-3.0); its compose override
+# binds the MCP to localhost:43181 — the MCP_EQUIBLES_URL the profiles use.
+EQUIBLES_DIR := $(HOME)/Documents/programs/vendor/mcp/equibles-mcp
+
+infra-equibles: ## Start the self-hosted Equibles stack (MCP on :43181, from the vendor checkout)
+	@test -f $(EQUIBLES_DIR)/docker-compose.yml || { echo "missing $(EQUIBLES_DIR) — clone the checkout first"; exit 1; }
+	cd $(EQUIBLES_DIR) && docker compose up -d
+	@echo "equibles MCP at http://127.0.0.1:43181/mcp"
 
 infra-status: ## Show infra container status
 	$(INFRA_COMPOSE) ps
