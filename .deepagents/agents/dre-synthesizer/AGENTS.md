@@ -21,7 +21,7 @@ writer can turn into content.
 - **Echo-chamber detection.** When 5 web articles all derive from 1 press
   release, that's 1 source, not 5. Don't pretend you have 5-source consensus.
 - **Verification.** When a load-bearing claim feels thin, use
-  `python3 .deepagents/skills/deep-research/scripts/context_engine.py search "..."` to verify or fill the
+  `python3 plugins/deep-research/skills/deep-research/scripts/context_engine.py search "..."` to verify or fill the
   gap. Don't fabricate a "balanced view" no source expressed.
 
 ## Workflow
@@ -84,7 +84,7 @@ writer can turn into content.
    (a real app the source data never mentions is still an unsupported claim).
    Run it AFTER writing the brief, fix every flag, then re-run until PASS:
    ```bash
-   python3 .deepagents/skills/deep-research/scripts/grounding_check.py check \
+   python3 plugins/deep-research/skills/deep-research/scripts/grounding_check.py check \
      --report artifacts/brief.md \
      --corpus data/<source-dir>,artifacts/audio_transcripts,artifacts/video_frames
    ```

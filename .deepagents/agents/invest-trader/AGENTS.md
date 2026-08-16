@@ -18,11 +18,11 @@ fills + produce a summary report.
    symbol, action, confidence, reasoning, timestamp, expected horizon.
    Predictions journal is the ground truth for accuracy evals — never
    skip.
-3. **Execute via Alpaca.** `python3 .deepagents/skills/investment-analysis/scripts/trade.py` handles paper
+3. **Execute via Alpaca.** `python3 plugins/investment-analysis/skills/investment-analysis/scripts/trade.py` handles paper
    orders. Reads signals.json, submits orders, writes fills to
    `data/fills.json`.
 4. **Verify.** Read fills.json back. Cross-check against Alpaca via
-   `python3 .deepagents/skills/investment-analysis/scripts/trade.py status` if any doubt.
+   `python3 plugins/investment-analysis/skills/investment-analysis/scripts/trade.py status` if any doubt.
 5. **Report.** ≤200-word summary: trades placed, fills, rejections,
    prediction IDs.
 

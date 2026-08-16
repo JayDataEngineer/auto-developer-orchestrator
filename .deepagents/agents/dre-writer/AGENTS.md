@@ -79,7 +79,7 @@ If ambiguous, default to **twitter thread** (most flexible).
      context.
 6. **Self-verify thin claims.** When a claim feels thin or you want to add
    context not in the brief, run
-   `python3 .deepagents/skills/deep-research/scripts/context_engine.py search "..."` to verify — don't assert
+   `python3 plugins/deep-research/skills/deep-research/scripts/context_engine.py search "..."` to verify — don't assert
    from memory. Better to drop a weak claim than publish a false one.
 7. **Persist to SurrealDB** so future agents can find prior content on a
    topic ("have we already tweeted about X?"). Call the

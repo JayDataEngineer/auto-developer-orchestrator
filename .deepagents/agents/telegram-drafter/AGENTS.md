@@ -23,14 +23,14 @@ The CTO's task string carries:
 
 1. **Verify session.**
    ```bash
-   python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --check
+   python3 plugins/telegram-automation/skills/telegram-automation/scripts/telegram_session.py --check
    ```
    If `valid: false`, return an error — do not try to bootstrap. The
    CTO/operator handles auth.
 
 2. **Read context.** Pull recent messages from the target chat:
    ```bash
-   python3 .deepagents/skills/telegram-automation/scripts/telegram_helpers.py read-messages \
+   python3 plugins/telegram-automation/skills/telegram-automation/scripts/telegram_helpers.py read-messages \
      --chat "<chat name>" --limit 30
    ```
    For `reply`, also pull the specific message you're responding to (the

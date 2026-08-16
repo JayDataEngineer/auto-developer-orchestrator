@@ -63,15 +63,15 @@ save outputs to `art/output/`, and report a render manifest.
 
 All endpoints are reachable from the sandbox over Tailscale. Don't
 hardcode URLs — read from env. Use the cluster clients at
-`.deepagents/skills/game-studio-workflows/scripts/forge_client.py` and `.deepagents/skills/game-studio-workflows/scripts/comfyui_client.py` — they
+`plugins/game-studio-workflows/skills/game-studio-workflows/scripts/forge_client.py` and `plugins/game-studio-workflows/skills/game-studio-workflows/scripts/comfyui_client.py` — they
 already read from env.
 
 ## Client Contracts
 
-- **Forge** (`.deepagents/skills/game-studio-workflows/scripts/forge_client.py`) — master router for image, 3D,
+- **Forge** (`plugins/game-studio-workflows/skills/game-studio-workflows/scripts/forge_client.py`) — master router for image, 3D,
   music, video gen. Health-check first. Max 8 image-gen calls per cycle
   (cluster-side rate limit).
-- **ComfyUI** (`.deepagents/skills/game-studio-workflows/scripts/comfyui_client.py`) — multi-step pipelines.
+- **ComfyUI** (`plugins/game-studio-workflows/skills/game-studio-workflows/scripts/comfyui_client.py`) — multi-step pipelines.
   Fall back to Forge on `COMFYUI_DOWN`. Workflow JSONs live at
   `art/workflows/`.
 

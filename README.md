@@ -8,10 +8,14 @@ resolution). Everything dcode reads is **authored in place**:
 
 - **`.deepagents/agents/<name>/AGENTS.md`** — the 30 specialists (frontmatter
   `name` / `description` / optional `model: provider:model`).
-- **`.deepagents/skills/<name>/`** — the 11 skills. Each skill owns its
-  supporting files: `references/` docs and `scripts/` (the operational
-  scripts — research pipeline, investing, game studio, telegram/twitter
-  sessions, media clients).
+- **`.deepagents/skills/<name>/`** — 5 workspace skills (browser
+  interaction conventions + vendored flows), each owning its `references/`
+  and `scripts/`.
+- **`plugins/`** — the in-repo `orchestrator` marketplace: 6 skill
+  families (deep-research, investment-analysis, twitter-automation,
+  telegram-automation, game-studio-workflows, social-media-publishing)
+  carrying the operational scripts, plus the orchestrator-tools MCP server
+  (python exec + describe_image).
 - **`.deepagents/AGENTS.md`** — workspace instructions, appended to the main
   agent's system prompt every session.
 - **`.mcp.json`** — the project's MCP servers (dcode gates them behind
@@ -48,8 +52,31 @@ MCP servers and scripts consume.
 |------|------|
 | `.deepagents/` | the authored dcode surface (agents, skills, workspace instructions) |
 | `.mcp.json` | MCP servers (env placeholders like `${MCP_WEB_RESEARCH_URL}` resolve from the environment) |
+| `plugins/` | the in-repo dcode marketplace (see below) — install with `dcode plugin install <name>@orchestrator` |
 | `infra/` | MCP-server infrastructure (media-mcp, nitter) + compose files |
 | `docs/` | engineering history (thin-architecture mandate, retired prod list) |
+
+## Plugins (in-repo marketplace)
+
+The old pux action tools and the operational skill families ship as dcode
+plugins under `plugins/`, registered as the `orchestrator` marketplace
+(`plugins/.claude-plugin/marketplace.json`):
+
+```bash
+dcode plugin marketplace add ./plugins    # one-time: register the marketplace
+dcode plugin install <name>@orchestrator  # e.g. deep-research@orchestrator
+dcode plugin list                         # shows enabled state
+```
+
+- **Plugin skills are namespaced** — invoke as
+  `/skill:deep-research@orchestrator:deep-research`. They don't show in
+  `dcode skills list`; they load in-session.
+- **orchestrator-tools** restores the pux action tools as an MCP stdio
+  server: `python` (host-side exec, JSON envelope) and `describe_image`
+  (vision via an OpenAI-compatible endpoint — `VISION_API_URL` /
+  `VISION_MODEL` / `VISION_API_KEY`, see `.env.example`).
+- Install copies a plugin to dcode's managed cache; the originals stay
+  in-repo as the source of truth. `/reload` re-reads after edits.
 
 ## Conventions
 
@@ -58,7 +85,11 @@ MCP servers and scripts consume.
 - Every skill script runs from the workspace root and resolves its own
   state under `data/` (sessions, credentials, caches — git-ignored).
 - Model defaults come from dcode's own `~/.deepagents/config.toml`; a
-  subagent overrides via frontmatter `model:`.
+  subagent overrides via frontmatter `model:`. Custom `class_path`
+  providers (config.toml) resolve for the **main** agent only — subagent
+  `model:` frontmatter goes through langchain's provider inference, so it
+  must name a langchain-known provider or be omitted (inherit the runtime
+  model). The four media/game-studio specialists omit it.
 
 ## History
 

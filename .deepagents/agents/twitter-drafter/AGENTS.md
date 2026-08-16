@@ -31,8 +31,8 @@ The CTO's task string carries:
 
 2. **Read recent timeline context.**
    ```bash
-   python3 .deepagents/skills/twitter-automation/scripts/twitter_session.py --check
-   python3 .deepagents/skills/twitter-automation/scripts/twitter_helpers.py timeline --limit 20
+   python3 plugins/twitter-automation/skills/twitter-automation/scripts/twitter_session.py --check
+   python3 plugins/twitter-automation/skills/twitter-automation/scripts/twitter_helpers.py timeline --limit 20
    ```
    If session invalid, return an error — do not try to re-extract
    cookies (host-side only). For `reply` or `quote_tweet`, also pull

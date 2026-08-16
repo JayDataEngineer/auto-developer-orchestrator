@@ -1,0 +1,6 @@
+{
+  "name": "orchestrator-tools",
+  "version": "1.0.0",
+  "description": "Action tools restored from the pux harness as MCP servers (host-side; use dcode --sandbox for isolation)",
+  "mcpServers": "./.mcp.json"
+}

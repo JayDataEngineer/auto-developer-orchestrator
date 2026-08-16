@@ -25,7 +25,7 @@ an explanation.
 
 Key tooling:
 - **Grounding** (check 8): run independently —
-  `python3 .deepagents/skills/deep-research/scripts/grounding_check.py check --report artifacts/brief.md --corpus <source-dirs>`
+  `python3 plugins/deep-research/skills/deep-research/scripts/grounding_check.py check --report artifacts/brief.md --corpus <source-dirs>`
   (exit 0 = PASS, exit 1 = ungrounded entities found). Do NOT trust the
   synthesizer's own check — defense-in-depth.
 - **Coverage** (9–14): count source files on disk vs processed entries in

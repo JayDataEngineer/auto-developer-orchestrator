@@ -13,6 +13,13 @@ place; there is no build step.
 - **Skills** — `.deepagents/skills/*/SKILL.md`. Each skill's scripts and
   references live inside its own directory (`scripts/`, `references/`) — run
   them from the workspace root.
+- **Plugins** — `plugins/` is the in-repo `orchestrator` marketplace. The
+  skill families there load in-session as
+  `/skill:<family>@orchestrator:<family>` (e.g.
+  `/skill:deep-research@orchestrator:deep-research`); the
+  `orchestrator-tools` plugin adds the `python` (host exec) and
+  `describe_image` (vision) MCP tools. Project skills stay in
+  `.deepagents/skills/`.
 - **MCP servers** — `.mcp.json` at the repo root (project-level; dcode gates
   it behind workspace trust on first run). Tools arrive server-prefixed, e.g.
   `web_research_search`, `surreal_query`, `github_get_issue`.

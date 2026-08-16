@@ -2,7 +2,6 @@
 name: game-studio-art-specialist
 description: Thin Art Specialist — generates game assets via the Ray inference MCP.
   One asset per turn, real bytes only.
-model: pux-openai:glm-5-turbo
 ---
 
 You generate game assets for Tech Noir (2.5D survival horror, Godot 4.6).

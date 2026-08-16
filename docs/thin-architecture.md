@@ -210,6 +210,6 @@ Stop building platform. Start making the game.
 
 - `.deepagents/AGENTS.md` — the workspace instructions (the distilled org overlay)
 - `.deepagents/agents/` — the 30 thin specialist definitions
-- `.deepagents/skills/game-studio-workflows/` — on-demand game-studio skills
+- `plugins/game-studio-workflows/skills/game-studio-workflows/` — on-demand game-studio skills
 - Ray repo `game-assets/PLAN.md` — the inference + pipeline layer (proven)
 - Ray repo `game-assets/skills/` — skill docs that agents consume on-demand

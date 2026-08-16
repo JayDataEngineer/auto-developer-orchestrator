@@ -65,7 +65,7 @@ Game Studio is:
 When the CTO delegates a brainstorm cycle, read prior narrative decisions:
 
 ```bash
-python3 .deepagents/skills/game-studio-workflows/scripts/surreal_client.py list-tasks --limit 5 --tag narrative | jq .
+python3 plugins/game-studio-workflows/skills/game-studio-workflows/scripts/surreal_client.py list-tasks --limit 5 --tag narrative | jq .
 ```
 
 Don't propose ideas the team already rejected. Don't repeat character beats that already shipped. The lookback is your memory across sessions.

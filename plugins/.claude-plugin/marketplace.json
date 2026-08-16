@@ -1,0 +1,47 @@
+{
+  "name": "orchestrator",
+  "plugins": [
+    {
+      "name": "orchestrator-tools",
+      "source": "./orchestrator-tools",
+      "description": "Action tools restored from the pux harness as MCP servers: python exec + describe_image (vision)",
+      "author": "JayDataEngineer"
+    },
+    {
+      "name": "deep-research",
+      "source": "./deep-research",
+      "description": "Deep Research Engine: Telegram/multimodal ingest, entity graph on SurrealDB, audit-graded article pipeline",
+      "author": "JayDataEngineer"
+    },
+    {
+      "name": "investment-analysis",
+      "source": "./investment-analysis",
+      "description": "Signals/journal/technical-analysis investment research workflow",
+      "author": "JayDataEngineer"
+    },
+    {
+      "name": "twitter-automation",
+      "source": "./twitter-automation",
+      "description": "Twitter session management, posting, and research automation",
+      "author": "JayDataEngineer"
+    },
+    {
+      "name": "telegram-automation",
+      "source": "./telegram-automation",
+      "description": "Telegram session management and channel automation",
+      "author": "JayDataEngineer"
+    },
+    {
+      "name": "game-studio-workflows",
+      "source": "./game-studio-workflows",
+      "description": "Godot/Forge/ComfyUI game-studio asset and scene workflows",
+      "author": "JayDataEngineer"
+    },
+    {
+      "name": "social-media-publishing",
+      "source": "./social-media-publishing",
+      "description": "Cross-platform social publishing workflows with research references",
+      "author": "JayDataEngineer"
+    }
+  ]
+}
