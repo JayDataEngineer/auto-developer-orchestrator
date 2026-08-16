@@ -105,3 +105,10 @@ final-test
 scripts/*_upload*.png
 scripts/compose_state.png
 scripts/debug_compose.png
+
+# browser-specialist deployment: local secrets + uv venv (patches/ IS tracked)
+deployments/*/.env
+deployments/*/.venv/
+
+# browser-specialist: the persisted OpenSandbox workload id
+deployments/browser-specialist/.sandbox_id

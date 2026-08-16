@@ -42,12 +42,12 @@ authored union — one source of truth), a persona `AGENTS.md`, skills, and its
 own `.mcp.json`, so only that lane's servers ever load.
 
 ```bash
-make coding                 # 7 agents  · github + opensandbox + sandbox_browser
-make research               # 6 agents  · web_research, surreal, equibles, nitter, browser
+make coding                 # 6 agents  · github + opensandbox (browser via the async subagent)
+make research               # 6 agents  · web_research, surreal, equibles, nitter
 make invest                 # 3 agents  · equibles, web_research, surreal
-make game                   # 11 agents · godot-mcp-runtime, ray_inference, surreal
+make game                   # 10 agents · godot-mcp-runtime, ray_inference, surreal
 make media                  # 5 agents  · ray_inference, surreal
-make social                 # 4 agents  · nitter, sandbox_browser, surreal
+make social                 # 3 agents  · nitter, surreal (browser via the async subagent)
 make profiles-check         # dry-run every profile (roster + skills + MCP counts)
 ```
 
@@ -64,12 +64,91 @@ root + server fingerprint — a committed `.mcp.json` can never self-approve;
 change a server definition and it re-prompts). Extra flags reach the launcher
 directly: `profiles/run.py coding -M provider:model -m "task..."`.
 
+## Subagent tool isolation (browser-specialist)
+
+dcode subagents inherit the main agent's full toolset by design — there is no
+per-subagent tool allowlist yet. For the one specialist whose toolset must
+NEVER enter a session's context window (the 42-tool stealth browser), the
+isolation is spatial instead: the browser runs as a **remote async subagent**
+on [Aegra](https://aegra.dev) (the self-hosted LangGraph Platform alternative)
+and dcode reaches it through its native seam:
+
+```toml
+# ~/.deepagents/config.toml — dcode's own async-subagent registry
+[async_subagents.browser-specialist]
+description = "42-tool stealth browser (SeleniumBase Pure CDP) — …"
+url = "http://127.0.0.1:2026"
+graph_id = "browser_specialist"
+```
+
+The main agent sees only the five `*_async_task` middleware tools; none of the
+42 browser tool schemas load into any dcode session (coding profile: 19 MCP
+tools, zero browser tools). Delegating is native model behavior:
+`start_async_task` (gated by dcode's HITL approval) → `check_async_task`
+until `success` → the specialist's final message arrives as the task result.
+
+Isolation holds in **both directions, at three boundaries**: (1) context —
+dcode never loads the browser schemas, the specialist never gets the main
+agent's tools; (2) tools — the graph's `create_deep_agent` drops every
+built-in file/shell/subagent tool via a `HarnessProfile` (`excluded_tools` +
+`general_purpose_subagent=disabled`), so its toolset is exactly the 42
+browser tools (proved with a `bind_tools` spy); (3) host — mc_browser and
+its Chromium run inside an **OpenSandbox container** (the platform we
+already run on `:8080`): no credentials, no host mounts, no host reach. A
+live hostile prove had the agent fire its `run` escape hatch (arbitrary
+Python) and `file://` navigation at the host `.env` path — nothing to find.
+
+```bash
+make aegra-sandbox-image    # once: build the workload image (mc_browser + Chromium)
+make aegra                  # start the deployment (Aegra :2026 + its Postgres :5433)
+make aegra-status           # health of Aegra + the browser sandbox
+make aegra-stop             # stop Aegra (the browser sandbox is left running by design)
+make aegra-sandbox-kill     # teardown the browser sandbox (Chrome state dies with it)
+```
+
+- `deployments/browser-specialist/` — the graph (deepagents-core
+  `create_deep_agent` + the browser MCP via langchain-mcp-adapters, exposed as
+  a langgraph-sdk **runtime factory** so the MCP session lives on the server's
+  own event loop), its `aegra.json`, the workload image `sandbox/Dockerfile`,
+  and `patches/`.
+- The browser sandbox is created on the first browser task (lease 23h,
+  renewed every 12h and on every Aegra restart), so tabs/cookies/sessions
+  survive restarts; all per-call MCP sessions land on the one long-lived
+  mc_browser HTTP process inside it.
+- `patches/aegra-thread-values.patch` — Agent Protocol conformance fix
+  (Aegra's `GET /threads/{id}` omitted `values`, which deepagents'
+  `check_async_task` reads as the completed run's result); applied to the
+  deployment venv by `make aegra-patch` (also a dependency of `make aegra`)
+  and prepared as an upstream PR.
+- `make aegra` needs `deployments/browser-specialist/.env` (postgres port,
+  auth mode, `ANTHROPIC_AUTH_TOKEN` — same key the dcode model uses).
+
+**When does a specialist go remote?** Only when its toolset is too heavy (or
+too untrusted) to sit in the session's context window *and* its work doesn't
+need millisecond local feedback. The execution spectrum every subagent lands
+on, by design:
+
+| Tier | Mode | Who | Why |
+|------|------|-----|-----|
+| heavy/untrusted tools | **remote AP + OpenSandbox** (Aegra async subagent, browser in a container) | browser-specialist | 42 tool schemas never enter a session; Chrome/captcha stack runs in a sandbox with no credentials and no host reach |
+| repo work | **standard dcode subagent** (in-process) | coder, reviewer, explorer, all `.deepagents/agents/*` | millisecond file I/O, local git state, direct rg/AST loops — an RPC boundary would add a file-sync tax to every edit |
+| code execution | **sandboxed** (`dcode --sandbox opensandbox`) | any agent's execute/read/write | arbitrary commands run inside the OpenSandbox container, not on the host |
+
+Editing is direct; only *execution* is sandboxed; only *heavy tools* are
+remote — and when they are, their execution is sandboxed too (tier one
+stacks both). A new specialist joins the remote tier only when its tool
+schemas or attack surface justify paying the delegation round-trip; dcode's
+lack of a per-subagent `tools:`/`skills:` allowlist is the open upstream gap
+that would let the remaining tiers scope their toolsets too.
+
 
 ## Host-side infrastructure
 
 ```bash
 make infra                  # SurrealDB (:8000) + media-mcp (:8101)
 make infra-core             # SurrealDB only
+make aegra-sandbox-image    # browser-specialist workload image (once)
+make aegra                  # browser-specialist deployment (Aegra :2026)
 ```
 
 | Service | Port | Used by |
@@ -77,6 +156,7 @@ make infra-core             # SurrealDB only
 | **SurrealDB** | `localhost:8000` | deep-research, game-studio, social-media (the shared knowledge graph) |
 | **media-mcp** | `localhost:8101` | deep-research (ASR + diarization + vision) — built from the `infra/media-mcp` submodule |
 | **nitter-mcp** | `localhost:41730` | twitter reads (opt-in: `make infra-nitter`; needs accounts in `infra/nitter/.env`) — built from `infra/nitter/` |
+| **Aegra** | `localhost:2026` | the isolated browser-specialist subagent (own Postgres on 5433; browser itself in an OpenSandbox container) — see below |
 
 Remote services (Ray cluster, Forge, ComfyUI, CompreFace) are bring-your-own;
 the skills name the env vars they read. `.env.example` documents the keys the
@@ -132,7 +212,7 @@ osb sandbox create --image python:3.12   # the upstream CLI, same server
 | `.mcp.json` | MCP servers (env placeholders like `${MCP_WEB_RESEARCH_URL}` resolve from the environment) |
 | `plugins/` | the in-repo dcode marketplace (see below) — install with `dcode plugin install <name>@orchestrator` |
 | `infra/` | MCP-server infrastructure (media-mcp, nitter) + compose files |
-| `docs/` | engineering history (thin-architecture mandate, retired prod list) |
+| `docs/` | engineering history (thin-architecture mandate, retired prod list, browser-specialist isolation record) |
 
 ## Plugins (in-repo marketplace)
 

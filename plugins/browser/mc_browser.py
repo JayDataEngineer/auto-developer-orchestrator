@@ -577,6 +577,10 @@ class BrowserSession:
         self._user_data_dir: str = ""
         self._started = False
         self._lock = threading.Lock()
+        # Persistent mode (MC_BROWSER_CDP_PORT): Chrome is detached from this
+        # process and shared across server restarts — browser state (tabs,
+        # cookies, sessions) survives per-call MCP session churn. See start().
+        self._persistent_port = int(os.environ.get("MC_BROWSER_CDP_PORT") or 0)
 
     def _build_chrome_args(self) -> list[str]:
         """Chrome launch args — fingerprint-masking flags, random viewport,
@@ -685,6 +689,28 @@ class BrowserSession:
         with self._lock:
             if self._started:
                 return
+            # Persistent mode: attach to a shared, detached Chrome when one is
+            # already listening on MC_BROWSER_CDP_PORT; otherwise spawn it
+            # detached (start_new_session) so it survives this server process.
+            # Browser state then persists across MCP sessions — needed because
+            # langchain-mcp-adapters 0.3.x opens a NEW server session per tool
+            # call, which would otherwise give every call a fresh browser.
+            if self._persistent_port:
+                self._cdp_port = self._persistent_port
+                if self._port_open(self._cdp_port, timeout_s=1.0):
+                    log(f"[mc_browser] attaching to persistent Chrome on "
+                        f"CDP port {self._cdp_port}")
+                    self._spawn_and_attach_persistent(attach_only=True)
+                    return
+                self._user_data_dir = os.path.join(
+                    tempfile.gettempdir(),
+                    f"mc_browser_chrome_{self._cdp_port}",
+                )
+                log(f"[mc_browser] starting persistent Chrome (Pure CDP Mode) "
+                    f"on CDP port {self._cdp_port}, profile {self._user_data_dir}")
+                self._spawn_and_attach_persistent(attach_only=False)
+                return
+            # Ephemeral mode (default): one Chrome per server process.
             # Reap any orphan stealth dirs from prior ungraceful exits BEFORE
             # we add our own. Keeps /tmp clean across crashes.
             _reap_orphan_stealth_dirs()
@@ -705,24 +731,98 @@ class BrowserSession:
                 shutil.rmtree(self._user_data_dir, ignore_errors=True)
                 raise RuntimeError("Chrome failed to start (CDP port not ready)")
             # 3. Attach sb_cdp.Chrome (Pure CDP Mode — no chromedriver)
-            try:
+            self._attach_sb_cdp()
+
+    def _port_open(self, port: int, timeout_s: float = 20.0) -> bool:
+        """True when something is accepting connections on the CDP port."""
+        import socket
+        try:
+            s = socket.socket()
+            s.settimeout(1.0)
+            s.connect(("127.0.0.1", port))
+            s.close()
+            return True
+        except Exception:
+            return False
+
+    def _spawn_and_attach_persistent(self, *, attach_only: bool) -> None:
+        """Persistent-mode startup: spawn detached Chrome if needed, then attach."""
+        if not attach_only:
+            args = self._build_chrome_args()
+            # Detached: not a child of this process — survives server restarts.
+            self._chrome_process = subprocess.Popen(
+                args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            if not self._wait_for_cdp_port():
+                log("[mc_browser] persistent Chrome failed to start — "
+                    "CDP port not ready")
+                self._kill_chrome_process_tree()
+                raise RuntimeError(
+                    "persistent Chrome failed to start (CDP port not ready)")
+        self._attach_sb_cdp()
+
+    def _attach_sb_cdp(self) -> None:
+        """Attach a Pure CDP Mode session to the running Chrome.
+
+        Persistent mode connects WITHOUT navigating: `sb_cdp.Chrome(url)`
+        runs `driver.get(url)`, which drags the most recent tab to that URL —
+        exactly what must not happen when sharing one Chrome across sessions.
+        Instead we build the same objects (`cdp_util.start_sync` driver +
+        `CDPMethods`) and bind to the most recent *page* target as-is.
+        """
+        try:
+            if self._persistent_port:
+                import asyncio as _asyncio
+
+                from seleniumbase import sb_cdp
+                from seleniumbase.undetected.cdp_driver import cdp_util
+
+                loop = _asyncio.new_event_loop()
+                with contextlib.redirect_stdout(sys.stderr):
+                    driver = cdp_util.start_sync(
+                        host="127.0.0.1", port=self._cdp_port, loop=loop,
+                    )
+                    targets = list(getattr(driver, "targets", None) or [])
+                    pages = [t for t in targets
+                             if getattr(t, "type_", None) == "page"]
+                    page = (pages or targets)[-1]
+                    loop.run_until_complete(page.sleep(0.005))
+                    self.sb = sb_cdp.CDPMethods(loop, page, driver)
+            else:
                 from seleniumbase import sb_cdp
                 with contextlib.redirect_stdout(sys.stderr):
                     self.sb = sb_cdp.Chrome(
                         "about:blank", host="127.0.0.1", port=self._cdp_port,
                     )
-            except Exception as e:
-                log(f"[mc_browser] sb_cdp.Chrome attach failed: {e}")
+        except Exception as e:
+            log(f"[mc_browser] sb_cdp.Chrome attach failed: {e}")
+            if not self._persistent_port:
                 self._kill_chrome_process_tree()
                 shutil.rmtree(self._user_data_dir, ignore_errors=True)
-                raise
-            self._started = True
-            log(f"[mc_browser] Chrome ready (Pure CDP Mode), "
-                f"sb={type(self.sb).__name__}")
+            raise
+        self._started = True
+        log(f"[mc_browser] Chrome ready (Pure CDP Mode), "
+            f"sb={type(self.sb).__name__}")
 
     def stop(self):
         with self._lock:
             if not self._started:
+                return
+            # Persistent mode: leave the shared Chrome running — the next
+            # server session (or the next tool call) attaches to it.
+            if self._persistent_port:
+                log(f"[mc_browser] detaching from persistent Chrome on port "
+                    f"{self._persistent_port} (left running)")
+                try:
+                    if self.sb:
+                        with contextlib.redirect_stdout(sys.stderr):
+                            self.sb.quit()
+                except Exception as e:
+                    log(f"[mc_browser] sb.quit() error: {e}")
+                self._started = False
+                self.sb = None
+                self._chrome_process = None
                 return
             log("[mc_browser] stopping Chrome")
             # 1. Disconnect sb_cdp
@@ -760,6 +860,20 @@ class BrowserSession:
 
 mcp = FastMCP("mc-browser")
 session = BrowserSession()
+
+
+# In HTTP mode the server is a long-lived process serving MANY MCP sessions —
+# the BrowserSession (and its Chrome) is therefore shared across sessions,
+# which is exactly what the isolated browser-specialist deployment needs.
+try:
+    from starlette.responses import JSONResponse
+
+    @mcp.custom_route("/health", methods=["GET"])
+    async def _health(_request):  # noqa: ANN001
+        return JSONResponse({"ok": True, "started": session._started,
+                             "cdp_port": session._cdp_port})
+except Exception:  # custom_route unavailable — health is best-effort
+    pass
 
 
 def _ensure():
@@ -1344,10 +1458,20 @@ for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
 
 
 if __name__ == "__main__":
-    log(f"[mc_browser] pid={os.getpid()}, Pure CDP Mode, "
+    transport = os.environ.get("MC_BROWSER_TRANSPORT", "stdio")
+    log(f"[mc_browser] pid={os.getpid()}, transport={transport}, Pure CDP Mode, "
         f"profile will be assigned on start()")
     try:
-        mcp.run(transport="stdio")
+        if transport == "http":
+            # Long-lived HTTP server (used inside the OpenSandbox workload
+            # container): one process, many MCP sessions, one shared Chrome.
+            mcp.run(
+                transport="http",
+                host=os.environ.get("MC_BROWSER_HOST", "0.0.0.0"),
+                port=int(os.environ.get("MC_BROWSER_PORT", "8765")),
+            )
+        else:
+            mcp.run(transport="stdio")
     except (KeyboardInterrupt, SystemExit):
         pass
     finally:

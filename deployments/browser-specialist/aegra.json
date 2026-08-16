@@ -1,0 +1,9 @@
+{
+  "name": "browser-specialist",
+  "dependencies": [
+    "./src"
+  ],
+  "graphs": {
+    "browser_specialist": "./src/browser_specialist/graph.py:make_graph"
+  }
+}

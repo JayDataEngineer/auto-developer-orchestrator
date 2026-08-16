@@ -10,7 +10,7 @@
 # Remote infra (NOT managed here — bring your own GPU box):
 #   Ray cluster on Tailscale — LLM, TTS, 3D, music, ComfyUI.
 
-.PHONY: help infra infra-core infra-nitter infra-status infra-down infra-destroy infra-logs hooks clean sandbox-config sandbox sandbox-status sandbox-stop
+.PHONY: help infra infra-core infra-nitter infra-status infra-down infra-destroy infra-logs hooks clean sandbox-config sandbox sandbox-status sandbox-stop aegra aegra-patch aegra-status aegra-stop aegra-log aegra-sandbox-image aegra-sandbox-status aegra-sandbox-kill
 
 INFRA_COMPOSE := docker compose -f docker-compose.infra.yml
 
@@ -140,3 +140,63 @@ hooks: ## Install pre-commit hooks (gitleaks secret scan)
 clean: ## Remove Python caches + .pyc files
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -name "*.pyc" -delete 2>/dev/null || true
+
+# ── browser-specialist deployment (isolated Aegra subagent) ──────────────────
+# The 42-tool stealth browser runs OUT of every dcode context window: it is a
+# deepagents-core graph deployed on Aegra (self-hosted LangGraph Platform
+# alternative, :2026 + its own Postgres :5433) and exposed to dcode through
+# the native [async_subagents.browser-specialist] seam in
+# ~/.deepagents/config.toml. The main agent sees only start/check/update/
+# cancel/list_async_task tools; browser tool schemas never load locally.
+# The browser itself runs INSIDE an OpenSandbox container (see
+# deployments/browser-specialist/sandbox/Dockerfile): one long-lived sandbox
+# hosts mc_browser (MCP over HTTP) + Chromium, with no credentials and no
+# host reach — the graph tier holds the model token and talks to the
+# container over MCP HTTP.
+
+AEGRA_DIR := deployments/browser-specialist
+AEGRA_SITE := $(AEGRA_DIR)/.venv/lib/python3.13/site-packages
+AEGRA_PIDFILE ?= /tmp/aegra-dev.pid
+AEGRA_LOG ?= /tmp/aegra-dev.log
+BROWSER_SANDBOX_IMAGE := browser-specialist-sandbox:latest
+
+aegra-sandbox-image: ## Build the browser workload image (mc_browser + Chromium)
+	docker build -f $(AEGRA_DIR)/sandbox/Dockerfile -t $(BROWSER_SANDBOX_IMAGE) .
+
+aegra-sandbox-status: ## Health of the browser workload sandbox (OpenSandbox)
+	@cd $(AEGRA_DIR) && uv run python sandbox_ctl.py status
+
+aegra-sandbox-kill: ## Kill the persistent browser workload sandbox
+	@cd $(AEGRA_DIR) && uv run python sandbox_ctl.py kill
+
+aegra-patch: ## Apply the aegra thread-values conformance patch to the venv
+	@if grep -q "_latest_checkpoint_values" $(AEGRA_SITE)/aegra_api/api/threads.py 2>/dev/null; then \
+		echo "aegra patch already applied"; \
+	else \
+		patch --forward -p1 -d $(AEGRA_SITE) < $(AEGRA_DIR)/patches/aegra-thread-values.patch; \
+	fi
+
+aegra: aegra-patch ## Start the browser-specialist deployment (Aegra :2026, browser in OpenSandbox)
+	@cd $(AEGRA_DIR) && { [ -f .env ] || { echo "missing deployments/browser-specialist/.env (see README)"; exit 1; }; }
+	@docker image inspect $(BROWSER_SANDBOX_IMAGE) >/dev/null 2>&1 \
+		|| { echo "missing workload image — run: make aegra-sandbox-image"; exit 1; }
+	@if curl -sf http://127.0.0.1:2026/info >/dev/null 2>&1; then \
+		echo "Aegra already running (http://127.0.0.1:2026)"; \
+	else \
+		cd $(AEGRA_DIR) && setsid nohup uv run aegra dev --no-reload > $(AEGRA_LOG) 2>&1 < /dev/null & echo $$! > $(AEGRA_PIDFILE); \
+		for i in $$(seq 1 45); do curl -sf http://127.0.0.1:2026/info >/dev/null 2>&1 && break; sleep 1; done; \
+		curl -sf http://127.0.0.1:2026/info >/dev/null && echo "Aegra up (log: $(AEGRA_LOG))" || { echo "Aegra failed to start — check $(AEGRA_LOG)"; exit 1; }; \
+	fi
+
+aegra-status: ## Health-check the browser-specialist deployment
+	@curl -sf http://127.0.0.1:2026/info >/dev/null && echo "Aegra UP (http://127.0.0.1:2026)" \
+		|| (echo "Aegra DOWN — run: make aegra"; exit 1)
+	@cd $(AEGRA_DIR) && uv run python sandbox_ctl.py status
+
+aegra-stop: ## Stop Aegra (the browser sandbox is left running by design)
+	@OWN=$$(ss -tlnp 2>/dev/null | grep ':2026' | grep -oP 'pid=\K[0-9]+' | head -1); \
+	if [ -n "$$OWN" ]; then kill -9 $$OWN && echo "Aegra stopped (pid $$OWN)"; \
+	else echo "Aegra not running"; fi
+
+aegra-log: ## Tail the Aegra log
+	@tail -f $(AEGRA_LOG)

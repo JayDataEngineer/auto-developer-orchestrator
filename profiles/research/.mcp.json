@@ -25,19 +25,6 @@
     "nitter": {
       "type": "http",
       "url": "${MCP_NITTER_URL}"
-    },
-    "sandbox_browser": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--no-project",
-        "--with",
-        "fastmcp",
-        "--with",
-        "seleniumbase",
-        "python",
-        "/home/user/Documents/programs/vendor/dev/auto-developer-orchestrator/plugins/browser/mc_browser.py"
-      ]
     }
   }
 }
