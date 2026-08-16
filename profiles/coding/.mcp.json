@@ -1,22 +1,3 @@
 {
-  "mcpServers": {
-    "github": {
-      "command": "github-mcp-server",
-      "args": [
-        "stdio"
-      ],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
-      }
-    },
-    "opensandbox": {
-      "command": "opensandbox-mcp",
-      "args": [
-        "--domain",
-        "localhost:8080",
-        "--protocol",
-        "http"
-      ]
-    }
-  }
+  "mcpServers": {}
 }

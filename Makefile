@@ -114,7 +114,7 @@ sandbox-stop: ## Stop the OpenSandbox server
 
 DCODE_PY := $(HOME)/.local/share/uv/tools/deepagents-code/bin/python
 
-coding: ## dcode · coding profile (7 agents; github/opensandbox/browser MCP)
+coding: ## dcode · coding profile (6 agents; ZERO MCP — git/github via execute + gh CLI)
 	$(DCODE_PY) profiles/run.py coding
 
 research: ## dcode · research profile (6 agents; research/surreal/browser MCP)

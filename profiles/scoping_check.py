@@ -21,7 +21,8 @@ scoped agents. This check rebuilds every profile through dcode's own assembly
      (an unset URL silently serves zero tools — that is how nitter sat at
      0 tools for days behind a healthy container: hard FAIL, not a warn);
   6. declared-but-empty servers are WARNed (down servers masquerade as
-     "scoped clean"; the check names them so it can't be mistaken for passing).
+     "scoped clean"; the check names them so it can't be mistaken for passing)
+     — except profiles in EXPECTED_EMPTY_MCP, where zero servers is the design.
 
 Run: make scoping-check   (or: $(dcode python) profiles/scoping_check.py)
 """
@@ -44,6 +45,11 @@ EXPECTED_SCOPED = {
     "game": {"game-studio-docs-writer", "task-planner"},
     "research": set(), "invest": set(), "media": set(), "social": set(),
 }
+# Profiles that declare ZERO MCP servers on purpose (coding: git + github go
+# through `execute` + the gh CLI — 63 tool schemas were riding every request
+# for work the shell already does). Their "served 0 tools" is the design, not
+# an outage; any OTHER empty server still WARNs.
+EXPECTED_EMPTY_MCP = {"coding"}
 
 
 def _load_env() -> None:
@@ -129,7 +135,7 @@ async def main() -> int:
                 for t in info.tools:
                     owner[getattr(t, "name", str(t))] = info.name
                     live.add(getattr(t, "name", str(t)))
-                if not info.tools:
+                if not info.tools and prof not in EXPECTED_EMPTY_MCP:
                     warnings.append(f"{prof}: server '{info.name}' served 0 tools — down or "
                                     f"misconfigured. The deny-list covers its captured/declared "
                                     f"names; run plugins/tool-scoping/regenerate.py when it "

@@ -82,8 +82,9 @@ graph_id = "browser_specialist"
 ```
 
 The main agent sees only the five `*_async_task` middleware tools; none of the
-42 browser tool schemas load into any dcode session (coding profile: 19 MCP
-tools, zero browser tools). Delegating is native model behavior:
+42 browser tool schemas load into any dcode session (coding profile: 0 MCP
+tools — the lane runs on the 14 built-ins; git/github via `execute` + `gh`).
+Delegating is native model behavior:
 `start_async_task` (gated by dcode's HITL approval) → `check_async_task`
 until `success` → the specialist's final message arrives as the task result.
 
