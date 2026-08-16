@@ -14,8 +14,10 @@ resolution). Everything dcode reads is **authored in place**:
 - **`plugins/`** — the in-repo `orchestrator` marketplace: 6 skill
   families (deep-research, investment-analysis, twitter-automation,
   telegram-automation, game-studio-workflows, social-media-publishing)
-  carrying the operational scripts, plus the orchestrator-tools MCP server
-  (python exec + describe_image).
+  carrying the operational scripts, plus three tool plugins —
+  orchestrator-tools (python exec + describe_image), browser (the 42-tool
+  stealth `sandbox_browser` MCP), and opensandbox (the dcode sandbox
+  provider).
 - **`.deepagents/AGENTS.md`** — workspace instructions, appended to the main
   agent's system prompt every session.
 - **`.mcp.json`** — the project's MCP servers (dcode gates them behind
@@ -66,6 +68,15 @@ uv tool install opensandbox-mcp --with "mcp<2"
 uv tool install opensandbox-server
 ```
 
+**dcode's own `--sandbox` seam can drive it too** — the `opensandbox` plugin
+ships a provider (entry point `deepagents_code.sandbox_providers`) so
+dcode's execute/read/write/glob/grep run inside an OpenSandbox container:
+
+```bash
+uv pip install --python "$(uv tool dir)/deepagents-code/bin/python" ./plugins/opensandbox
+dcode --sandbox opensandbox
+```
+
 Daily use — `make sandbox` writes `~/.sandbox.toml` on first run
 (re-run `make sandbox-config` to regenerate); the server runs in insecure
 mode (no API key), which is fine for this single-user box:
@@ -103,6 +114,15 @@ dcode plugin list                         # shows enabled state
 - **Plugin skills are namespaced** — invoke as
   `/skill:deep-research@orchestrator:deep-research`. They don't show in
   `dcode skills list`; they load in-session.
+- **browser** restores the pux-era `mc_browser` as a FastMCP stdio server
+  (`sandbox_browser`, 42 tools: navigate/read/click/type_text/search/
+  screenshot/cookies/solve_captcha/...) driving a local Chrome/Chromium via
+  SeleniumBase Pure CDP Mode — no chromedriver, stealth flags, one Chrome per
+  server process. Env: `MC_BROWSER_CHROME` (binary override),
+  `MC_BROWSER_HEADLESS=1` for display-less hosts. Self-contained
+  (`uv run --with fastmcp --with seleniumbase`).
+- **opensandbox** ships the dcode sandbox provider (see the Sandbox section)
+  plus the usage skill.
 - **orchestrator-tools** restores the pux action tools as an MCP stdio
   server: `python` (host-side exec, JSON envelope) and `describe_image`
   (vision via an OpenAI-compatible endpoint — `VISION_API_URL` /

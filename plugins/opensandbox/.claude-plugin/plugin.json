@@ -1,0 +1,6 @@
+{
+  "name": "opensandbox",
+  "version": "0.1.0",
+  "description": "OpenSandbox platform integration: the dcode sandbox provider (dcode --sandbox opensandbox) plus usage skill. The MCP server lives in the project .mcp.json.",
+  "skills": "./skills"
+}

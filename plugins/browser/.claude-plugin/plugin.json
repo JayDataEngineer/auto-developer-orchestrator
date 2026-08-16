@@ -1,0 +1,6 @@
+{
+  "name": "browser",
+  "version": "1.0.0",
+  "description": "Stealth browser automation as an MCP server: the pux-era mc_browser (42 tools, SeleniumBase Pure CDP Mode) driving a local Chrome/Chromium. Pair with the opensandbox MCP/plugin for sandboxed browsers.",
+  "mcpServers": "./.mcp.json"
+}

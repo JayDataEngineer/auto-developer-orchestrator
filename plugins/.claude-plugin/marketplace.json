@@ -8,6 +8,18 @@
       "author": "JayDataEngineer"
     },
     {
+      "name": "browser",
+      "source": "./browser",
+      "description": "Stealth browser automation MCP (42 tools, Pure CDP mc_browser) driving local Chrome/Chromium",
+      "author": "JayDataEngineer"
+    },
+    {
+      "name": "opensandbox",
+      "source": "./opensandbox",
+      "description": "OpenSandbox platform integration: dcode sandbox provider (--sandbox opensandbox) + usage skill",
+      "author": "JayDataEngineer"
+    },
+    {
       "name": "deep-research",
       "source": "./deep-research",
       "description": "Deep Research Engine: Telegram/multimodal ingest, entity graph on SurrealDB, audit-graded article pipeline",
