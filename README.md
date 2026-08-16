@@ -22,8 +22,9 @@ resolution). Everything dcode reads is **authored in place**:
   agent's system prompt every session.
 - **`profiles/<name>/`** — scoped dcode project roots (roster subset + persona
   + lane-specific `.mcp.json`) launched by `profiles/run.py` — see Profiles.
-- **`.mcp.json`** — the project's MCP servers (dcode gates them behind
-  workspace trust on first run).
+- **`.mcp.json`** — EMPTY by design: MCP is opt-in per lane (context is too
+  expensive to spend by default). Servers live in `profiles/<name>/.mcp.json`;
+  a bare `dcode` loads none.
 - **root `AGENTS.md`** — this repo's developer guide (combined by dcode).
 
 Run it:
@@ -221,7 +222,7 @@ mode (no API key), which is fine for this single-user box:
 make sandbox                # start the server
 make sandbox-status         # health probe
 make sandbox-stop           # stop the server
-dcode                       # opensandbox tools arrive via .mcp.json
+dcode                       # opensandbox tools arrive via a lane's .mcp.json (root loads none)
 osb sandbox create --image python:3.12   # the upstream CLI, same server
 ```
 
@@ -231,7 +232,7 @@ osb sandbox create --image python:3.12   # the upstream CLI, same server
 |------|------|
 | `.deepagents/` | the authored dcode surface (agents, skills, workspace instructions) |
 | `profiles/` | scoped dcode project roots + the native-API launcher (`run.py`) |
-| `.mcp.json` | MCP servers (env placeholders like `${MCP_WEB_RESEARCH_URL}` resolve from the environment) |
+| `.mcp.json` | EMPTY — MCP is opt-in per lane; servers live in `profiles/<name>/.mcp.json` (env placeholders like `${MCP_WEB_RESEARCH_URL}` resolve from the environment) |
 | `plugins/` | the in-repo dcode marketplace (see below) — install with `dcode plugin install <name>@orchestrator` |
 | `infra/` | MCP-server infrastructure (media-mcp, nitter) + compose files |
 | `docs/` | engineering history (thin-architecture mandate, retired prod list, browser-specialist isolation record) |

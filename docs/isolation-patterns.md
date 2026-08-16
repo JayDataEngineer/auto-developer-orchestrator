@@ -68,8 +68,8 @@ toolstack out of the session and into a sandbox.
 
 | Level | Seam | Status |
 |---|---|---|
-| L0 | workspace `.mcp.json` — every server in every session | available; wrong for lanes |
-| L1 | profile `.mcp.json` — only the lane's servers load | **in place** (all six profiles) |
+| L0 | workspace `.mcp.json` — every server in every session | retired — root is EMPTY; MCP is opt-in per lane |
+| L1 | profile `.mcp.json` — only the lane's servers load | **in place** (all six profiles; coding declares zero) |
 | L2 | per-server trim: `allowedTools` in `.mcp.json` | **in place** (ray: 11 tools; web_research: 3) |
 | L2.5 | model-keyed harness exclusion — the bridge below | **in place** (3 agents scoped, `make scoping-check`) |
 | L3 | per-subagent `tools:` / `skills:` frontmatter | **not native** — upstream PR prepared (`feat/subagent-tools-skills-frontmatter`, langchain-ai/deepagents `libs/code/`) |
