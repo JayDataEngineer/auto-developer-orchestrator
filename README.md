@@ -54,21 +54,28 @@ handrolled container. Its server (Docker runtime) runs on `localhost:8080`;
 dcode reaches it through the `opensandbox` MCP server (19 tools:
 `sandbox_create`, `sandbox_connect`, `command_run`, `file_*`,
 `sandbox_healthcheck`, ...). Built-in environments cover command, filesystem
-and code interpreter, with browser/desktop examples upstream (chrome + VNC,
+and code interpreter, plus browser/desktop examples upstream (chrome + VNC,
 playwright, desktop, vscode).
 
+One-time install (uv tools). The `mcp<2` pin is required: upstream
+`opensandbox-mcp` 0.1.1 imports `mcp.server.fastmcp`, which mcp 2.x moved out.
+
 ```bash
-uv tool install opensandbox-cli       # the osb CLI
-uv tool install opensandbox-mcp --with "mcp<2"   # MCP server — upstream 0.1.1
-                                          # imports mcp.server.fastmcp, which
-                                          # mcp 2.x moved out; pin 1.x
-uv tool install opensandbox-server    # the sandbox server
-make sandbox-config      # once: write ~/.sandbox.toml (docker runtime example)
-make sandbox             # start the server (insecure mode, no API key)
-make sandbox-status      # health probe
-dcode                    # opensandbox tools arrive via .mcp.json
-osb sandbox create --image python:3.12   # the upstream CLI (same server)
-make sandbox-stop        # stop the server
+uv tool install opensandbox-cli
+uv tool install opensandbox-mcp --with "mcp<2"
+uv tool install opensandbox-server
+```
+
+Daily use — `make sandbox` writes `~/.sandbox.toml` on first run
+(re-run `make sandbox-config` to regenerate); the server runs in insecure
+mode (no API key), which is fine for this single-user box:
+
+```bash
+make sandbox                # start the server
+make sandbox-status         # health probe
+make sandbox-stop           # stop the server
+dcode                       # opensandbox tools arrive via .mcp.json
+osb sandbox create --image python:3.12   # the upstream CLI, same server
 ```
 
 ## Where things live

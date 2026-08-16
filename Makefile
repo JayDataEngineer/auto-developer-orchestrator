@@ -72,6 +72,7 @@ sandbox-config: ## Generate ~/.sandbox.toml from the docker-runtime example (onc
 	opensandbox-server init-config $(SANDBOX_CONFIG) --example docker
 
 sandbox: ## Start the OpenSandbox server (docker runtime, http://localhost:8080)
+	@[ -f $(SANDBOX_CONFIG) ] || opensandbox-server init-config $(SANDBOX_CONFIG) --example docker >/dev/null
 	@if python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/openapi.json', timeout=2)" 2>/dev/null; then \
 		echo "OpenSandbox server already running (localhost:8080)"; \
 	else \
