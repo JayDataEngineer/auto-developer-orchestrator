@@ -1,6 +1,0 @@
-[submodule "pux-harness"]
-	path = pux-harness
-	url = https://github.com/JayDataEngineer/pux-harness.git
-[submodule "infra/media-mcp"]
-	path = infra/media-mcp
-	url = https://github.com/JayDataEngineer/media-mcp.git

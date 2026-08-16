@@ -14,9 +14,9 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
-    "CapabilitiesSugarError",
     "AGENT_CAPABILITY_KINDS",
     "ORG_CAPABILITY_KINDS",
+    "CapabilitiesSugarError",
     "desugar_agent_capabilities",
     "org_mcp_items_from_dict",
 ]

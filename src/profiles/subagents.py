@@ -15,9 +15,8 @@ from typing import TYPE_CHECKING, Any
 
 from deepagents.middleware.subagents import SubAgent
 
-from profiles.loaders import _load_agent_spec, org_agent_slugs
-
 from middlewares.rubric import agent_middlewares
+from profiles.loaders import _load_agent_spec, org_agent_slugs
 from tools.resolve import resolve_tool_ref
 
 if TYPE_CHECKING:
@@ -28,9 +27,9 @@ if TYPE_CHECKING:
 def org_subagent_specs(
     org: str, *,
     project_root: Path,
-    mcp_tools_by_server: dict[str, list["BaseTool"]],
+    mcp_tools_by_server: dict[str, list[BaseTool]],
     model: Any,
-    sandbox: "BaseSandbox | None" = None,
+    sandbox: BaseSandbox | None = None,
 ) -> list[SubAgent]:
     """Every rostered agent of ``org`` as a native ``SubAgent`` dict.
 
@@ -44,7 +43,7 @@ def org_subagent_specs(
         if spec is None:
             raise FileNotFoundError(f"no agent {slug!r} for org {org!r}")
 
-        tools: list["BaseTool"] = [
+        tools: list[BaseTool] = [
             resolve_tool_ref(t, sandbox=sandbox) for t in (spec.get("tools") or [])
         ]
         for item in spec.get("mcp") or []:

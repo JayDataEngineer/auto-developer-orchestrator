@@ -17,10 +17,11 @@ from tools.registry import REGISTRY, Category, Requirements
 
 if TYPE_CHECKING:
     from deepagents.backends.sandbox import BaseSandbox
+
     from tools.registry import ToolSpec
 
 
-def _buildable_specs() -> dict[str, "ToolSpec"]:
+def _buildable_specs() -> dict[str, ToolSpec]:
     """Specialist REGISTRY slugs whose factory takes just ``sandbox=``. This is
     the DERIVED buildable surface — a new ``Requirements()``-only tool joins
     automatically, no second list to maintain."""
@@ -30,7 +31,7 @@ def _buildable_specs() -> dict[str, "ToolSpec"]:
     }
 
 
-def resolve_tool_ref(ref: str, *, sandbox: "BaseSandbox | None" = None) -> BaseTool:
+def resolve_tool_ref(ref: str, *, sandbox: BaseSandbox | None = None) -> BaseTool:
     """One ``tools:`` ref → a live tool.
 
     The tool executes against the process's shared sandbox (the same

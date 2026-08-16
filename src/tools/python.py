@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from deepagents.backends.sandbox import BaseSandbox
-
 import shlex
 
+from deepagents.backends.sandbox import BaseSandbox
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from langchain_core.tools import StructuredTool
-
-from ._shared import _result, _exec
+from ._shared import _exec, _result
 
 
 class _PythonArgs(BaseModel):

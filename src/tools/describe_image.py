@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+from deepagents.backends.sandbox import BaseSandbox
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from langchain_core.tools import StructuredTool
-
-from deepagents.backends.sandbox import BaseSandbox
-from ._shared import _tail, _result
-from ._media import _read_media, _invoke_primary_media, _onnx_describe, _model_name
+from ._media import _invoke_primary_media, _model_name, _onnx_describe, _read_media
+from ._shared import _result, _tail
 
 
 class _DescribeImageArgs(BaseModel):
@@ -62,7 +61,7 @@ def _describe_image_tool(
                     "model": _model_name(vision_model),
                     "source": "primary",
                 })
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — fallback net: any primary-model failure routes to the ONNX tier
                 primary_error = str(exc)
         {"primary_error": _tail(primary_error, 300)} if primary_error else {}
 

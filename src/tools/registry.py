@@ -7,30 +7,30 @@ report an honest error at call time (present + honest, never a silent drop).
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Sequence
-
-from langchain_core.tools import StructuredTool
+from typing import Any
 
 from deepagents.backends.sandbox import BaseSandbox
-from ._pux import PUX_PREFIX, PUX_GRADER_PREFIX
-from .python import _python_tool
-from .skills import _list_skills_tool
+from langchain_core.tools import StructuredTool
+
+from ._pux import PUX_GRADER_PREFIX, PUX_PREFIX
 from .describe_image import _describe_image_tool
-from .multimodal import _multimodal_tool, _multimodal_mega_tool
 from .desktop import (
-    _desktop_screenshot_tool,
     _desktop_click_tool,
-    _desktop_type_tool,
     _desktop_key_tool,
+    _desktop_screenshot_tool,
+    _desktop_type_tool,
 )
 from .grader import (
     _grader_execute_tool,
-    _grader_read_file_tool,
     _grader_grep_tool,
+    _grader_read_file_tool,
 )
-
+from .multimodal import _multimodal_mega_tool, _multimodal_tool
+from .python import _python_tool
+from .skills import _list_skills_tool
 
 # --- the vocabulary -------------------------------------------------------
 

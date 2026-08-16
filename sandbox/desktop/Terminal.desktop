@@ -1,9 +1,0 @@
-[Desktop Entry]
-Version=1.0
-Name=Terminal
-Comment=Terminal emulator
-Exec=xterm
-Terminal=false
-Type=Application
-Icon=utilities-terminal
-Categories=System;TerminalEmulator;

@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 
 def _exec(
-    sandbox: "BaseSandbox", command: str, timeout: int | None = None,
+    sandbox: BaseSandbox, command: str, timeout: int | None = None,
 ) -> tuple[str, int]:
     """Run ``command`` in ``sandbox``, return ``(output, exit_code)``.
 

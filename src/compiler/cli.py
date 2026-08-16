@@ -54,6 +54,12 @@ def _print_summary(label: str, summary: dict) -> None:
     agents = summary.get("agents") or []
     skills = summary.get("skills") or []
     mcp = summary.get("mcp") or []
+    if "plugins" in summary:  # the marketplace result carries plugins, not a roster
+        plugins = summary.get("plugins") or []
+        print(f"{label}: {len(plugins)} plugins -> {summary.get('out')}")
+        for name in plugins:
+            print(f"  plugin {name}")
+        return
     print(f"{label}: {len(agents)} agents, {len(skills)} skills, "
           f"{len(mcp)} mcp servers -> {summary.get('out')}")
     for name in agents:
@@ -82,9 +88,7 @@ def main() -> None:
     bootstrap_env_and_logging()
     args = _parse().parse_args()
     if args.cmd in ("sync", "check"):
-        if args.cmd == "sync" and args.check:
-            _do_check(args.project_root, args.out)
-        elif args.cmd == "check":
+        if args.cmd == "sync" and args.check or args.cmd == "check":
             _do_check(args.project_root, args.out)
         else:
             summary = emit_union(project_root=args.project_root, out=args.out)

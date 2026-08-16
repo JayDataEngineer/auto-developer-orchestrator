@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 from profiles.loaders import supervisor_skills_roots
 
 

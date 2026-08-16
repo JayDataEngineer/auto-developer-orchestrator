@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-from deepagents.backends.sandbox import BaseSandbox
-
 import json
 import shlex
 
+from deepagents.backends.sandbox import BaseSandbox
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from langchain_core.tools import StructuredTool
-
-from ._shared import _tail, _result, _NoArgs, _exec
-
+from ._shared import _exec, _NoArgs, _result, _tail
 
 _DISPLAY_ENV = "DISPLAY=:99"
 _DESKTOP_TIMEOUT = 15
@@ -27,7 +24,7 @@ def _exec_desktop(sandbox: BaseSandbox, op: str, cmd: str,
     is ``None`` and the caller synthesizes the result from ``out`` / its args."""
     try:
         out, exit_code = _exec(sandbox, cmd, timeout=timeout)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — exec net: any failure reports exec_failed instead of raising
         return _result({"success": False, "reason": "exec_failed",
                         "error": f"desktop {op}: {exc}"}), "", 0
     if exit_code != 0:
@@ -59,7 +56,7 @@ def _desktop_screenshot_tool(sandbox: BaseSandbox) -> StructuredTool:
             return _result({"success": False, "reason": "malformed_response",
                             "error": "desktop_screenshot: non-JSON output",
                             "detail": _tail(out, 400)})
-        parsed["ok"] = False if parsed.get("error") else True
+        parsed["ok"] = not parsed.get("error")
         return _result(parsed)
 
     return StructuredTool(

@@ -24,12 +24,11 @@ import pytest
 from profiles import _paths
 from profiles.loaders import (
     _load_agent_spec,
+    _org_path,  # the ONE resolver delegate
     build_system_prompt,
     discover_orgs,
     org_agent_slugs,
 )
-from profiles.loaders import _org_path  # the ONE resolver delegate
-
 
 # --- helper: create a test-library base in a temp dir ------------------------
 

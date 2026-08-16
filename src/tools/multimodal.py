@@ -5,17 +5,21 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
+from deepagents.backends.sandbox import BaseSandbox
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from langchain_core.tools import StructuredTool
-
-from deepagents.backends.sandbox import BaseSandbox
-from ._shared import _tail, _result, _exec
 from ._media import (
-    _read_media, _invoke_primary_media, _onnx_describe,
-    _media_kind, _extract_video_keyframes, _model_name, _IMAGE_FETCH_TIMEOUT,
+    _IMAGE_FETCH_TIMEOUT,
+    _extract_video_keyframes,
+    _invoke_primary_media,
+    _media_kind,
     _MediaNonAnswer,
+    _model_name,
+    _onnx_describe,
+    _read_media,
 )
+from ._shared import _exec, _result, _tail
 
 
 class _MultimodalArgs(BaseModel):
@@ -124,7 +128,7 @@ def _multimodal_tool(
                 "success": False, "media_type": kind, "reason": "model_non_answer",
                 "primary_error": _tail(str(exc), 300),
             })
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — terminal tier: any failure reports model_failed instead of raising
             return _result({
                 "success": False, "media_type": kind, "reason": "model_failed",
                 "primary_error": _tail(str(exc), 300),
@@ -168,7 +172,7 @@ def _multimodal_mega_tool(
                     "model": _model_name(vision_model),
                     "media_type": kind, "source": "primary",
                 })
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — fallback net: any primary-model failure routes to the ONNX tier
                 primary_error = str(exc)
         pe = {"primary_error": _tail(primary_error, 300)} if primary_error else {}
 
@@ -222,7 +226,7 @@ def _multimodal_mega_tool(
                     per_frame.append({"frame": fp, "success": True,
                                       "description": desc, "source": "primary"})
                     continue
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 — per-frame net: a bad frame falls through to ONNX, not the whole tool
                     frame_error = str(exc)
             d = _onnx_describe(sandbox, image_path=fp, image_url=None,
                                prompt=prompt, primary_error=frame_error)

@@ -12,9 +12,9 @@ from typing import Any
 
 import yaml
 
-from . import _paths
 from compiler.capabilities import desugar_agent_capabilities
 
+from . import _paths
 
 # --- pure helpers ----------------------------------------------------------
 
@@ -60,7 +60,7 @@ def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         raise ValueError(msg) from e
     if not isinstance(fm, dict):
         msg = f"frontmatter must be a YAML mapping, got {type(fm).__name__}"
-        raise ValueError(msg)
+        raise TypeError(msg)
     return fm, body.strip()
 
 
@@ -206,7 +206,7 @@ def _own_org_agent_slugs(name: str, project_root: Path) -> list[str]:
     data = yaml.safe_load(manifest.read_text()) or {}
     if not isinstance(data, dict):
         msg = f"{name}/org.yaml: top level must be a mapping, got {type(data).__name__}"
-        raise ValueError(msg)
+        raise TypeError(msg)
     return _parse_list(data.get("agents"))
 
 

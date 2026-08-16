@@ -35,7 +35,7 @@ DATA_DIR="$(cd "$DATA_DIR" && pwd)"
 export DATA_DIR
 
 RUN_DIR="artifacts/run-$(date +%Y-%m-%d)"
-SB="orgs/specialists/deep-research-engine/sandbox"
+SB="profiles/specialists/deep-research-engine/sandbox"
 mkdir -p "$RUN_DIR"
 
 echo "╔══════════════════════════════════════════════════════════════╗"

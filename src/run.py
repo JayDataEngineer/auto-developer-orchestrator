@@ -20,19 +20,17 @@ import tempfile
 from pathlib import Path
 from typing import Any, cast
 
-from langchain_core.language_models import BaseChatModel
-
 from deepagents.backends import LocalShellBackend
 from deepagents.graph import create_deep_agent
 from deepagents_code.app import run_textual_app
 from deepagents_code.config import _get_default_model_spec
 from deepagents_code.mcp_tools import MCPServerInfo, resolve_and_load_mcp_tools
+from langchain_core.language_models import BaseChatModel
 
 from profiles._paths import project_root as _default_project_root
-from protocol.mcp import _org_mcp_servers
 from profiles.loaders import build_system_prompt
-
 from profiles.subagents import org_subagent_specs
+from protocol.mcp import _org_mcp_servers
 from sandbox.local import local_backend
 
 # The org's temp ``.mcp.json`` is only read at load time, but keep it for the
@@ -142,7 +140,10 @@ async def launch(
         org, project_root=project_root, model=model, cwd=cwd)
     result = await run_textual_app(
         agent=agent,
-        backend=backend,
+        # run_textual_app annotates CompositeBackend | None, but dcode's own
+        # create_cli_agent (deepagents_code/agent.py) builds a bare
+        # LocalShellBackend and threads it into the same param — runtime-valid.
+        backend=backend,  # type: ignore[arg-type]
         assistant_id=f"pux-{org}",
         cwd=str(Path(cwd).resolve()) if cwd is not None else None,
     )

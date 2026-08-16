@@ -2,31 +2,55 @@
 name = "auto-developer-orchestrator"
 version = "0.1.0"
 requires-python = ">=3.12,<3.14"
-# The orchestrator depends on the pux-harness library (the deepagents Pux
-# harness: the slim org+skill compiler + the Docker sandbox runtimes).
-# pux-harness lives in its OWN repo (github.com/JayDataEngineer/pux-harness),
-# pinned here as a git submodule at ./pux-harness/ — so `git clone --recursive`
-# yields a known-compatible pair (the two share hard contracts: the
-# ``project_root()`` path-seam, the ``pux_harness.kit`` surface, the contract
-# tripwires). uv resolves it from the submodule path below.
-dependencies = ["pux-harness"]
+# The orchestrator IS a dcode workspace: the org tree (profiles/) projects onto
+# dcode's native surface via src/ (compiler, run.py) and runs inside dcode's
+# own TUI. The dependencies are the SDK the graph + TUI are built on —
+# deepagents (create_deep_agent, LocalShellBackend, RubricMiddleware) and
+# deepagents-code (run_textual_app, _get_default_model_spec,
+# resolve_and_load_mcp_tools) — pinned to the exact versions the operator's
+# `dcode` tool install resolves (deepagents-code 0.1.55 + deepagents 0.7.5).
+#
+# Deliberately NOT declared: openshell / langchain-nvidia-openshell (the old
+# OpenShell sandbox arm). langchain-nvidia-openshell pins deepagents<0.6 and
+# can therefore never coexist with the real SDK — the submodule pyproject was
+# unresolvable because of it. The opt-in PUX_SANDBOX=openshell path in
+# src/sandbox/exec.py fail-louds with install instructions instead.
+dependencies = [
+    "deepagents==0.7.5",
+    "deepagents-code[anthropic,openai]==0.1.55",
+    "anthropic>=0.100",
+    "langchain-anthropic>=1.5.3",
+    "langchain-openai",
+    "pyyaml",
+    "python-dotenv>=1.0",
+    "pydantic>=2",
+]
 
-# Resolve the orchestrator's pux-harness dep to the in-tree submodule checkout
-# (editable install into this repo's .venv), NOT PyPI. ``editable = true`` is
-# REQUIRED: without it uv installs a NON-editable physical copy that silently
-# diverges from the submodule source — the orchestrator tests would run a stale
-# snapshot and harness edits would look inert until a manual reinstall. Editable
-# makes the submodule source the live import target: edit + re-test, no reinstall.
-[tool.uv.sources]
-pux-harness = { path = "pux-harness", editable = true }
+[project.scripts]
+pux = "compiler.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# src/ is a src-layout workspace (no package named after the project) — the
+# wheel must carry every src package for `pux` + `uv run python -m compiler.cli`
+# to work from the installed venv.
+[tool.hatch.build.targets.wheel]
+packages = [
+    "src/compiler",
+    "src/profiles",
+    "src/tools",
+    "src/sandbox",
+    "src/middlewares",
+    "src/protocol",
+    "src/plugins",
+]
 
 [dependency-groups]
-dev = ["pytest", "pytest-asyncio", "ruff", "mypy"]
+dev = ["pytest", "pytest-asyncio", "ruff", "mypy", "types-PyYAML"]
 
 [tool.pytest.ini_options]
-# The workspace suite: src/ IS the kit (compiler, profiles, tools, sandbox),
-# imported via ``pythonpath = ["src", "."]``. The pux-harness submodule's own
-# suite still runs inside the submodule until it is removed (commit 3).
 testpaths = ["tests"]
 pythonpath = ["src", "."]
 # Async tests (src/profiles + tools exercise asyncio paths) use
@@ -49,13 +73,9 @@ python_version = "3.12"
 mypy_path = ["src"]
 explicit_package_bases = true
 
-# Scoped stubs — all three resolve at the commit-3 uv sync, none are checked
-# today because the current venv can't provision them:
-#   yaml                    — types-PyYAML not installed in the no-sync venv
-#   deepagents_code.*       — the venv's deepagents-code is the 0.0.1 stub
-#                             (no app.py); the real SDK lands at commit 3
-#   openshell*              — the opt-in sandbox arm; its langchain adapter
-#                             pins deepagents<0.6 so it is deliberately absent
+# Scoped stubs — only the opt-in sandbox arm stays untyped: its langchain
+# adapter pins deepagents<0.6 so it is deliberately absent (PUX_SANDBOX=openshell
+# fail-louds). yaml + deepagents_code.* resolve from the synced venv.
 [[tool.mypy.overrides]]
-module = ["yaml", "deepagents_code.*", "openshell", "langchain_nvidia_openshell"]
+module = ["openshell", "langchain_nvidia_openshell"]
 ignore_missing_imports = true

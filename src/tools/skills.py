@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from langchain_core.tools import StructuredTool
 
-from ._shared import _result, _NoArgs
 from ._pux import SKILL_FILE, _skills_dirs
+from ._shared import _NoArgs, _result
 
 
 def _parse_skill(raw: str) -> tuple[str, str]:

@@ -1,12 +1,13 @@
 # auto-developer-orchestrator — developer commands.
 #
-# First time setup:
-#   git clone --recurse-submodules <repo>
-#   make sandbox           # build the pux-sandbox Docker image
-#   make infra             # start SurrealDB + media-mcp (host-side services)
+# The repo IS a dcode workspace: profiles/ projects onto dcode's native surface
+# via src/ (the compiler + src/run.py). First time setup:
+#   uv sync              # deepagents 0.7.5 + deepagents-code 0.1.55 (dcode's own pins)
+#   make infra           # start SurrealDB + media-mcp (host-side services)
 #
 # After that, any org works:
-#   uv run pux direct --org deep-research-engine --task "..."
+#   uv run python src/run.py --org deep-research-engine --dry-run
+#   uv run pux compile --org coder --out /tmp/staging
 #
 # GPU media-mcp (optional, faster ASR/vision):
 #   MEDIA_DEVICE=cuda TORCH_VARIANT=cu124 make infra
@@ -14,9 +15,9 @@
 # Remote infra (NOT managed here — game-studio only, bring your own GPU box):
 #   Ray cluster on Tailscale — LLM, TTS, 3D, music, ComfyUI.
 
-.PHONY: help submodules infra infra-core infra-embeddings \
+.PHONY: help infra infra-core infra-embeddings \
         infra-status infra-down infra-destroy infra-logs \
-        sandbox sandbox-shell test test-quick test-live clean
+        test clean
 
 INFRA_COMPOSE := docker compose -f docker-compose.infra.yml
 
@@ -24,14 +25,9 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
-# ── Submodules ──────────────────────────────────────────────────────────────
-
-submodules: ## Init + update git submodules (pux-harness, infra/media-mcp)
-	git submodule update --init --recursive
-
 # ── Host-side infrastructure ────────────────────────────────────────────────
 
-infra: ## Start SurrealDB + media-mcp (embeddings load in-sandbox via sentence-transformers)
+infra: ## Start SurrealDB + media-mcp (host-side services)
 	$(INFRA_COMPOSE) up -d surrealdb media-mcp
 	@echo ""
 	@echo "Waiting for SurrealDB to be healthy..."
@@ -39,9 +35,8 @@ infra: ## Start SurrealDB + media-mcp (embeddings load in-sandbox via sentence-t
 		&& echo "SurrealDB healthy" || echo "WARNING: SurrealDB not healthy — check: make infra-logs"
 	@echo "SurrealDB at http://localhost:8000 (root:root, MCP at /mcp)"
 	@echo "media-mcp at http://localhost:8101"
-	@echo "embeddings: microsoft/harrier-oss-v1-0.6b loads in-sandbox (sandbox/embed.py)"
 	@echo ""
-	@echo "Infra is up. Run any org: uv run pux direct --org deep-research-engine --task '...'"
+	@echo "Infra is up. Run any org: uv run python src/run.py --org deep-research-engine --dry-run"
 
 infra-core: ## Start SurrealDB only (lighter — skip media-mcp)
 	$(INFRA_COMPOSE) up -d surrealdb
@@ -64,25 +59,10 @@ infra-destroy: ## Stop infra AND wipe data volumes (irreversible)
 	$(INFRA_COMPOSE) down -v
 	@echo "Data volumes wiped. Next 'make infra' starts fresh."
 
-# ── Sandbox image ───────────────────────────────────────────────────────────
-
-sandbox: ## Build the pux-sandbox Docker image
-	docker build -t pux-sandbox:latest sandbox/
-
-sandbox-shell: ## Drop into a shell in the sandbox container
-	docker exec -it orchestrator-sandbox-mcp-default bash || \
-		echo "Sandbox not running. Start it with: uv run pux direct --org general --task 'hello'"
-
 # ── Tests ───────────────────────────────────────────────────────────────────
 
 test: ## Run the full test suite (no live/E2E tests)
 	uv run pytest -q
-
-test-quick: ## Run the fastest unit tests only
-	uv run pytest tests/contract/ tests/sandbox/ -q
-
-test-live: ## Run live E2E tests (needs PUX_E2E=1 + .env with API key)
-	PUX_E2E=1 uv run pytest tests/integration/ -q
 
 # ── Misc ────────────────────────────────────────────────────────────────────
 

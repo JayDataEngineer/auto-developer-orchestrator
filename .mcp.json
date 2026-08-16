@@ -1,9 +1,75 @@
 {
   "mcpServers": {
-    "pux": {
-      "command": "pux",
-      "args": ["mcp", "--transport", "stdio"],
-      "env": {}
+    "web_research": {
+      "type": "http",
+      "url": "${PUX_MCP_WEB_RESEARCH_URL}",
+      "allowedTools": [
+        "search",
+        "fetch",
+        "research"
+      ]
+    },
+    "sandbox_browser": {
+      "command": "docker",
+      "args": [
+        "exec",
+        "-i",
+        "${PUX_SANDBOX_CONTAINER}",
+        "mc_browser.py"
+      ]
+    },
+    "github": {
+      "command": "github-mcp-server",
+      "args": [
+        "stdio"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "surreal": {
+      "type": "http",
+      "url": "${PUX_MCP_SURREAL_URL}",
+      "headers": {
+        "surreal-ns": "research",
+        "surreal-db": "main",
+        "Authorization": "Basic ${PUX_MCP_SURREAL_AUTH}"
+      }
+    },
+    "godot-mcp-runtime": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "godot-mcp-runtime"
+      ],
+      "env": {
+        "GODOT_PATH": "${GODOT_PATH}"
+      }
+    },
+    "ray_inference": {
+      "type": "http",
+      "url": "${PUX_MCP_RAY_URL}",
+      "allowedTools": [
+        "list_models",
+        "describe_model",
+        "generate",
+        "list_pipelines",
+        "describe_pipeline",
+        "validate_pipeline",
+        "start_pipeline",
+        "get_pipeline_status",
+        "stop_pipeline",
+        "resume_pipeline",
+        "list_pipeline_runs"
+      ]
+    },
+    "equibles": {
+      "type": "http",
+      "url": "${PUX_MCP_EQUIBLES_URL}"
+    },
+    "nitter": {
+      "type": "http",
+      "url": "${PUX_MCP_NITTER_URL}"
     }
   }
 }

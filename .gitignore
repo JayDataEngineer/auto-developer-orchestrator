@@ -46,7 +46,6 @@ backend/tmp/
 # ignored (see Archives / backups below) so it isn't committed by accident.
 data/
 **/.pux/
-.deepagents/
 
 # Org runtime data (5G+ of model weights, venvs, parsed dumps, memos).
 # Org *templates* ship as AGENTS.md + agents/<slug>.md + skills/ + sandbox/ —

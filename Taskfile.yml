@@ -7,59 +7,34 @@ tasks:
       - task --list
 
   sync:
-    desc: Sync the orchestrator venv (uv sync; resolves pux-harness submodule dep)
+    desc: Sync the orchestrator venv (uv sync; deepagents 0.7.5 + deepagents-code 0.1.55, dcode's own pins)
     cmds:
       - uv sync
 
   test:
     desc: Run the pytest suite (no Docker, no tokens)
     cmds:
-      - uv run --no-sync pytest -q
+      - uv run pytest -q
 
   lint:
-    desc: Run ruff linter
+    desc: Run ruff linter (workspace core — src/ + tests/; infra/media-mcp is its own project)
     cmds:
-      - uv run --no-sync ruff check .
+      - uv run ruff check src/ tests/
 
   typecheck:
     desc: Run mypy type checker
     cmds:
-      - uv run --no-sync mypy .
+      - uv run mypy src/
 
   emit:
     desc: Emit the union dcode surface (.deepagents/ + .mcp.json) at the project root
     cmds:
-      - uv run --no-sync python -m compiler.cli sync
+      - uv run pux sync
 
   check:
     desc: Drift-check the checked-in dcode surface (exit 1 on drift)
     cmds:
-      - uv run --no-sync python -m compiler.cli check
-
-  contract:
-    desc: Validate the declarative org contract (all 10 orgs green; no server)
-    cmds:
-      - uv run pux check-contract
-
-  serve:
-    desc: Start the Agent Protocol server locally (Aegra dev on :9988; prod uses scripts/start_pux_aegra.sh)
-    cmds:
-      - cd pux-harness && uv run --extra prod aegra dev
-
-  sandbox:start:
-    desc: Boot the Docker sandbox container (harness-owned; self-boots on first tool use anyway)
-    cmds:
-      - pux sandbox start
-
-  sandbox:stop:
-    desc: Stop + remove the Docker sandbox container
-    cmds:
-      - pux sandbox stop
-
-  sandbox:status:
-    desc: Show the running sandbox container (name/image/status/network/runtime)
-    cmds:
-      - pux sandbox status
+      - uv run pux check
 
   hooks:
     desc: Install pre-commit hooks (gitleaks secret scan)

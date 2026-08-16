@@ -1,9 +1,0 @@
-[Desktop Entry]
-Version=1.0
-Name=File Browser
-Comment=Browse files
-Exec=pcmanfm /sandbox/workspace
-Terminal=false
-Type=Application
-Icon=system-file-manager
-Categories=System;FileManager;

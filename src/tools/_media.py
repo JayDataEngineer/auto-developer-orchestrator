@@ -14,10 +14,10 @@ import shlex
 from pathlib import Path
 from typing import Any
 
+from deepagents.backends.sandbox import BaseSandbox
 from langchain_core.messages import HumanMessage
 
-from deepagents.backends.sandbox import BaseSandbox
-from ._shared import _tail, _exec
+from ._shared import _exec, _tail
 
 log = logging.getLogger(__name__)
 
@@ -211,7 +211,8 @@ def _onnx_describe(
     cmd = " ".join(parts)
     try:
         out, exit_code = _exec(sandbox, cmd, timeout=_DESCRIBE_IMAGE_TIMEOUT)
-    except Exception as exc:  # container vanished / docker API error
+    except Exception as exc:  # noqa: BLE001 — fallback net: container vanished / docker API error routes to a reason, not a raise
+
         return {"success": False, "reason": "exec_failed", "error": str(exc), **pe}
     if exit_code == 0:
         try:

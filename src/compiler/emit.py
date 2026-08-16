@@ -45,7 +45,10 @@ import yaml
 
 from profiles._paths import project_root as _default_project_root
 from profiles.loaders import (
-    _load_agent_spec, discover_orgs, org_agent_slugs, supervisor_skills_roots,
+    _load_agent_spec,
+    discover_orgs,
+    org_agent_slugs,
+    supervisor_skills_roots,
 )
 from protocol.mcp import _org_mcp_servers
 

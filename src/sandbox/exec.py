@@ -29,7 +29,7 @@ def resolve_project_path() -> str:
 
     The sandbox workspace is bind-mounted from this path. URL schemes are
     rejected: their colons corrupt path parsing."""
-    from profiles._paths import project_root  # noqa: PLC0415
+    from profiles._paths import project_root
     p = os.environ.get("PUX_PROJECT_PATH")
     if not p:
         p = str(project_root())
@@ -72,8 +72,8 @@ def _make_backend() -> BaseSandbox:
 def _make_openshell_backend() -> BaseSandbox:
     global _openshell_sb
     try:
-        import openshell  # noqa: PLC0415
-        from langchain_nvidia_openshell import OpenShellSandbox  # noqa: PLC0415
+        import openshell
+        from langchain_nvidia_openshell import OpenShellSandbox
     except ImportError as exc:
         raise RuntimeError(
             "PUX_SANDBOX=openshell but the OpenShell SDK is not installed. "
@@ -93,5 +93,5 @@ def _make_local_backend() -> BaseSandbox:
     Used by tests / ``kit compile`` / anywhere the OpenShell gateway isn't
     available. deepagents' ``LocalShellBackend`` implements the full
     ``BaseSandbox`` surface (``execute``/``ls``/``read``/``upload_files``/…)."""
-    from deepagents.backends.local_shell import LocalShellBackend  # noqa: PLC0415
+    from deepagents.backends.local_shell import LocalShellBackend
     return LocalShellBackend()  # type: ignore[return-value]  # implements the sandbox protocol; deepagents' BaseSandbox typing is loose (its CLI passes LocalShellBackend)

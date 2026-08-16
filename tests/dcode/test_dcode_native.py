@@ -15,17 +15,16 @@ import pytest
 
 pytest.importorskip("deepagents_code.app")  # the wrapper IS dcode — nothing to test without it
 
-from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
-from langchain_core.tools import BaseTool
-
 from deepagents.backends import LocalShellBackend
 from deepagents.graph import create_deep_agent
 from deepagents.middleware import RubricMiddleware
 from deepagents.middleware.subagents import SubAgent
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.tools import BaseTool
 
-from run import build_org_agent, plan
 from middlewares.rubric import agent_middlewares
 from profiles.subagents import org_subagent_specs
+from run import build_org_agent, plan
 from tools.resolve import resolve_tool_ref
 
 # The parent repo (profiles/ tree) — pux-harness is a submodule of it; skip the
