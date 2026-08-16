@@ -1,7 +1,8 @@
 """The thin-wrapper compiler (``kit.emit_dcode``) — org tree → dcode-native.
 
-``pux compile --org <org>`` projects the SAME source of truth that ``pux``
-runs in-harness onto the three surfaces Deep Agents Code discovers natively:
+``pux compile --org <org>`` projects the SAME source of truth the runtime
+loads (the profiles/ tree) onto the three surfaces Deep Agents Code
+discovers natively:
 ``.deepagents/agents/<name>/AGENTS.md`` (roster, extends-chains materialized,
 pux-only frontmatter dropped), ``.deepagents/skills/`` (supervisor skill
 roots), and ``.mcp.json`` (``capabilities:`` mcp refs → the standard
@@ -23,8 +24,8 @@ import yaml
 from compiler.emit import emit_dcode
 from plugins.marketplace import emit_marketplace, emit_plugin
 
-# The parent repo (profiles/ tree) — pux-harness is a submodule of it; skip the
-# real-repo tests when checked out standalone.
+# The parent repo (profiles/ tree) — the real-repo tests activate only when the
+# workspace tree is present (_HAS_ORGS); they skip when the suite runs standalone.
 _REPO = Path(__file__).resolve().parents[2]
 _HAS_ORGS = (_REPO / "profiles" / "_shared" / "tool_servers.yaml").is_file()
 

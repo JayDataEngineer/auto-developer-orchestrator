@@ -6,20 +6,20 @@ The SurrealDB context engine persists everything: items, transcripts, face/voice
 
 ## How to query
 
-EVERY query in this skill runs via the `mcp__surreal__query` tool. You call it by name — you never construct URLs, run curl, or manage auth. The tool handles the SurrealDB connection internally.
+EVERY query in this skill runs via the `surreal_query` tool. You call it by name — you never construct URLs, run curl, or manage auth. The tool handles the SurrealDB connection internally.
 
 ```
-mcp__surreal__query(sql="<SurrealQL statement>")
+surreal_query(sql="<SurrealQL statement>")
 ```
 
-For quick table counts: `mcp__surreal__query(sql="RETURN count(SELECT id FROM item)")`.
+For quick table counts: `surreal_query(sql="RETURN count(SELECT id FROM item)")`.
 
 ## What runs have happened?
 
 The `ingestion_run` table tracks every pipeline run. Query it first.
 
 ```
-mcp__surreal__query(sql="SELECT id, started_at, completed_at, source_path, pipeline_version, status, stats FROM ingestion_run ORDER BY started_at DESC")
+surreal_query(sql="SELECT id, started_at, completed_at, source_path, pipeline_version, status, stats FROM ingestion_run ORDER BY started_at DESC")
 ```
 
 ## What tasks have we worked on? (cross-session history)
@@ -28,23 +28,23 @@ The `task_run` table records every CTO task — what the user asked, who the CTO
 
 ```
 # Recent tasks
-mcp__surreal__query(sql="SELECT id, prompt, mode, started_at, completed_at, delegated_to, artifacts_produced, status, summary FROM task_run ORDER BY started_at DESC LIMIT 20")
+surreal_query(sql="SELECT id, prompt, mode, started_at, completed_at, delegated_to, artifacts_produced, status, summary FROM task_run ORDER BY started_at DESC LIMIT 20")
 
 # Tasks that produced an article
-mcp__surreal__query(sql="SELECT prompt, started_at, summary FROM task_run WHERE 'artifacts/article.md' IN artifacts_produced")
+surreal_query(sql="SELECT prompt, started_at, summary FROM task_run WHERE 'artifacts/article.md' IN artifacts_produced")
 
 # Still-running tasks (should usually be empty)
-mcp__surreal__query(sql="SELECT prompt, started_at FROM task_run WHERE status = 'running'")
+surreal_query(sql="SELECT prompt, started_at FROM task_run WHERE status = 'running'")
 ```
 
-The CTO writes one `task_run` record per user request via `mcp__surreal__query` at the beginning and `mcp__surreal__query` at the end. Tasks that errored mid-loop show `status='running'` until manually cleaned up.
+The CTO writes one `task_run` record per user request via `surreal_query` at the beginning and `surreal_query` at the end. Tasks that errored mid-loop show `status='running'` until manually cleaned up.
 
 ## Current state of the DB
 
 Quick row counts for every table:
 
 ```
-mcp__surreal__query(sql="RETURN count(SELECT id FROM item)")
+surreal_query(sql="RETURN count(SELECT id FROM item)")
 ```
 
 ## What's missing? (the auditor's questions)
@@ -54,7 +54,7 @@ Run the 7 audit queries from [[AUDIT_QUALITY_GATES]] — they pin down exactly w
 Quick: what voice/video items have NO transcript?
 
 ```
-mcp__surreal__query(sql="SELECT id, type, sender, timestamp FROM item WHERE type IN ['voice','video'] AND count(->transcribed_by->transcript) = 0 LIMIT 20")
+surreal_query(sql="SELECT id, type, sender, timestamp FROM item WHERE type IN ['voice','video'] AND count(->transcribed_by->transcript) = 0 LIMIT 20")
 ```
 
 ## What's already known about a person?
@@ -63,16 +63,16 @@ Cross-modal linking means a single `person` node can have both face and voice ce
 
 ```
 # All persons with face AND voice linked (the gold standard)
-mcp__surreal__query(sql="SELECT canonical_name, face_count, voice_count, face_centroid != NONE AS has_face, voice_centroid != NONE AS has_voice FROM person")
+surreal_query(sql="SELECT canonical_name, face_count, voice_count, face_centroid != NONE AS has_face, voice_centroid != NONE AS has_voice FROM person")
 
 # Everything about a specific person (by name)
-mcp__surreal__query(sql="SELECT *, ->appears_in->item.{type, timestamp, sender} AS photos, ->speaks_in->item.{type, timestamp, sender} AS recordings FROM person WHERE canonical_name CONTAINS 'Grady'")
+surreal_query(sql="SELECT *, ->appears_in->item.{type, timestamp, sender} AS photos, ->speaks_in->item.{type, timestamp, sender} AS recordings FROM person WHERE canonical_name CONTAINS 'Grady'")
 ```
 
 ## What's already known about a topic?
 
 ```
-mcp__surreal__query(sql="SELECT name, keywords, summary, count(->mentions->item) AS mentions FROM topic ORDER BY mentions DESC")
+surreal_query(sql="SELECT name, keywords, summary, count(->mentions->item) AS mentions FROM topic ORDER BY mentions DESC")
 ```
 
 ## Decision rules
@@ -90,9 +90,9 @@ mcp__surreal__query(sql="SELECT name, keywords, summary, count(->mentions->item)
 
 The pipeline is **idempotent at the DB level** — every row uses UPSERT with a deterministic id, so re-running ingest produces the same state. No duplicates. This is the core design contract of the persistence layer.
 
-1. **Full re-ingest** (for major model changes): delete the relevant tables, then re-run. The `mcp__surreal__query` tool can run DELETE statements.
+1. **Full re-ingest** (for major model changes): delete the relevant tables, then re-run. The `surreal_query` tool can run DELETE statements.
    ```
-   mcp__surreal__query(sql="DELETE FROM item; DELETE FROM transcript; DELETE FROM person; DELETE FROM speaker_turn; DELETE FROM face_appearance; DELETE FROM topic; DELETE FROM appears_in; DELETE FROM transcribed_by; DELETE FROM speaks_in; DELETE FROM mentions; DELETE FROM extracted_from;")
+   surreal_query(sql="DELETE FROM item; DELETE FROM transcript; DELETE FROM person; DELETE FROM speaker_turn; DELETE FROM face_appearance; DELETE FROM topic; DELETE FROM appears_in; DELETE FROM transcribed_by; DELETE FROM speaks_in; DELETE FROM mentions; DELETE FROM extracted_from;")
    ```
    File caches in the work_dir will speed up re-processing.
 

@@ -1,318 +1,152 @@
-# Pux
+# Pux — a dcode workspace
 
-**Deepagents (Python/LangGraph) driving a Docker sandbox.** Pux is an agent
-orchestrator: a [deepagents](https://docs.langchain.com/oss/python/deepagents)
-agent layer served over the [LangChain Agent
-Protocol](https://langchain-ai.github.io/agent-protocol/), backed by a Docker
-sandbox that exposes bash / file / browser / desktop / vision tools.
+**This repo IS a [dcode](https://docs.langchain.com/oss/python/deepagents) (Deep
+Agents Code) workspace.** The org tree (`profiles/`) projects onto dcode's
+native surface — `.deepagents/` agents + skills and `.mcp.json` servers — via a
+small compiler in `src/`, and every org runs inside dcode's own graph builder
+(`create_deep_agent`) and TUI (`run_textual_app`). There is no separate harness
+library, no dual track, no re-implementation: a bare `dcode` run in this repo
+shows the full union roster.
 
-This repo is the **orchestrator app**: it owns `orgs/`, the `sandbox/` Docker
-image, the integration `tests/`, and the optional `site/` web UI. The agent
-layer is a separate library — **`pux-harness/`** — pinned as a git submodule
-([github.com/JayDataEngineer/pux-harness](https://github.com/JayDataEngineer/pux-harness)),
-consumed by uv as a path dependency (`[tool.uv.sources] pux-harness = { path = "pux-harness" }`).
+- **`profiles/`** — the declarative SSOT. Per-org `org.yaml` roster,
+  `AGENTS.md` CTO prompt, `agents/*.md` specialists (frontmatter: name /
+  description / tools / model), `skills/`, `policy.yaml` (egress, creds,
+  budgets), and `sandbox/` data.
+- **`src/`** — the projection layer + launch:
+  - `compiler/` — `pux sync` / `pux check` / `pux compile` (profiles/ → dcode
+    surface). `emit_union` emits every rostered agent + skill across all
+    non-underscore orgs; `check` drift-compares the checked-in surface.
+  - `run.py` — `build_org_agent` = `create_deep_agent` (dcode's own), `launch`
+    = `run_textual_app` (dcode's own TUI). Model default is dcode's own
+    `_get_default_model_spec()`.
+  - `profiles/` loaders (`build_system_prompt`, `discover_orgs`,
+    `org_agent_slugs`, `_load_agent_spec`), `tools/` (the 11-tool registry),
+    `middlewares/` (deepagents `RubricMiddleware`), `sandbox/` (deepagents
+    `LocalShellBackend`), `protocol/` (.mcp.json projection), `plugins/`
+    (the `pux-orgs` plugin marketplace).
+- **`.deepagents/` + `.mcp.json`** — dcode's discovered surface. **Checked in
+  and sync-tested**: `uv run pux check` exits 1 on any drift from the compiler
+  output.
+- **`infra/`** — host-side services (SurrealDB + media-mcp); `media-mcp` is
+  its own submodule.
 
-- **`pux-harness/`** (Python, uv; submodule) — the deepagents Pux harness
-  library. Builds per-org deepagents graphs (a CTO + specialist subagents),
-  serves them over the Agent Protocol REST API, and ships the `pux` console
-  script. Native fs/shell tools (`ls` / `read_file` / `write_file` /
-  `edit_file` / `glob` / `grep` / `execute`) run through a `PuxSandboxBackend`;
-  the 40 specialist tools (`browser_*`, `desktop_*`, `describe_image`,
-  `python`, skills) are native Python too. `container.py` owns
-  the Docker sandbox lifecycle + declarative policy enforcement.
-  The harness boots its own container directly over the Docker SDK — there is
-  no Go server.
-- **`pux` console script** (`pux_harness.cli:main`) — the native CLI
-  dispatches `pux direct` / `pux sandbox` / `pux <client-cmd>` into the harness.
-  (The Agent Protocol server is **Aegra** in prod — `scripts/start_pux_aegra.sh` —
-  or `langgraph dev` / `aegra dev` for local smoke; it is no longer a `pux`
-  subcommand.)
-
-Single-tenant, localhost-only, no auth. One pux process = one project = one
-sandbox.
+The server lane is deepagents' own: the **deepagents-acp package + a JSON
+adapter file**. No repo server code, no custom overlay.
 
 ## Quick start
 
 ```bash
-# 1. Clone (with submodules) + sync the orchestrator venv
-git clone --recursive <this-repo> pux && cd pux
-uv sync                    # resolves pux-harness from the ./pux-harness/ submodule
+# 1. Sync the workspace venv (deepagents 0.7.5 + deepagents-code 0.1.55 — dcode's own pins)
+uv sync
 
 # 2. Start host-side infra (SurrealDB + media-mcp) — one command
 make infra                 # or: make infra-core (SurrealDB only, lighter)
                            # GPU: MEDIA_DEVICE=cuda TORCH_VARIANT=cu124 make infra
 
-# 3. Build the sandbox image (one-time)
-make sandbox               # or: cd sandbox && docker build -t pux-sandbox:latest .
-
-# 4. Boot the sandbox container (harness-owned; or it self-boots on first tool use)
-pux sandbox start                  # with $PUX_ORG policy if set
-
-# 5. Start the Agent Protocol server
-#    prod (this repo's deployment): scripts/start_pux_aegra.sh   (Aegra on :9988)
-#    local keyless dev:             cd pux-harness && uv run langgraph dev
-
-# 6. Drive it (client — requires the server running)
-pux agents                         # list the 14 orgs
-pux dispatch --org general "describe this project"   # one-shot run → thread_id
-pux resume                         # list recent threads (+ task snippets, offline-capable)
-pux show <thread_id>               # prints last msg + the exact resume command
-
-# No server? In-process runner for dev:
-pux direct --org general --task "describe this project"   # runs the graph directly, no HTTP
+# 3. Run an org inside dcode's own TUI
+uv run python src/run.py --org coder          # dcode's run_textual_app
+uv run python src/run.py --org coder --dry-run  # the plan: model, MCP servers,
+                                               # subagents + tools + middleware
+# …or just run dcode in the repo — .deepagents/ is the union roster
+dcode
 ```
-
-### What `make infra` starts
 
 | Service | Port | Used by |
 |---------|------|---------|
-| **SurrealDB** | `localhost:8000` | deep-research-engine (ns: research, db: main), game-studio, social-media-pipeline. The shared knowledge graph — persists across runs, query it to resume research. |
-| **media-mcp** | `localhost:8101` | deep-research-engine (Parakeet ASR + Pyannote diarization + Florence-2 vision). Built from the `infra/media-mcp` submodule. |
+| **SurrealDB** | `localhost:8000` | deep-research-engine (ns: research, db: main), game-studio, social-media-pipeline. The shared knowledge graph — persists across runs. |
+| **media-mcp** | `localhost:8101` | deep-research-engine (ASR + diarization + vision). Built from the `infra/media-mcp` submodule. |
 | **ollama** | `localhost:11434` | Optional (`make infra-embeddings`). Embedding model for SurrealDB vector search. |
 
-The sandbox reaches these via `host.docker.internal` (the docker gateway). Orgs
-that need host-side services declare the URLs in their `policy.yaml`
-`sandbox.env` block — no manual configuration needed. Ray cluster (LLM, TTS,
-3D, music) is NOT managed here — only game-studio needs it; bring your own GPU
-box or set `OPENROUTER_API_KEY` for LLM fallback.
+Orgs declare host-side service URLs in their `policy.yaml` `sandbox.env` block.
+Ray cluster (LLM, TTS, 3D, music) is NOT managed here — bring your own GPU box
+or set `OPENROUTER_API_KEY` for LLM fallback.
 
-The Agent Protocol server is **Aegra** in prod (OSS langgraph-api drop-in —
-`scripts/start_pux_aegra.sh`, binds the Tailscale IP on :9988) or `langgraph dev`
-/ `aegra dev` for local smoke; the `pux` client defaults to
-`http://127.0.0.1:9988` (override with `PUX_API_URL`). There is no Go server —
-the harness drives the Docker sandbox directly over the SDK.
-
-## Subcommands
+## The `pux` compiler
 
 | Subcommand | What it does |
 |------------|-------------|
-| _(server)_ | The Agent Protocol server is **Aegra** (prod: `scripts/start_pux_aegra.sh`) or `langgraph dev` / `aegra dev` (local). Not a `pux` subcommand. |
-| `pux direct --org <name> --task "..."` | In-process runner — no server. The verify/dev path. |
-| `pux sandbox <projects\|prune-sessions>` | Sandbox wayfinding — list active project paths and prune stale session state. |
-| `pux agents` | List orgs as Agent Protocol agents (+ their specialists). |
-| `pux dispatch --org <name> "task"` | Ephemeral blocking run; prints the answer + a resumable `thread_id`. |
-| `pux resume [--org <name>]` | List recent threads (with task snippets + offline fallback to the sqlite store when the server is down). The first half of "pick up where I left off". |
-| `pux show <thread_id>` | Print a thread's last message + status, AND the exact `pux direct --thread <id> --task "…"` command to resume it. Works offline. |
-| `pux history <thread_id>` | Print a thread's revision history (langgraph checkpoints). |
-| `pux run <thread_id> "task"` | Background run on an existing thread → `run_id`. |
-| `pux wait <run_id>` | Block for a background run's output. |
-| `pux direct --thread <thread_id> --task "…"` | **Resume a thread in-process** — the checkpointer restores the full conversation, the agent sees every prior turn. No server needed. |
-
-## Tool surface
-
-fs/shell is **deepagents-native** (via `PuxSandboxBackend.execute()` → docker
-exec inside the container); all 40 specialists are **`pux_sandbox_*`** native
-Python tools too. The container lifecycle moved into
-`container.py`; the Go bridge was deleted — every model-visible path is
-Python:
-
-| Tool | Backed by |
-|------|----------|
-| `ls` / `read_file` / `write_file` / `edit_file` / `glob` / `grep` / `execute` | native — `PuxSandboxBackend.execute()` → docker exec (8a) |
-| `python` | native — docker exec `python3 -c` (8b) |
-| `list_skills` | native — host FS `orgs/_shared/skills/` + each `orgs/<name>/skills/` (8c). Discovery aid; bodies peeked via native `read_file`. |
-| `describe_image` | native — **driving-model PRIMARY** (mimo-v2.5 multimodal) → in-sandbox ONNX fallback (8d) |
-| `multimodal` | native — image **or** audio **or** video + a PROMPT → multimodal model (18.B). Returns the model's reasoning or an HONEST error; **no silent fallback** (the value is the prompt-conditioned judgment — e.g. "is this audio intelligible?" — that a generic describer can't give). |
-| `multimodal_mega` | native — resilient sibling of `multimodal`: model first, then a per-type WATERFALL on failure (image→ONNX, audio→honest-unavailable, video→ffmpeg keyframes→per-frame image waterfall) (18.B). Use when you want SOMETHING back even if the model is down. |
-| `browser_*` (autopilot surface) | native — `curl` to in-sandbox `sb_server.py` via docker exec (8e). Navigate/click/type/screenshot/evaluate PLUS the action set: `search`/`scroll`/`go_back`/`wait`/`find_text`/`extract`/`extract_images`/`save_screenshot`/`download`/`upload`/`tabs`/`new_tab`/`switch_tab`/`close_tab`/`dropdown_options`/`select_dropdown`/`save_session`/`restore_session`. Each tool's docstring carries the autopilot knowledge; the shared `browser` agent is a lean loop over them. |
-| `desktop_screenshot` / `_click` / `_type` / `_key` | native — `xdotool` + `desktop_observe.py` via docker exec (8f) |
-
-All paths the tools report are **inside the sandbox container**; the project is
-bind-mounted at `/sandbox/workspace/`. `create_deep_agent` injects
-`FilesystemMiddleware(backend)` into every subagent, so native fs tools are
-always available regardless of a subagent's `tools:` whitelist.
+| `uv run pux sync` | Emit the union dcode surface at the project root — `.deepagents/` agents + skills + merged `.mcp.json` (foreign entries preserved, `${VAR}` pass-through). |
+| `uv run pux check` | Drift-check the checked-in surface (exit 1 on drift). |
+| `uv run pux compile --org <name> --out <dir>` | Emit one org's dcode layout into a staging dir. |
+| `uv run pux compile --marketplace --out <dir>` | Emit every org as a dcode plugin + the `pux-orgs` marketplace catalog (`dcode plugin marketplace add <dir> && dcode plugin install <org>@pux-orgs`). |
 
 ## Org system
 
-Orgs are markdown-driven and **declaratively contracted**. Drop a directory
-under `orgs/<name>/`:
+Orgs are markdown-driven. Drop a directory under `profiles/<name>/`:
 
 ```
-orgs/<name>/
+profiles/<name>/
 ├── AGENTS.md       # CTO system prompt body (prose only — no frontmatter)
 ├── org.yaml        # specialist roster: `agents: [slug, …]`
-├── policy.yaml     # optional: egress ACLs, creds, sandbox image/tier, cookies
-└── profile.yaml    # optional: per-org overrides (prompt suffix, tool overrides, models map, rubric verify-gate)
+├── policy.yaml     # optional: egress ACLs, creds, budgets
+├── agents/*.md     # one file per specialist (frontmatter: name/description/tools/model)
+└── skills/         # org skills (union-emitted to .deepagents/skills/)
 ```
 
-`pux --org <name>` (in-process) / `dispatch --org <name>` (server) appends the
-body to the base system prompt — the main agent becomes that org's CTO and
-delegates to its declared specialists via the `task` tool.
+`uv run python src/run.py --org <name>` appends the org's prompt to the base
+system prompt — the main agent becomes that org's CTO and delegates to its
+declared specialists via the `task` tool. Cross-org agents live under
+`profiles/_shared/agents/`; an org specializes one by dropping a same-named
+`<slug>.md` in its own `agents/` dir. Underscore-prefixed orgs (`_shared`,
+`_demo`) are internal and never emitted.
 
-**`dev-bot` is the Claude-Code-equivalent coding org.** Its `AGENTS.md` is a
-10-pattern coding state machine (PLAN → EXECUTE → RECOVER → ESCALATE, risk-tiered
-autonomy, think-aloud-then-act, verify-or-die), and its `profile.yaml` opts into
-the **`RubricMiddleware` verify-gate**: after the agent implements, a grader
-sub-agent runs the test suite + reads the diff + greps for regressions and gates
-the deliverable on a ship rubric (`satisfied` / `needs_revision` / revise, up to
-`max_iterations`). Override the rubric per-run with `--rubric`:
+**`coder` is the Claude-Code-equivalent coding org.** Its `profile.yaml` opts
+into the **`RubricMiddleware` verify-gate**: after the agent implements, a
+grader sub-agent runs the test suite + reads the diff + greps for regressions
+and gates the deliverable on a ship rubric (`satisfied` / `needs_revision` /
+revise, up to `max_iterations`).
 
-```bash
-pux direct --org dev-bot --rubric "- must include a docstring" "add foo(x) to src/bar.py + a test"
-```
+## Tool surface
 
-Specialist subagents are ONE file each — `orgs/<name>/agents/<slug>.md` (YAML
-frontmatter: `name`, `description`, optional `tools`/`skills`/`model`; body =
-the system-prompt prose). Cross-org agents live under `orgs/_shared/agents/`
-(an org specializes one by dropping a same-named `<slug>.md` in its own
-`agents/` dir). The org contract enforces that every `org.yaml` slug resolves
-to a `.md` with the required frontmatter keys + a non-empty body (the
-`no-legacy-agent-py` tripwire permanently forbids the old `.pi/agents/*.py`
-form), every `tools:` entry is a real tool (native fs or a `pux_sandbox_*`
-specialist), and any `policy.yaml` is schema-valid:
+The sandbox is **deepagents' `LocalShellBackend`** (the same backend dcode's
+CLI uses — no container, no gateway). The 11 tools under `src/tools/` are
+registry-keyed and resolved per subagent `tools:` refs:
 
-```bash
-uv run pux check-contract   # exit 0 = green
-```
+| Tool | Backed by |
+|------|----------|
+| `python` | `LocalShellBackend` — execute `python3 -c` (src/tools/python.py) |
+| `skills` | host FS `profiles/_shared/skills/` + each `profiles/<name>/skills/` |
+| `describe_image` | driving-model PRIMARY (multimodal) → in-sandbox ONNX fallback |
+| `multimodal` / `multimodal_mega` | image/audio/video + a PROMPT → the multimodal model; honest errors, tiered waterfall, **no silent fallback** |
+| `desktop_screenshot` / `_click` / `_type` / `_key` | `xdotool`-driven desktop observation |
+| `grader` | rubric evaluation (used by `RubricMiddleware`) |
 
-## Threads & history
-
-The Agent Protocol server persists threads + checkpoint history in SQLite
-(`<project>/.pux/agent-protocol.sqlite`). Every run (ephemeral or background)
-writes a resumable thread; revisions are langgraph checkpoints:
-
-```bash
-pux dispatch --org general "..."   # → thread_id
-pux resume                         # list threads (with task snippets; offline-capable)
-pux show <thread_id>               # last message + status + the resume command
-pux history <thread_id>            # revisions
-pux run <thread_id> "follow up"    # continue on the same thread (server mode)
-pux direct --thread <thread_id> --task "follow up"   # continue in-process (no server)
-```
-
-## Picking up where you left off (session preservation)
-
-A run is **not single-use**. Every thread's full conversation is checkpointed
-to disk, the sandbox can be frozen in place (no teardown), and the workspace
-bind-mount means files appear on the host the moment the agent writes them.
-Resume is the default; export is the optional extra.
-
-### The short version
-
-```bash
-pux resume                                    # list threads (+ task snippets)
-pux show dre-deadbeef                         # prints last msg + the resume cmd
-pux direct --thread dre-deadbeef --task "now write the substack version"
-# (equivalently: pux run dre-deadbeef "now write the substack version"  → run_id)
-
-# Freeze the sandbox between sessions instead of stop/start:
-pux sandbox pause                             # cgroup freezer — processes frozen, memory resident
-pux sandbox unpause                           # thaw — every process resumes in place
-```
-
-`pux direct --thread <id>` and `pux run <id> "…"` both route through the
-langgraph checkpointer. The agent on resume **sees every prior turn** — the
-research, the brief, the citations — as if the process never stopped. This
-holds whether the original run was `pux direct` or `pux dispatch`.
-
-### What persists, and where
-
-Every run writes to **four layers**, each with a different persistence story.
-`pux sandbox status` surfaces the sandbox ID + persist volume + thread store
-location so you can verify the state is safe before stopping.
-
-| Layer | Where it lives | Survives `sandbox stop`? | How to retrieve |
-|-------|----------------|--------------------------|-----------------|
-| Conversation + checkpoints | SQLite at `<project>/.pux/agent-protocol.sqlite` (or Postgres under Aegra prod) | yes | `pux resume`, `pux show <id>`, `pux direct --thread <id>` |
-| Workspace files (`artifacts/`, `memos/`, `.pux/sessions/`, `wild-runs/`) | **bind-mount** — `<project>/<dir>/` on host the moment the agent writes | yes (host files) | `ls <project>/artifacts/` |
-| Per-thread provenance | `<project>/.pux/sessions/<thread_id>.meta.json` (written by `pux direct`) | yes | `cat <project>/.pux/sessions/<thread_id>.meta.json` |
-| Chrome profile + apt list + `/root` dotfiles | **named Docker volume** `sandbox-<id>-persist` | yes — `destroy()` starts a stopped container to snapshot before removing; `pause`/`unpause` keeps the container alive without teardown | `pux sandbox status` (shows volume size); `pux sandbox dump-persist` for a tarball |
-
-**`PUX_SANDBOX_ID` (defaults to `mcp-default`) is the key for the named
-persist volume.** Do NOT change it between runs — doing so orphans the old
-volume (Chrome profile, installs, dotfiles) and starts a fresh one. The
-`pux sandbox status` output names the volume explicitly so you can verify.
-
-### `pause` vs `stop` — when to use which
-
-| Action | Container | Processes | Memory | Use when |
-|--------|-----------|-----------|--------|----------|
-| `pause` | stays running (frozen) | frozen in place | resident | you'll resume within hours; want zero re-boot cost |
-| `stop`  | removed | killed | gone (volume survives) | you're done for the day; frees RAM |
-| `unpause` | still running | resumed mid-instruction | resident | continuing a paused session |
-
-`pause` is the right answer to "I want to come back to this exact session
-after lunch." `stop` is the right answer to "I'm done with the sandbox
-entirely." **The thread store survives both** — `pux direct --thread <id>`
-works regardless of container state (it boots a fresh container if needed,
-then restores the conversation from the checkpointer).
-
-## Tests
-
-```bash
-# from the repo root — `tests/` is the orchestrator integration suite (org
-# contract, delegation, export, stack/graph/acp against the real orgs/ tree +
-# the container-side sb_server.py JS). The pux-harness library's own
-# org-agnostic suite lives in the submodule at pux-harness/tests/.
-uv run pytest -q
-```
-
-The server tests use FastAPI's `TestClient` with a stub graph (no tokens, no
-Docker) to lock the REST envelope + thread/run CRUD; the real LLM-driven run
-is proven end-to-end in the verify log (`pux direct --org general --task "..."`).
+An `mcp:` ref in a subagent must name a server the org has actually declared —
+unknown refs raise at build time; the org's declared capability surface can
+never silently shrink.
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────┐
-│ pux (console_scripts → cli.py)          │  native CLI
-└──────────────┬───────────────────────────┘
-               │ Agent Protocol REST (httpx)
-┌──────────────▼───────────────────────────┐
-│ aegra serve / langgraph dev (:9988)      │  Agent Protocol server
-│  deepagents org graphs; langgraph-api    │  owns checkpointer + store
-└──────────────┬───────────────────────────┘
-               │ deepagents graph + PuxSandboxBackend
-┌──────────────▼───────────────────────────┐
-│ harness (Python, deepagents)             │  40 specialists NATIVE; no MCP hop
-│  container.py (lifecycle + policy) +     │  for fs/shell OR specialists
-│  docker_exec.py (docker exec)            │
-└──────────────┬───────────────────────────┘
-               │ Docker SDK (create / exec / stop)
-┌──────────────▼───────────────────────────┐
-│ pux-sandbox container                    │
-│  Chrome + Xvfb + xdotool + tesseract +   │
-│  supervisord + /workspace bind-mount     │
-└──────────────────────────────────────────┘
+dcode (the SDK, unpinned by us)
+ ├─ create_deep_agent          ← src/run.py build_org_agent (dcode's own graph builder)
+ ├─ run_textual_app            ← src/run.py launch (dcode's own TUI)
+ ├─ LocalShellBackend          ← src/sandbox/local.py (dcode's own sandbox backend)
+ ├─ RubricMiddleware           ← src/middlewares/rubric.py (dcode's own rubric gate)
+ └─ _get_default_model_spec    ← src/run.py model default (dcode's own config)
+        │
+        └── profiles/  ──(compiler)──▶  .deepagents/  .mcp.json   (checked in)
 ```
 
-There is no Go server on this branch. The Go MCP tree + JSON-RPC bridge were
-deleted — every model-visible path (fs, shell, the 40 specialists,
-and the container lifecycle) lives in the Python harness and drives the sandbox
-directly over the Docker SDK.
+The compiler (`src/compiler/`) is pure data → format projection: profiles/
+tree → dcode's file surface. Zero monkey patches, zero re-implementations.
 
-## Web UI (`site/`)
+The server lane (when a server is needed) is deepagents' own **ACP package +
+a JSON adapter file** pointing at the dcode-native graph — never custom code.
 
-`site/` is an OPTIONAL, standalone React/Vite/CopilotKit frontend — a browser
-workbench for the harness (chat sidebar + editor / terminal / sandbox / VNC
-panels). It is NOT a member of any workspace: the repo root is a uv workspace,
-and `site/` carries its own `package.json` + `package-lock.json` + `tsconfig.json`
-(`rm -rf site/` leaves the rest of the repo untouched). It talks to a running
-harness two ways — the chat sidebar hits the AG-UI endpoint at
-`http://127.0.0.1:9988/agui/<org>` (proxied through a small Node BFF in
-`site/server/`), and thread/run/agent CRUD goes to the Agent Protocol REST API
-at `:9988` directly. Run it from `site/`:
+## Tests
 
 ```bash
-scripts/start_pux_aegra.sh &            # Agent Protocol server on :9988 (Aegra)
-cd site && npm install && npm run dev   # vite (5176) + Node BFF (3001)
+uv run pytest -q        # workspace suite: compiler, loaders, tools, dcode-native
+uv run pux check        # the checked-in .deepagents/ + .mcp.json match the compiler
 ```
 
-Open http://127.0.0.1:5176. See [`site/README.md`](site/README.md) for details.
+## History
 
-## Branch layout
-
-- **`pi-pivot`** — current. Deepagents pivot: Phases 0–18 shipped (harness +
-  native sandbox, declarative contract, TS harness deleted, Agent Protocol
-  server + client, all 10 orgs ported to RUN on deepagents, the policy engine
-  ported Go→Python + its enforcement wired into `container.py`, proactive
-  context-offload, the entire Go sandbox re-hosted in Python — fs/shell + all
-  40 specialists via direct `docker exec`, container lifecycle + policy
-  enforcement harness-owned — and the Go MCP server + JSON-RPC bridge deleted).
-  TUI as Agent Protocol consumer + SSE remains.
-- **`master`** — pre-pivot MVP. Slim Go MCP server with in-process agent loop.
-- **`v0.2.0-pre-pi-mono`** — tag of master HEAD before the pivot. Safety net.
-
-## License
-
-See [LICENSE](LICENSE).
+This repo previously hosted a dual-track harness (a custom deepagents graph
+assembly + a custom Agent Protocol server overlay) pinned as a git submodule.
+On 2026-08-16 the submodule, the overlay, and the legacy lanes were deleted:
+the repo became the dcode workspace it is now. `orgs/` was renamed
+`profiles/` (folder-only; the concept vocabulary — `--org`, `org.yaml`,
+`org_agent_slugs`, `discover_orgs`, `PUX_ORG_PATHS`, `pux-orgs` — is
+unchanged). See `docs/` for the engineering history.

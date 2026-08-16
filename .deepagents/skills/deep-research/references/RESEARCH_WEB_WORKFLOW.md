@@ -1,10 +1,10 @@
 # RESEARCH_WEB_WORKFLOW
 
-The web-researcher's checklist. Loaded automatically into the web-researcher's prompt via skills_dir.
+The web-researcher's checklist. A skill reference — read it when researching.
 
 ## Strategy
 
-The web-mcp server exposes a combined search+scrape tool, a lightweight search-only tool, a single-page fetch tool, a domain-mapper, a deep crawler, and a structured-data extractor. **Check your tool list for the actual names** — they all live under the `mcp__web__` prefix. Use the combined search+scrape tool as the default; it returns full page content, not just titles. Escalate to the deep crawler only when you need many pages from one site.
+The `web_research` MCP server arms three tools: `web_research_research` (search + read top results in one call — the default; returns full page content, not just titles), `web_research_search` (lightweight title/snippet list), and `web_research_fetch` (read one known URL). No crawler or sitemap-mapper is armed — for bulk discovery, iterate `web_research_search`/`web_research_research` over the query space instead.
 
 ## Workflow
 
@@ -22,11 +22,11 @@ Restate the user's research question in your own words. Then list 3-5 sub-questi
 
 ### Step 2 — Search per sub-question
 
-Call the combined search+scrape tool with each sub-question as the `query`. Default `max_results=3, depth=quick`. For load-bearing sub-questions, escalate to `depth=deep` and `max_results=5`.
+Call `web_research_research` with each sub-question as the `query`. Default `max_results=3, depth=quick`. For load-bearing sub-questions, escalate to `depth=deep` and `max_results=5`.
 
 ### Step 3 — Deepen on load-bearing sources
 
-For each source that you'll cite, follow up with the single-page fetch tool on the URL. This gets you the full page text, not just the snippet. The snippet is often misleading.
+For each source that you'll cite, follow up with `web_research_fetch` on the URL. This gets you the full page text, not just the snippet. The snippet is often misleading.
 
 ### Step 4 — Read every image
 
@@ -70,10 +70,10 @@ If you find only echo-chamber sources, note that in `_INDEX.md`.
 <optional: caveats, related findings, follow-ups>
 ```
 
-**(b) SurrealDB source record** via `mcp__surreal__upsert`:
+**(b) SurrealDB source record** via `surreal_upsert`:
 
 ```bash
-mcp__surreal__upsert(table="source", data={
+surreal_upsert(table="source", data={
   "kind": "web", "url": "https://example.com/article", "title": "Article Title",
   "author": "Author Name", "published_at": "2026-06-15",
   "content": <read finding-slug.md>,
@@ -91,7 +91,7 @@ This atomically:
 **When to link person_ids**: only when the source directly discusses or quotes a person. If the person doesn't exist in the DB yet, create them via `upsert-person`:
 
 ```bash
-mcp__surreal__upsert(table="person", data={"canonical_name": "Elon Musk", "role": "subject", "notes": "CEO of SpaceX, quoted in this article about Starship"})
+surreal_upsert(table="person", data={"canonical_name": "Elon Musk", "role": "subject", "notes": "CEO of SpaceX, quoted in this article about Starship"})
 ```
 
 Only create persons for individuals the source is **about** or **quotes directly** — not every proper noun. Use your judgment.
@@ -135,5 +135,5 @@ If you stop with gaps, **say so explicitly** in `_INDEX.md`. Don't paper over.
 - **Search-result farming** — many "Top 10 X" sites exist purely to game search results. Skip them.
 - **Snippets lie** — Google's featured snippet is sometimes wrong. Always scrape the actual page.
 - **Date drift** — a 2018 article republished in 2024 still says 2018 things. Always check publication date, not "X years ago".
-- **Archive.org fallback** — if a page is 404, try `https://web.archive.org/web/*/<url>` via the single-page fetch tool.
+- **Archive.org fallback** — if a page is 404, try `https://web.archive.org/web/*/<url>` via `web_research_fetch`.
 - **Skipping images** — the most falsifiable claims often live in screenshots and infographics; read them.

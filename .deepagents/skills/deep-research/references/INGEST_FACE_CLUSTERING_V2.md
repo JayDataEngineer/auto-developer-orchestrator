@@ -15,7 +15,7 @@ You want to answer "who appears in these images, and where?" — producing `face
 
 ## Tool
 
-`mcp__media__embed_faces` — InsightFace buffalo_l (SCRFD-10GF detector + MobileFaceNet-22k recognizer, ~30MB total). One call per image returns:
+`media_embed_faces` — InsightFace buffalo_l (SCRFD-10GF detector + MobileFaceNet-22k recognizer, ~30MB total). One call per image returns:
 ```json
 {
   "success": true,
@@ -73,7 +73,7 @@ Iterate the image list, call `embed_faces` per image, accumulate results. Write 
 results = []
 for image_path in all_images:
     url = serve_via_http(image_path)
-    res = mcp__media__embed_faces(imageSource=url)
+    res = media_embed_faces(imageSource=url)
     if res["success"] and res["count"] > 0:
         for face in res["faces"]:
             results.append({
@@ -102,7 +102,7 @@ print(json.dumps(embeddings))
 " > /tmp/face_vectors.json
 ```
 
-Then call `mcp__media__cluster_embeddings` with the embeddings array. Defaults (`min_samples=3`, `min_cluster_size=3`) work for personal-scale corpora. Tune lower if you have <20 faces; higher if you have >500.
+Then call `media_cluster_embeddings` with the embeddings array. Defaults (`min_samples=3`, `min_cluster_size=3`) work for personal-scale corpora. Tune lower if you have <20 faces; higher if you have >500.
 
 Response:
 ```json
@@ -126,7 +126,7 @@ Response:
 For each face in `face_embeddings.json` (using its cluster label from step 3), write a SurrealDB record:
 
 ```bash
-mcp__surreal__create(table="face_appearance", data= '{
+surreal_create(table="face_appearance", data= '{
   "id": "face_001",
   "item_id": "photo_108",
   "image_path": "data/.../photo_108.jpg",
@@ -140,7 +140,7 @@ mcp__surreal__create(table="face_appearance", data= '{
 For keyframes, also store `frame_sec` (computed from filename pattern `_0001.jpg` → 1 second in):
 
 ```bash
-mcp__surreal__create(table="face_appearance", data= '{
+surreal_create(table="face_appearance", data= '{
   "id": "face_042",
   "item_id": "video_2",
   "image_path": ".../video_2_0042.jpg",
@@ -159,7 +159,7 @@ One `person` per cluster:
 
 ```bash
 for cluster_id in 0 1 2 3; do
-    mcp__surreal__create(table="person", data= "{
+    surreal_create(table="person", data= "{
       \"id\": \"person_${cluster_id}\",
       \"canonical_name\": null,
       \"face_centroid\": <from cluster centroids output>,
@@ -177,7 +177,7 @@ Don't try to assign canonical names yet — that's a separate supervised step (o
 For each `face_appearance` record, link its person → source item:
 
 ```bash
-mcp__surreal__relate(
+surreal_relate(
     --from person:person_0 --edge appears_in --to item:photo_108 \
     --data '{"role": "photographed", "face_appearance_id": "face_001"}'
 ```

@@ -5,115 +5,74 @@ These are the deferred items the upstream-contract pivot left open, parked so th
 prod path (phone→Hermes→ACP/Agent-Protocol→dev-bot) could ship first. Each is
 scoped, sized, and tagged with its tracking task.
 
-The governing context: `[[upstream-protocol-pivot]]` — bind ALL protocol surfaces
-UPSTREAM. P1+P2+P2.5 SHIPPED+PROVEN (keystone + real `compile_org` org graphs both
-serve upstream via `langgraph dev`; full `langgraph_sdk` surface green). The items
-below are P3/P4 + known defects.
+**Post-fold verdict (2026-08):** the prod path's HTTP/server half died with the
+pre-fold harness. The workspace is a dcode workspace: the only graph surface is
+deepagents' own ACP package (`deepagents-acp`) plus a JSON adapter file — there
+is no repo server code, no AG-UI lane, no langgraph-api deployment. Every item
+below is therefore retired-with-the-lane or superseded; **nothing here is open
+work**. Each section records its disposition so nobody re-researches.
 
 ---
 
-## P3 — Retire the hand-rolled `server.py` REST lane  (task #15)
+## P3 — Retire the hand-rolled `server.py` REST lane (task #15) — MOOT
 
-**Why it's deferred:** the prod build reuses the EXISTING `pux serve` (uvicorn +
-FastAPI `server.py`) as the Agent Protocol HTTP backend. It works today and is
-proven. Retiring it is a clean-up, not a blocker.
-
-**The work:**
-- `pux_harness/runtime/server.py` reimplements the Agent Protocol REST surface
-  (assistants/threads/runs/store) that the UPSTREAM `langgraph-api` runtime (launched
-  by `langgraph dev` / `langgraph build`) already serves — proven by
-  `scripts/upstream_keystone.py` driving the full `langgraph_sdk` surface green.
-- Retire = make `pux serve` a THIN launcher of the upstream runtime
-  (`langgraph dev --config langgraph.json` style) instead of the hand-rolled app,
-  OR delete it and point the MCP wrapper + AG-UI mount straight at the upstream ASGI app.
-- MUST land a contract test first that pins the exact HTTP surface (`/threads`,
-  `/runs/stream`, `/store/items`, SSE event shapes) so the cutover is verifiable
-  (no-legacy-left-behind: the OLD form becomes a permanent contract failure only
-  AFTER the upstream form is proven equivalent on every endpoint).
-
-**Sizing:** medium. The risk is the SSE event-shape parity + the
-shared-`BaseStore` seam (already fixed — ONE store on `app.state.base_store`, see
-`[[store-rest-surface]]`).
+The lane it would retire is gone. The hand-rolled Agent Protocol REST surface
+(assistants/threads/runs/store, served by `pux serve` / uvicorn) was retired
+with the harness at the 2026-08 fold. The Agent Protocol surface is now
+deepagents' own `deepagents-acp` package plus a JSON adapter file in the
+workspace — no repo server code. The old contract-test-first plan
+(`/threads`, `/runs/stream`, `/store/items` SSE shapes) never needed to land:
+there is no cutover because there is no hand-rolled app.
 
 ---
 
-## P4 — Rework the Export lane → MDA project structure  (task #16, feeds `[[plan-dynamic-tools-and-export]]`)
+## P4 — Rework the Export lane → MDA project structure (task #16) — SUPERSEDED
 
-**Why it's deferred:** export already ships (the export.py data/ leak is a permanent
-contract — `[[export-data-credential-leak-fixed]]`). The rework changes the TARGET
-shape, not whether export works.
-
-**The work (canonical design lives in `docs/dynamic-tools-and-packaging.md`):**
-- Export an org as a **Managed Deep Agents project** (`[[managed-deep-agents]]`):
-  `agent.py` emitting `define_deep_agent(...)` + `instructions.md` + `skills/` +
-  `tools/` + `middleware/` + `schedules/` + `sandbox/` + `connectors/mcp.*` + `.env`.
-- Consumer runs `mda dev` (local, = `langgraph-cli`, same wire format as our AP lane)
-  or `mda deploy` (hosted beta). Zero lock-in: identical to what `pux serve` serves.
-- Level (c) Dynamic Tools (agent-authored `lib/`, prunable, graduates→sandbox) is the
-  other half of P4 — reuse-first: `oras` (OCI), gitleaks/ruff/uv (in-repo),
-  APS-*shaped* manifest (v0.1, not dependent), `.agent` ruled out (patent).
-- Own only thin glue (`PACK_HOOK_REGISTRY`).
-
-**Sizing:** large. Blocked on nothing for the local `mda dev` path (package is public);
-hosted `mda deploy` waits on private-beta access.
+The export lane died with the harness. The surviving packaging story is
+**marketplace emission**: `pux compile --marketplace` (`src/plugins/marketplace.py`)
+emits each org as an installable dcode plugin plus the marketplace catalog —
+portable orgs are *installed*, not exported to a Managed Deep Agents project.
+The MDA shape (`agent.py` + `instructions.md` + `tools/` + `middleware/` +
+`connectors/mcp.*`), the `mda dev`/`mda deploy` consumer path, and the level (c)
+dynamic-tools half (agent-authored `lib/`, `oras` OCI, gitleaks/ruff/uv,
+APS-shaped manifest) are all retired — see `docs/dynamic-tools-and-packaging.md`
+for the full disposition.
 
 ---
 
-## AG-UI defects #5 / #6 / #7  (task #9) — ✅ RESOLVED 2026-07-08
+## AG-UI defects #5 / #6 / #7 (task #9) — HISTORICAL
 
-**Resolved by verify-against-current-version.** Re-derived the defects by
-driving the LIVE AG-UI lane against the current stack (ag-ui-langgraph `0.0.42`
-+ the prod model layer's default `glm-5.2`). All 4 `tests/server/test_agui_live.py`
-tests green (29.4s), including the ask_user interrupt→resume round-trip.
-
-The headline defect — "incremental `TEXT_MESSAGE_*` streaming broken, deltas
-pass through as `RAW`" — is **moot**: it was MiMo-specific (MiMo's langgraph
-deltas didn't map); `glm-5.2` streams a proper `TEXT_MESSAGE_START`→`CONTENT`→
-`END` lifecycle. The `RAW` events that still appear are benign graph-lifecycle
-passthrough (`on_chain_start`, etc.), not untranslated message deltas.
-
-**no-legacy-left-behind:** `test_agui_general_streams_text` previously declined
-to assert incremental streaming (its docstring said "out of scope"). Now that
-streaming works it's a **permanent contract** — the test asserts the
-`TEXT_MESSAGE_*` lifecycle and prefers streamed deltas over the
-`MESSAGES_SNAPSHOT` fallback, so a RAW-passthrough regression fails loud. A
-pux-side event-rewriter was correctly rejected (`[[rely-on-upstream]]` — it
-would fight the upstream adapter; the real fix was the model/version advance).
-
-**Why it was deferred (context):** AG-UI (the web SSE lane, CopilotKit
-`/agui/{org}`) is NOT on the prod path — Hermes speaks MCP, not AG-UI. The
-phone→Hermes flow never touches AG-UI.
+The AG-UI web SSE lane (CopilotKit `/agui/{org}`, the ag-ui-langgraph adapter)
+was part of the retired server lane — there is no AG-UI mount post-fold. The
+defect analysis is historical: the "incremental `TEXT_MESSAGE_*` streaming
+broken, deltas pass through as `RAW`" defect was MiMo-specific, and `glm-5.2`
+streamed a proper `TEXT_MESSAGE_START`→`CONTENT`→`END` lifecycle. The
+`test_agui_general_streams_text` permanent-contract test retired with the
+`tests/server/` suite.
 
 ---
 
-## k3s build artifacts
+## k3s build artifacts — MOOT
 
-**Why deferred:** prod runs on the local docker lane (`pux serve` + `pux mcp` on the
-ubuntu-desktop host, dev-bot containerized). The k3s path (the eventual Agent Protocol
-production target per the two-protocol split: ACP=local, AP=k3s) needs its build pipeline.
-
-**The work:**
-- `langgraph build` produces the OCI image for the multi-org `langgraph.json`
-  (every org = one graph_id = one assistant). k3s manifest + ingress + the shared
-  sqlite→Postgres cutover for real multi-replica.
-- The model layer is now k3s-ready (multi-provider: glm-5.2 via ZAI anthropic-secret,
-  mimo via OpenRouter secret — two separate k8s Secrets, not one).
-- `[[aegra-verified]]` Gate 2a/2b (compile + compose smoke) already green; the k3s
-  cutover is the packaging, not the graph.
-
-**Sizing:** medium. Postgres-only for k3s (localhost stays ACP/sqlite).
+The langgraph-api/k3s deployment lane retired with the server lane: no
+`langgraph build` OCI image, no multi-org `langgraph.json` deployment, no
+sqlite→Postgres cutover. Model configuration is now dcode's own
+`_get_default_model_spec()` (`src/run.py`) reading the operator's deepagents
+config — the old multi-provider k8s Secrets wiring (ZAI `glm-5.2` / OpenRouter
+`mimo`) is historical.
 
 ---
 
 ## Prod-path decisions baked in this build (for reference, NOT come-back-to)
 
-These are DONE and should NOT be revisited unless they break:
-- **Two-protocol split:** ACP=local (`pux acp` / deepagents-acp stdio),
-  Agent Protocol=`pux serve` HTTP. Both share ONE sqlite.
-- **dev-bot container:** `sandbox.tier: bridged` (host-net → reaches cloud over
-  Tailscale) + `workspace.mounts` (`/home/ubuntu`→`/host`) + `sandbox.deps.apt:
-  [openssh-client]`. Config-only, no harness code change.
-- **Hermes→dev-bot seam = MCP:** `pux mcp` (FastMCP SSE :9987) wraps the Agent
-  Protocol HTTP. Hermes config adds an `mcp_servers:` entry (HTTP `url:`).
-- **GLM-5.2 prod = ZAI Anthropic-compat** (`ANTHROPIC_AUTH_TOKEN`); mimo via OpenRouter.
-  Multi-provider model layer shipped (submodule `56bdea1`).
+Pre-fold decisions, all superseded by the fold except where noted:
+- **Two-protocol split** (ACP=local, Agent Protocol=`pux serve` HTTP, one shared
+  sqlite): retired — only the ACP leg survives, as deepagents' own
+  `deepagents-acp` (stdio).
+- **dev-bot container** (`sandbox.tier: bridged`, `workspace.mounts`,
+  `sandbox.deps.apt`): retired with the container sandbox (`LocalShellBackend`,
+  no container).
+- **Hermes→dev-bot seam = MCP** (`pux mcp`, FastMCP SSE :9987): the FastMCP
+  wrapper was part of the retired server lane.
+- **GLM-5.2 prod = ZAI Anthropic-compat** (multi-provider model layer): retired;
+  model config is dcode's own, per the operator's deepagents config.

@@ -4,7 +4,7 @@ agents: [dre-auditor, dre-synthesizer, dre-writer]
 # MCP is security-scoped + NEVER inherited via ``extends:``. web_research is
 # redeclared here to arm the ``web-search`` agent inherited from general.
 # surreal is SurrealDB's built-in MCP server (3.1+) — exposes query, insert,
-# upsert, relate, select, run, etc. as mcp__surreal__<tool>. The agent uses
+# upsert, relate, select, run, etc. as surreal_<tool>. The agent uses
 # these for ALL knowledge-graph operations. No CLI scripts, no subprocess-per-
 # call — the harness holds a persistent MCP connection.
 capabilities:

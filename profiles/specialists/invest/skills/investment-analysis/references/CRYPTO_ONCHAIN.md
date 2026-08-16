@@ -30,38 +30,38 @@ On-chain metrics, funding rates, exchange flows. This skill is baked into the **
 
 ### Coinglass (free, scrapes funding/OI aggregates)
 ```python
-mcp__web__scrape(url="https://www.coinglass.com/FundingRate")
-mcp__web__scrape(url="https://www.coinglass.com/OpenInterest")
+web_research_fetch(url="https://www.coinglass.com/FundingRate")
+web_research_fetch(url="https://www.coinglass.com/OpenInterest")
 ```
 
 ## Web MCP Patterns
 
 ### Funding rate snapshot
 ```python
-mcp__web__scrape(url="https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT")
+web_research_fetch(url="https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT")
 # Returns: {"symbol":"BTCUSDT","markPrice":...,"lastFundingRate":"0.00010000"...}
 ```
 
 ### Open interest
 ```python
-mcp__web__scrape(url="https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT")
+web_research_fetch(url="https://fapi.binance.com/fapi/v1/openInterest?symbol=BTCUSDT")
 ```
 
 ### Exchange reserve trends (Glassnode public scrapes)
 ```python
-mcp__web__research(query="Bitcoin exchange reserves outflow inflow this week", max_results=3)
-mcp__web__scrape(url="https://glassnode.com/charts/exchanges/balance")  # may need login
+web_research_research(query="Bitcoin exchange reserves outflow inflow this week", max_results=3)
+web_research_fetch(url="https://glassnode.com/charts/exchanges/balance")  # may need login
 ```
 
 ### Whale alerts
 ```python
-mcp__web__search(query="whale alert Bitcoin large transfer exchange last 24h", top_k=5)
+web_research_search(query="whale alert Bitcoin large transfer exchange last 24h", top_k=5)
 ```
 
 ### ETF flows (BTC/ETH)
 ```python
-mcp__web__research(query="Bitcoin ETF flows IBIT GBTC last week inflow outflow", max_results=3)
-mcp__web__research(query="Ethereum ETF flows BlackRock Franklin last week", max_results=3)
+web_research_research(query="Bitcoin ETF flows IBIT GBTC last week inflow outflow", max_results=3)
+web_research_research(query="Ethereum ETF flows BlackRock Franklin last week", max_results=3)
 ```
 
 ## Metrics Reference

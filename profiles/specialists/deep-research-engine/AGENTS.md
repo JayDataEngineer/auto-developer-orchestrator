@@ -52,13 +52,15 @@ dossier building, synthesis, audit.
 ## SurrealDB
 
 The knowledge graph lives in SurrealDB 3.1+ (built-in MCP server at `/mcp`).
-Query it via `mcp__surreal__<tool>` (query, select, insert, upsert, relate,
-etc.). The harness holds one persistent connection — you never see a URL.
-**Query the DB before delegating** — the answer may already exist.
+Query it via `surreal_<tool>` (query, select, insert, upsert, relate, etc. —
+the MCP server-prefixed names). **Query the DB before delegating** — the
+answer may already exist.
 
-For declared (non-DB) tools — `extract_entities`, `process_audio`,
-`recognize_face`, `cluster_content`, `parse_telegram_export`,
-`process_video`, etc. — call them by name (`pux_sandbox_<name>`).
+(The pre-processing media tools — `extract_entities`, `process_audio`,
+`recognize_face`, `cluster_content`, `parse_telegram_export`, `process_video`
+— are the sandbox arm's script catalog (`sandbox/tools/tools.yaml`,
+dormant): they run as pipeline steps, not agent tools. You do NOT call them;
+the pipeline's output lands in the knowledge graph / artifacts.)
 
 ## Stop conditions
 

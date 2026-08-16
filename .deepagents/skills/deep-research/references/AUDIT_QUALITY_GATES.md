@@ -14,13 +14,13 @@ If your task created tables not covered by check 7's hardcoded list (e.g. `pdf_c
 
 ## How to run queries
 
-EVERY query in this skill is run via the `mcp__surreal__query` tool. You call it by name — you never construct URLs, run curl, or manage auth. The tool handles the SurrealDB connection internally.
+EVERY query in this skill is run via the `surreal_query` tool. You call it by name — you never construct URLs, run curl, or manage auth. The tool handles the SurrealDB connection internally.
 
 ```
-mcp__surreal__query(sql="<SurrealQL statement>")
+surreal_query(sql="<SurrealQL statement>")
 ```
 
-Returns JSON results. For quick table counts, use `mcp__surreal__query(sql="RETURN count(SELECT id FROM item)")`.
+Returns JSON results. For quick table counts, use `surreal_query(sql="RETURN count(SELECT id FROM item)")`.
 
 ## Check 1 — transcripts_complete
 
@@ -28,16 +28,16 @@ Returns JSON results. For quick table counts, use `mcp__surreal__query(sql="RETU
 
 ```
 # Count voice/video items missing a transcript OR with empty-text transcript.
-mcp__surreal__query(sql="SELECT count() FROM item WHERE type IN ['voice', 'video'] AND (count(->transcribed_by->transcript) = 0 OR array::len(->transcribed_by->transcript.text) = 0) GROUP ALL")
+surreal_query(sql="SELECT count() FROM item WHERE type IN ['voice', 'video'] AND (count(->transcribed_by->transcript) = 0 OR array::len(->transcribed_by->transcript.text) = 0) GROUP ALL")
 
 # Total voice/video items
-mcp__surreal__query(sql="SELECT count() FROM item WHERE type IN ['voice', 'video'] GROUP ALL")
+surreal_query(sql="SELECT count() FROM item WHERE type IN ['voice', 'video'] GROUP ALL")
 ```
 
 **Pass:** MISSING = 0.
 **Fail sample:** list first 5 missing IDs:
 ```
-mcp__surreal__query(sql="SELECT id FROM item WHERE type IN ['voice', 'video'] AND (count(->transcribed_by->transcript) = 0 OR array::len(->transcribed_by->transcript.text) = 0) LIMIT 5")
+surreal_query(sql="SELECT id FROM item WHERE type IN ['voice', 'video'] AND (count(->transcribed_by->transcript) = 0 OR array::len(->transcribed_by->transcript.text) = 0) LIMIT 5")
 ```
 
 **Common failure cause:** ASR provider 429'd mid-batch. Re-delegate INGEST_AUDIO_DIARIZATION with the explicit list of missing IDs.
@@ -47,7 +47,7 @@ mcp__surreal__query(sql="SELECT id FROM item WHERE type IN ['voice', 'video'] AN
 **Silent videos — legitimate edge case:** some videos are recorded with no microphone input (audio measures -91 dB = digital silence). ASR correctly returns empty text. The pipeline writes a transcript with `text="[no speech detected ...]"` and `is_silent: true` so the audit reflects reality rather than masking silence as a failure. The query above counts these as success because `text` is non-empty. If you want to see how many transcripts are silent markers vs real speech:
 
 ```
-mcp__surreal__query(sql="RETURN { speech: count(SELECT id FROM transcript WHERE is_silent != true), silent: count(SELECT id FROM transcript WHERE is_silent = true) }")
+surreal_query(sql="RETURN { speech: count(SELECT id FROM transcript WHERE is_silent != true), silent: count(SELECT id FROM transcript WHERE is_silent = true) }")
 ```
 
 ## Check 2 — sender_names_clean
@@ -56,7 +56,7 @@ mcp__surreal__query(sql="RETURN { speech: count(SELECT id FROM transcript WHERE 
 
 ```
 # SurrealDB v3 regex: string::matches() with double-escaped backslashes.
-mcp__surreal__query(sql="RETURN count(SELECT id FROM item WHERE string::matches(sender, '\\\\d{2}\\\\.\\\\d{2}\\\\.\\\\d{4}'))")
+surreal_query(sql="RETURN count(SELECT id FROM item WHERE string::matches(sender, '\\\\d{2}\\\\.\\\\d{2}\\\\.\\\\d{4}'))")
 ```
 
 **Pass:** POLLUTED = 0.
@@ -67,8 +67,8 @@ mcp__surreal__query(sql="RETURN count(SELECT id FROM item WHERE string::matches(
 **Goal:** <5% of items have `sender='Unknown'`. Target: rate < 5% of total items.
 
 ```
-UNKNOWN = mcp__surreal__query(sql="RETURN count(SELECT id FROM item WHERE sender = 'Unknown')")
-TOTAL   = mcp__surreal__query(sql="RETURN count(SELECT id FROM item)")
+UNKNOWN = surreal_query(sql="RETURN count(SELECT id FROM item WHERE sender = 'Unknown')")
+TOTAL   = surreal_query(sql="RETURN count(SELECT id FROM item)")
 
 # rate = UNKNOWN * 100 / TOTAL
 ```
@@ -81,7 +81,7 @@ TOTAL   = mcp__surreal__query(sql="RETURN count(SELECT id FROM item)")
 **Goal:** `topic` table has ≥5 rows. Target: ≥5.
 
 ```
-mcp__surreal__query(sql="RETURN count(SELECT id FROM topic)")
+surreal_query(sql="RETURN count(SELECT id FROM topic)")
 ```
 
 **Pass:** TOPICS ≥ 5.
@@ -92,7 +92,7 @@ mcp__surreal__query(sql="RETURN count(SELECT id FROM topic)")
 **Goal:** ≥3 distinct `person` clusters from face+voice clustering. Target: ≥3.
 
 ```
-mcp__surreal__query(sql="RETURN count(SELECT id FROM person)")
+surreal_query(sql="RETURN count(SELECT id FROM person)")
 ```
 
 **Pass:** PERSONS ≥ 3.
@@ -103,7 +103,7 @@ mcp__surreal__query(sql="RETURN count(SELECT id FROM person)")
 **Goal:** ≥1 `person` node has BOTH `face_centroid` AND `voice_centroid`. Target: ≥1.
 
 ```
-mcp__surreal__query(sql="RETURN count(SELECT id FROM person WHERE face_centroid != NONE AND voice_centroid != NONE)")
+surreal_query(sql="RETURN count(SELECT id FROM person WHERE face_centroid != NONE AND voice_centroid != NONE)")
 ```
 
 **Pass:** LINKED ≥ 1.
@@ -115,22 +115,22 @@ mcp__surreal__query(sql="RETURN count(SELECT id FROM person WHERE face_centroid 
 
 ```
 # Items without text embeddings
-mcp__surreal__query(sql="RETURN count(SELECT id FROM item WHERE text_embedding = NONE OR array::len(text_embedding) != 1024)")
+surreal_query(sql="RETURN count(SELECT id FROM item WHERE text_embedding = NONE OR array::len(text_embedding) != 1024)")
 
 # Transcripts without embeddings
-mcp__surreal__query(sql="RETURN count(SELECT id FROM transcript WHERE embedding = NONE)")
+surreal_query(sql="RETURN count(SELECT id FROM transcript WHERE embedding = NONE)")
 
 # Face appearances without embeddings (orphan detection vectors)
-mcp__surreal__query(sql="RETURN count(SELECT id FROM face_appearance WHERE embedding = NONE)")
+surreal_query(sql="RETURN count(SELECT id FROM face_appearance WHERE embedding = NONE)")
 
 # Topics without centroid embeddings (can't be semantic-search targets)
-mcp__surreal__query(sql="RETURN count(SELECT id FROM topic WHERE centroid_embedding = NONE)")
+surreal_query(sql="RETURN count(SELECT id FROM topic WHERE centroid_embedding = NONE)")
 
 # Orphan media (videos registered but never processed through video_frames.py)
-mcp__surreal__query(sql="RETURN count(SELECT id FROM media WHERE type = NONE)")
+surreal_query(sql="RETURN count(SELECT id FROM media WHERE type = NONE)")
 
 # Orphan persons (no face or voice evidence linked)
-mcp__surreal__query(sql="RETURN count(SELECT id FROM person WHERE count(<-appears_in<-face_appearance) = 0 AND count(<-speaks_in<-speaker_turn) = 0)")
+surreal_query(sql="RETURN count(SELECT id FROM person WHERE count(<-appears_in<-face_appearance) = 0 AND count(<-speaks_in<-speaker_turn) = 0)")
 ```
 
 **Pass:** ALL counts = 0.
@@ -201,7 +201,7 @@ those photos had detectable faces.
 # Source count: text messages from Telegram export result.json
 python3 -c "import json; d=json.load(open('data/<export>/result.json')); print(sum(1 for m in d['messages'] if isinstance(m,dict) and m.get('text') and str(m.get('text','')).strip()))"
 # Processed count
-mcp__surreal__query(sql="SELECT count() FROM item WHERE type = 'message' GROUP ALL")
+surreal_query(sql="SELECT count() FROM item WHERE type = 'message' GROUP ALL")
 ```
 
 **Pass:** processed/source ≥ 0.95.
@@ -280,7 +280,7 @@ difference is explained in the audit report.
 # Source
 python3 -c "import json; d=json.load(open('artifacts/<run>/items.json')); print(len(d.get('items',d) if isinstance(d,dict) else d))"
 # DB
-mcp__surreal__query(sql="RETURN count(SELECT id FROM item)")
+surreal_query(sql="RETURN count(SELECT id FROM item)")
 ```
 
 **Pass:** delta is zero OR the delta is explicitly explained in the report
@@ -294,10 +294,10 @@ of original photos, not separate content").
 
 ```
 # Duplicate transcribed_by edges (one item → same transcript twice)
-mcp__surreal__query(sql="SELECT count() FROM item WHERE count(->transcribed_by) > 1 GROUP ALL")
+surreal_query(sql="SELECT count() FROM item WHERE count(->transcribed_by) > 1 GROUP ALL")
 
 # Stale edges (in/out point to non-existent records)
-mcp__surreal__query(sql="RETURN count(SELECT id FROM transcribed_by WHERE in NOT IN (SELECT id FROM item))")
+surreal_query(sql="RETURN count(SELECT id FROM transcribed_by WHERE in NOT IN (SELECT id FROM item))")
 ```
 
 **Pass:** 0 duplicates, 0 stale edges. Edge count for transcribed_by should

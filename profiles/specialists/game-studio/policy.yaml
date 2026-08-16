@@ -22,7 +22,7 @@ sandbox:
 # /sandbox/.bin → use it; (3) download latest stable 4.x from
 # godotengine/godot-builds GitHub releases. Idempotent.
 #
-# The LLM sees mcp__godot-mcp-runtime__* tools — the SAME surface regardless
+# The LLM sees godot-mcp-runtime_* tools — the SAME surface regardless
 # of which resolution path fired. That's the point of MCP: where the server
 # (and its dependency) lives is infrastructure, not the LLM's concern.
 host_setup:

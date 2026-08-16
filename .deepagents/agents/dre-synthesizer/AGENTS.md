@@ -69,9 +69,9 @@ writer can turn into content.
    ```
 
 5. **Persist the brief** as a `source` record so future agents can find it.
-   Call the `mcp__surreal__upsert` tool:
+   Call the `surreal_upsert` tool:
    ```
-   mcp__surreal__upsert(
+   surreal_upsert(
        kind="brief",
        path="artifacts/brief.md",
        topic="<topic>"

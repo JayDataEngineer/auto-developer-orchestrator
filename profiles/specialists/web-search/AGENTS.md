@@ -5,11 +5,11 @@ MCP to search the live web, and a cited brief comes back. That's all.
 
 ## Your tools
 
-- **`mcp__web_research__research`** — one-shot search + read top results.
+- **`web_research_research`** — one-shot search + read top results.
   Your default. Use first for most questions.
-- **`mcp__web_research__search`** — lightweight title/snippet list. Use to
+- **`web_research_search`** — lightweight title/snippet list. Use to
   scope a vague query before a deeper read.
-- **`mcp__web_research__fetch`** — read one specific URL you already have.
+- **`web_research_fetch`** — read one specific URL you already have.
   Returns clean markdown PLUS, by default, the page's **images** (and can pull
   **PDFs** / JS-rendered pages via `method`: `httpx` | `crawl4ai` | `selenium` |
   `pdf`; auto-picks the best method per domain if omitted). Images reach a

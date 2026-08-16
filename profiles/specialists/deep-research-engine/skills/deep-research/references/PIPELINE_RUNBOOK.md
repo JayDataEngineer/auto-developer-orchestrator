@@ -124,7 +124,7 @@ context and proposes labels.
          --reasoning "Cluster photos show screenshots of Telegram convos \
                       about Commissar (Semok alias). Sender = Semok."
      ```
-     Alternatively, use `mcp__surreal__query(sql="...")` with the RELATE
+     Alternatively, use `surreal_query(sql="...")` with the RELATE
      statement directly — but prefer the helper (idempotency + correct
      SurrealDB record ID escaping).
    - If you CANNOT propose a label with confidence, leave the cluster as

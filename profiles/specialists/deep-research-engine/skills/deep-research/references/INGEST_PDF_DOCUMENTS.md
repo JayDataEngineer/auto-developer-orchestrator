@@ -1,10 +1,10 @@
 # INGEST_PDF_DOCUMENTS
 
-The pdf-ingestor's checklist. Loaded automatically into the pdf-ingestor's prompt via skills_dir.
+The pdf-ingestor's checklist. A skill reference — read it when ingesting PDFs.
 
 ## Tool reference
 
-PDFs are extracted via shell tools (`pdftotext`, `pdfinfo`, `pdftoppm`) + Python (`pypdf`, `pymupdf`) + media-mcp for OCR. The media-mcp tool names are auto-injected at runtime under the `mcp__media__` prefix — check your tool list for the exact names. The OCR-flavored tool is what you want for scanned pages; the caption/tagging-flavored tools are for figures and charts.
+PDFs are extracted via shell tools (`pdftotext`, `pdfinfo`, `pdftoppm`) + Python (`pypdf`, `pymupdf`) + media-mcp for OCR. media-mcp tools surface as `media_*` only when the org declares the media server (`{kind: mcp, ref: media}` in org.yaml) — check your tool list for the exact names. The OCR-flavored tool is what you want for scanned pages; the caption/tagging-flavored tools are for figures and charts.
 
 | Tool | When | Install |
 |---|---|---|
@@ -111,7 +111,7 @@ Read `raw.txt`. Identify:
 **(b) SurrealDB source record** — one per PDF document (not per section). Run this once after extracting the document:
 
 ```bash
-mcp__surreal__upsert(table="source", data={
+surreal_upsert(table="source", data={
   "kind": "pdf", "path": "/abs/path/to/document.pdf", "title": "<title from pdfinfo>",
   "author": "<author from pdfinfo>", "published_at": "<CreationDate ISO-formatted>",
 })
@@ -125,7 +125,7 @@ This atomically:
 **For sections that reference existing topics or persons**, create additional extracted_from edges manually:
 
 ```bash
-mcp__surreal__relate(src="topic:abc123", edge="extracted_from", tgt="source:<source_id>")
+surreal_relate(src="topic:abc123", edge="extracted_from", tgt="source:<source_id>")
 ```
 
 ### Step 5 — Build the index

@@ -78,7 +78,7 @@ based on your report.
 Read the **`deep-research` skill → `AUDIT_QUALITY_GATES.md`** reference for the
 full 17-criteria spec (checks 1–8 pipeline health + grounding; 9–14 coverage
 gates; 15–17 data integrity). Run each applicable check via
-`mcp__surreal__query(sql="...")`. Checks 1–6 apply to multimodal-ingest tasks
+`surreal_query(sql="...")`. Checks 1–6 apply to multimodal-ingest tasks
 only; check 7 (embedding coverage) applies to every task with vector columns;
 check 8 (grounding) applies when a brief/report exists. Skip N/A checks with
 an explanation.

@@ -11,44 +11,44 @@ Options flow reveals **where smart money (or large risk-takers) is positioning**
 - News + flow summaries
 - Scraped via web MCP:
 ```python
-mcp__web__research(query="site:unusualwhales.com $SYMBOL options flow", max_results=3)
+web_research_research(query="site:unusualwhales.com $SYMBOL options flow", max_results=3)
 ```
 
 ### barchart.com (free tier, limited)
 - Unusual options activity
 ```python
-mcp__web__scrape(url="https://www.barchart.com/options/unusual-activity/stocks")
+web_research_fetch(url="https://www.barchart.com/options/unusual-activity/stocks")
 ```
 
 ### Market Chameleon (free, requires registration)
 - Volatility, expected moves
 ```python
-mcp__web__scrape(url="https://marketchameleon.com/Overview/$SYMBOL/OptionActivity/")
+web_research_fetch(url="https://marketchameleon.com/Overview/$SYMBOL/OptionActivity/")
 ```
 
 ### Yahoo Finance (free)
 - Options chain with OI + volume
 ```python
-mcp__web__scrape(url="https://finance.yahoo.com/quote/$SYMBOL/options")
+web_research_fetch(url="https://finance.yahoo.com/quote/$SYMBOL/options")
 ```
 
 ### Finviz (free)
 - News + dark pool hints in headlines
 ```python
-mcp__web__scrape(url="https://finviz.com/quote.ashx?t=$SYMBOL")
+web_research_fetch(url="https://finviz.com/quote.ashx?t=$SYMBOL")
 ```
 
 ### Quiver Quant (free, dark pool + flow)
 - Trades > $100K
 ```python
-mcp__web__scrape(url="https://quiverquant.com/source/darkpool")
+web_research_fetch(url="https://quiverquant.com/source/darkpool")
 ```
 
 ## Web MCP Patterns
 
 ### Recent unusual activity
 ```python
-mcp__web__research(
+web_research_research(
     query="$SYMBOL unusual options activity call put today",
     max_results=5,
     time_filter="day"
@@ -57,7 +57,7 @@ mcp__web__research(
 
 ### Earnings options positioning
 ```python
-mcp__web__research(
+web_research_research(
     query="$SYMBOL options implied move earnings next week",
     max_results=3
 )
@@ -65,7 +65,7 @@ mcp__web__research(
 
 ### Dark pool prints
 ```python
-mcp__web__research(
+web_research_research(
     query="$SYMBOL dark pool prints last 5 days size",
     max_results=3
 )

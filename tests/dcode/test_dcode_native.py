@@ -27,8 +27,8 @@ from profiles.subagents import org_subagent_specs
 from run import build_org_agent, plan
 from tools.resolve import resolve_tool_ref
 
-# The parent repo (profiles/ tree) — pux-harness is a submodule of it; skip the
-# real-repo tests when checked out standalone.
+# The parent repo (profiles/ tree) — the real-repo tests activate only when the
+# workspace tree is present (_HAS_ORGS); they skip when the suite runs standalone.
 _REPO = Path(__file__).resolve().parents[2]
 _HAS_ORGS = (_REPO / "profiles" / "_shared" / "tool_servers.yaml").is_file()
 
@@ -84,7 +84,7 @@ def _compile_org(org: str, root: Path, *, servers: dict | None = None):
     MCP load, a fake model substitutes for the configured spec."""
     specs = org_subagent_specs(
         org, project_root=root, mcp_tools_by_server=servers or {},
-        model="<test>", sandbox=LocalShellBackend())
+        model="<test>", sandbox=LocalShellBackend())  # type: ignore[arg-type]  # dry-run stand-in: declared type is BaseSandbox, only duck-typed here
     return create_deep_agent(
         model=_FAKE,
         system_prompt="test prompt",

@@ -53,6 +53,6 @@ python3 departments/engineering/game/tools/godot_test.py evaluate     # AI playt
 
 ## Skills (reference)
 
-- **GODOT_VIA_MCP** — the `mcp__godot-mcp-runtime__*` tools are your Godot surface. Use them for scene edits, script-read/update, screenshots, input simulation, live GDScript eval, project management, autoloads, and more. 36 tools total.
+- **GODOT_VIA_MCP** — the `godot-mcp-runtime_*` tools are your Godot surface. Use them for scene edits, script-read/update, screenshots, input simulation, live GDScript eval, project management, autoloads, and more. 36 tools total.
 
-Where Godot lives doesn't matter to you — it's resolved transparently (pre-installed on the host OR downloaded from GitHub releases by `godot_bootstrap.py`). You always see the same `mcp__godot-mcp-runtime__*` tools regardless.
+Where Godot lives doesn't matter to you — it's resolved transparently (pre-installed on the host OR downloaded from GitHub releases by `godot_bootstrap.py`). You always see the same `godot-mcp-runtime_*` tools regardless.

@@ -2,164 +2,137 @@
 
 > **This is a developer guide for the pux repo (also the Claude Code instruction
 > file). It is NOT a runtime prompt.** The agent base prompt lives at
-> `profiles/general/AGENTS.md` and flows to every org CTO via `extends:` (orgs layer
+> `profiles/_shared/` and flows to every org CTO via `extends:` (orgs layer
 > their specialization on top — prompts are additive). Nothing in the runtime
 > reads this file.
 
 ## Architecture
 
-Two-layer model: **harness/** (lifecycle, policy, scheduling, org roster) +
-**console_scripts entry point** (`pux` CLI from `pux_harness.cli:main`).
+The repo **IS a dcode workspace** — no harness library, no dual track. The org
+tree (`profiles/`) projects onto dcode's native surface via `src/`:
 
-The harness owns the full sandbox lifecycle. There is no Go MCP server,
-no `bridge.py`, no `smoke_mcp.py` — the entire Go sandbox was re-hosted
-in Python and deleted. The per-org `bootstrap.sh` +
-`docker-compose.yml` shadow lifecycle was also deleted outright;
-`policy.yaml` `host_setup` + `sandbox.build` cover host hooks and image
-builds (permanent `no-legacy-sandbox-artifacts` tripwire).
+- **`src/compiler/`** — the projection: `uv run pux sync` emits the union
+  `.deepagents/` (agents + skills) + `.mcp.json` at the project root; `pux
+  check` drift-compares the checked-in surface; `pux compile --org X --out D`
+  stages one org's layout.
+- **`src/run.py`** — the launch: `build_org_agent` = dcode's
+  `create_deep_agent`, `launch` = dcode's `run_textual_app` (the same TUI a
+  bare `dcode` run shows). Model default = dcode's own
+  `_get_default_model_spec()`; per-agent override via frontmatter `model:`.
+- **`src/profiles/`** — loaders (`discover_orgs`, `org_agent_slugs`,
+  `build_system_prompt`, `_load_agent_spec`), subagents (roster → native
+  `SubAgent` dicts).
+- **`src/tools/`** — the 11-tool registry (`registry.py` + `resolve.py`).
+- **`src/sandbox/`** — deepagents' `LocalShellBackend` (same backend dcode's
+  CLI uses — no container, no gateway).
+- **`src/middlewares/`** — `rubric.py`: a rostered agent's `middleware:
+  [rubric]` + `rubric:` frontmatter prose map onto deepagents'
+  `RubricMiddleware`.
+- **`src/protocol/`** — `.mcp.json` projection; **`src/plugins/`** — the
+  `pux-orgs` plugin marketplace.
 
-### Two-tier Python separation
-
-Backbone scripts under `/sandbox/*.py` are immutable (chmod 0444).
-Agent-authored scratch lives under `/sandbox/workspace/scripts/`. Don't
-try to edit the backbone.
+The server lane (when a server is needed) is deepagents' own **ACP package + a
+JSON adapter file** — never custom code.
 
 ## Philosophy
 
-1. **One harness, many orgs.** The harness is the single owner of the
-   sandbox lifecycle. Each org is a thin layer on top — a `policy.yaml`,
-   an `AGENTS.md`, a roster.
+1. **One dcode workspace, many orgs.** Each org is a thin layer on top —
+   an `AGENTS.md` overlay, an `org.yaml` roster, `agents/*.md` specs, skills.
+   The compiler projects them onto dcode's native surface.
 2. **Policy over code.** Every org-specific behaviour is declared in
-   `policy.yaml` or the org's `AGENTS.md`. The harness never hard-codes
-   org logic.
+   `policy.yaml` or the org's `AGENTS.md`. `src/` never hard-codes org logic.
 3. **Verify or die.** Run a tool, watch its output, then reason about the
    result. "Should work" is banned.
 4. **No fallbacks.** If something breaks, surface the error — don't paper
-   over it with a fallback path.
+   over it with a fallback path. (The tool-layer fallback nets in `src/tools/`
+   are the deliberate exception — they route a failed primary model to the
+   ONNX tier and report the reason honestly.)
 
 ## Conventions
 
 - No co-authored-by Claude in git commits.
-- Use astral uv for any Python environments (sandbox scripts, smoke test runner, the harness).
+- Use astral uv for any Python environments.
 - Prefer 'prove' (integration-style) over 'assert' (unit-only) when feasible.
 - "Verify or die" — no claiming a thing works without running it.
 - No fallbacks, no deprecation aliases, no backwards-compat shims.
 - No emojis unless the user explicitly requests them.
 - Keep responses concise — fewer than 4 lines unless the user asks for detail.
 
-## Policy engine
+## Policy engine (dormant arm)
 
-`policy.yaml` declares everything the harness needs per org:
+`policy.yaml` + `sandbox/` + `_shared/budgets.yaml` are the opt-in sandbox
+arm's data — the `PUX_SANDBOX=openshell` adapter (its langchain adapter pins
+deepagents<0.6) is deliberately absent from this workspace, so nothing reads
+them today. They document the org's intended shell policy
+(`allowed_commands` / `forbidden_commands`, `env`, sandbox image/tier,
+budgets) for when the arm returns.
 
-- `allowed_commands` / `forbidden_commands` — shell command guardrails
-- `env` — required environment variables
-- `image` / `build` — sandbox image selection or build spec
-- `host_setup` — host-side hooks run before `create()` (cookie extraction, etc.)
-- `tools` — specialist tool whitelist
-- `jobs` — explicit job declarations (warn-and-continue runner)
+## Per-org composition (the native surface)
 
-Jobs are triggered via CLI (`pux jobs run --org X`) or server endpoint
-(`POST /jobs/{org}/run`). Status is queryable via `pux jobs status --org X`
-or `GET /jobs/{org}/status`.
+The org spec is 100% dcode format — no custom config format:
 
-## Per-org harness profile
+- `org.yaml` — `extends:` chain, `agents:` roster (set-union with the
+  parent), `inherit_roster:`, `capabilities:` (MCP refs resolved against
+  `_shared/tool_servers.yaml`; every declared ref must load or the launch
+  raises — the org's surface can never silently shrink).
+- `AGENTS.md` — the org's CTO overlay; parent + own concatenated own-last
+  (root→child). The chain overlay IS the system prompt.
+- `agents/<slug>.md` — one file per rostered subagent: YAML frontmatter
+  (`name`, `description`, `tools:` refs, `model:`, `mcp:` refs,
+  `middleware: [rubric]` + `rubric:` prose → deepagents' own
+  `RubricMiddleware` — a grader sub-agent runs after the CTO finishes and
+  grades the deliverable against that prose, then returns
+  `satisfied` / `needs_revision` / `max_iterations_reached`) + body =
+  system-prompt prose.
+- `skills/` — dcode skills; bodies peeked with `read_file`.
 
-An OPTIONAL `profiles/<name>/profile.yaml` applies small org-wide overrides to the
-deepagents stack the harness compiles for that org — the CTO system prompt AND
-every specialist subagent (so the shared `browser` agent inherits it too). It is
-NOT a policy file (no egress/sandbox effect); it shapes the agent graph itself:
+Every declared ref resolves or the build raises. Model defaults are dcode's
+own (`_get_default_model_spec()`); per-agent override via frontmatter
+`model:`.
 
-- `system_prompt_suffix` — appended to the assembled CTO prompt + each
-  subagent's prompt.
-- `tool_description_overrides` — rewrite a specialist tool's description, keyed
-  by its full `pux_sandbox_*` name (nudges how the model calls it in this org).
-- `excluded_tools` — drop specialist tools (full `pux_sandbox_*` names) from
-  this org's stack entirely.
-- `base_system_prompt` — REPLACE the assembled CTO prompt (rarely needed; the
-  suffix is the usual lever).
-
-An OPTIONAL `profile.local.yaml` in the same directory is deep-merged on top
-(local wins). It is **not** tracked by git (the `.gitignore` catch-all covers
-it) — use it for operator-specific overrides that shouldn't land in the shared
-repo (account-specific context, personal model preferences, etc.). Absent is
-the common case; byte-identical to the original single-file reader.
-
-Two more blocks ride on the same file:
-
-- `models:` — a map overriding the **model-role spec**. The harness resolves
-  four roles — `base_model` (CTO driver), `worker_model` (subagents),
-  `multimodal_model` (describe_image, decoupled from base), `grader_model` (the
-  rubric gate) — all defaulting to `mimo-v2.5` in the shipped
-  `pux-harness/pux_harness/agent/models.yaml`. Override per-org here, e.g.
-  `models: {grader_model: glm-5.2}`, or per-agent via frontmatter `model:`.
-  Resolution: frontmatter `model:` > this `models:` map > `PUX_<ROLE>_MODEL`
-  env (legacy `PUX_MODEL` for base) > shipped default. One file to edit when
-  cloning — no hardcoded model ids anywhere in the harness.
-- `rubric:` — opt the org into deepagents' beta **`RubricMiddleware`
-  verify-gate**. The grader (a separate sub-agent on `grader_model`) runs after
-  the CTO finishes, grades the deliverable against a ship-gate rubric using
-  sandbox evidence tools (`pux_grader_execute` / `pux_grader_read_file` /
-  `pux_grader_grep` — run tests, read the diff, grep for regressions; NEVER the
-  agent's summary alone), and returns `satisfied` / `needs_revision` /
-  `max_iterations_reached`. On `needs_revision` the feedback is fed back and the
-  CTO revises, up to `max_iterations`. Per-org opt-in + `enabled: true`; orgs
-  without the block are byte-identical to today. The default rubric
-  (`rubric.default`) is injected at invoke time by `server._execute` /
-  `main._run`; an operator `--rubric` override wins. `profiles/specialists/dev-bot/profile.yaml`
-  is the shipped sample (dev-bot is the Claude-Code-equivalent coding org).
-- `middleware:` — add/remove named deepagents middleware per scope
-  (`supervisor` / `subagent`). A base set (context + routing + session_guide,
-  + `rubric` / `tool_retry` when gated) mounts for every org; `add` / `remove`
-  override it (same-named add wins). One strength-gated entry: `interpreter` —
-  the orchestrator's dynamic-dispatch surface — auto-mounts iff the resolved
-  base model is **strong**, else off (a flash / unknown base gets neither the
-  tool NOR the dispatch guidance — no token waste on a path it can't drive);
-  `add: [interpreter]` / `remove: [interpreter]` override either way. Strength
-  is a per-id catalog attribute, NOT a profile field:
-  `pux-harness/pux_harness/agent/models.yaml` flags each id `strength: pro`
-  (the strong orchestrators glm-5.2 / glm-5.1) or `strength: flash` (every
-  other id; unknown → flash = fail-safe).
-
-The loader (`pux-harness/pux_harness/agent/profile.py`) uses deepagents'
-`HarnessProfileConfig` SCHEMA but applies the fields at the `build_graph(org)`
-call site rather than the global model-keyed `_HARNESS_PROFILES` registry —
-that registry has no per-org namespace, so two orgs sharing a model would
-collide and the long-lived server path would leak across orgs. Most orgs ship
-no profile; absence is a no-op (byte-identical stack). `profiles/specialists/twitter-agent/
-profile.yaml` is the shipped sample.
+(The legacy `profile.yaml` format — `system_prompt_suffix`, `ask_user`,
+`models:`, org-level `rubric:`/`middleware:` — was retired at the 2026-08-16
+fold: it had no reader in the dcode track. Its still-live prose was folded
+into the org overlays. `profile.local.yaml` is likewise inert legacy.)
 
 ## Testing harness rules
 
-- "Should work" is banned. Verify with a real `pux direct` / `pux dispatch`
-  run (ground-truth answer), or a test that exercises the actual code path.
-- Adding a Python specialist tool → add it to `SPECIALISTS` (drives the
-  contract resolver + the bound surface) and add a test exercising the real
-  code path where feasible.
-- Adding an Agent Protocol endpoint → add a routing test in
-  `harness/tests/test_server.py` (stub graph, no tokens).
-- Adding an org / subagent → it must pass `--check-contract` + the
-  `test_org_contract.py` gate.
+- "Should work" is banned. Verify with a real run
+  (`uv run python src/run.py --org <name> --dry-run` for the plan; `dcode` in
+  the repo for the TUI), or a test that exercises the actual code path.
+- Adding a Python tool → add it to the registry (`src/tools/registry.py`) and
+  add a test exercising the real code path where feasible.
+- Adding an org / subagent → `uv run pux sync` must still emit cleanly and
+  `uv run pux check` must exit 0 (the checked-in `.deepagents/` is
+  sync-tested).
+- The guards in `tests/guards/` enforce the workspace invariants: no
+  `pux_harness` refs in `src/`, no re-implementations of dcode's surface.
 
 ## Branch strategy
 
-- **`pi-pivot`** = current branch. The deepagents pivot.
-- **`master`** = pre-pivot MVP. Slim Go MCP server. Frozen.
-- **`v0.2.0-pre-pi-mono`** = tag of master HEAD before the pi-mono pivot. Safety net.
-- **`dev`** + **`v0.1.0-fullstack-legacy`** = the older fullstack predecessor. Frozen.
+- **`master`** = the dcode workspace (current).
+- Older branches (`pi-pivot`, `v0.1.0-fullstack-legacy`, `v0.2.0-pre-pi-mono`)
+  hold the pre-fold history. Frozen.
 
 ## What's NOT here (deferred or dropped)
 
-**Dropped** (deepagents does it natively, or wasn't pulling weight):
+**Dropped** (dcode does it natively, or wasn't pulling weight):
 
-- ~~pi-mono TS harness~~ — replaced by the Python harness + Agent Protocol server
-- ~~In-process Go agent loop / Go dispatch surface / Go history recorder / Bubble Tea TUI~~ — replaced by deepagents + the Agent Protocol server
-- ~~Go MCP server + bridge.py + smoke_mcp.py~~ — re-hosted in Python then deleted
-- ~~Per-org bootstrap.sh + docker-compose.yml shadow lifecycle~~ — harness owns the full lifecycle now
-- ~~TOML org config~~ — replaced by per-org `AGENTS.md` markdown
+- ~~The pux-harness submodule / dual-track harness~~ — the repo IS the
+  workspace; `src/` is the projection layer, dcode is the runtime.
+- ~~Custom Agent Protocol server overlay (runtime/, site/, aegra)~~ — the
+  server lane is deepagents' own ACP package + a JSON adapter file.
+- ~~Docker sandbox + `PuxSandboxBackend` + the 40 `pux_sandbox_*`
+  specialists~~ — the sandbox is deepagents' `LocalShellBackend`; the tool
+  surface is the 11-tool `src/tools/` registry.
+- ~~Second graph builder (`kit/compile.py`) + legacy `pux` subcommands~~ —
+  the only graph builder is `create_deep_agent`; `pux` = sync/check/compile.
+- ~~`orgs/`~~ — renamed `profiles/` (folder-only; the concept vocabulary —
+  `--org`, `org.yaml`, `org_agent_slugs`, `discover_orgs`, `PUX_ORG_PATHS`,
+  `pux-orgs` — is unchanged).
 
 **Deferred** (might land later):
 
-- SSE streaming for Agent Protocol runs
 - Multi-org orchestration
 - Self-evolving script toolkit (`make_script` / `edit_script`)
 - Diligence evals, safeguard router
@@ -167,5 +140,5 @@ profile.yaml` is the shipped sample.
 ## Memory
 
 Auto-memory lives at `~/.claude/projects/.../memory/`. The memory directory
-tracks the strategic context — pivot rationale, fullstack lessons learned,
+tracks the strategic context — fold rationale, legacy lessons learned,
 decisions deferred. Read `MEMORY.md` first when picking up context.

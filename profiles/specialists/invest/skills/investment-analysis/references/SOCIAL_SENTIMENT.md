@@ -23,19 +23,19 @@ Social sentiment is a **contrarian signal at extremes** and a **momentum confirm
 ### Site-restricted searches
 ```python
 # WallStreetBets mentions
-mcp__web__research(
+web_research_research(
     query="site:reddit.com/r/wallstreetbets $SYMBOL",
     max_results=5
 )
 
 # Specific coin or stock discussion
-mcp__web__research(
+web_research_research(
     query="site:reddit.com/r/cryptocurrency $COIN sentiment",
     max_results=5
 )
 
 # Recent threads (last 24h)
-mcp__web__search(
+web_research_search(
     query="site:reddit.com/r/wallstreetbets $SYMBOL",
     time_filter="day",
     top_k=10
@@ -44,12 +44,12 @@ mcp__web__search(
 
 ### Reading Reddit threads
 ```python
-mcp__web__scrape(url="https://www.reddit.com/r/wallstreetbets/comments/{thread_id}/")
+web_research_fetch(url="https://www.reddit.com/r/wallstreetbets/comments/{thread_id}/")
 ```
 
 For Reddit specifically, append `.json` to get raw JSON:
 ```python
-mcp__web__scrape(url="https://www.reddit.com/r/wallstreetbets/comments/{thread_id}.json?limit=100")
+web_research_fetch(url="https://www.reddit.com/r/wallstreetbets/comments/{thread_id}.json?limit=100")
 ```
 
 ## X / Twitter Patterns
@@ -57,17 +57,17 @@ mcp__web__scrape(url="https://www.reddit.com/r/wallstreetbets/comments/{thread_i
 X has the fastest signal for breaking news. Use search operators:
 ```python
 # Stock-specific chatter
-mcp__web__search(query="$SYMBOL (stock OR earnings) (bullish OR bearish)", top_k=10)
+web_research_search(query="$SYMBOL (stock OR earnings) (bullish OR bearish)", top_k=10)
 
 # Crypto-specific chatter
-mcp__web__search(query="$COIN (BTC OR ETH OR crypto) (long OR short)", top_k=10)
+web_research_search(query="$COIN (BTC OR ETH OR crypto) (long OR short)", top_k=10)
 
 # Follow specific accounts
-mcp__web__search(query="from:unusual_whales $SYMBOL", top_k=5)
-mcp__web__search(query="from:zerohedge $SYMBOL", top_k=5)
+web_research_search(query="from:unusual_whales $SYMBOL", top_k=5)
+web_research_search(query="from:zerohedge $SYMBOL", top_k=5)
 
 # Cashtags ($AAPL)
-mcp__web__search(query="\\$AAPL (from:realWillMeade OR from:DanZanger)", top_k=5)
+web_research_search(query="\\$AAPL (from:realWillMeade OR from:DanZanger)", top_k=5)
 ```
 
 **Verified accounts to follow** (high signal-to-noise):
@@ -81,7 +81,7 @@ mcp__web__search(query="\\$AAPL (from:realWillMeade OR from:DanZanger)", top_k=5
 ## StockTwits Patterns
 
 ```python
-mcp__web__scrape(url="https://stocktwits.com/symbol/$SYMBOL")
+web_research_fetch(url="https://stocktwits.com/symbol/$SYMBOL")
 ```
 
 StockTwits shows a "bullish/bearish" sentiment ratio from users. Extreme readings (>80% bullish or >80% bearish) are contrarian signals.
@@ -116,7 +116,7 @@ def social_sentiment_score(mentions, sentiment_ratio, momentum):
 WallStreetBets + extreme volume + high short interest = potential gamma squeeze.
 
 ```python
-mcp__web__research(
+web_research_research(
     query="$SYMBOL short interest float wallstreetbets gamma squeeze",
     max_results=3
 )

@@ -6,11 +6,11 @@ Pair with [[CONTEXT_ENGINE_QUERY]] which covers structural queries (counts, gaps
 
 ## How to query
 
-EVERY query runs via the `mcp__surreal__query` tool — SurrealDB's built-in
+EVERY query runs via the `surreal_query` tool — SurrealDB's built-in
 MCP server. The harness holds a persistent connection. You call it by name:
 
 ```
-mcp__surreal__query(sql="<SurrealQL statement>")
+surreal_query(sql="<SurrealQL statement>")
 ```
 
 For vector search, embed the query via the in-sandbox embed helper
@@ -23,7 +23,7 @@ Find records whose content is semantically similar to a query, regardless of exa
 
 ```
 # Semantic search across transcripts (field defaults to "embedding")
-mcp__surreal__query(sql="
+surreal_query(sql="
   SELECT id, vector::similarity::cosine(embedding, $query_vec) AS score
   FROM transcript
   WHERE embedding != NONE
@@ -45,7 +45,7 @@ query_vec = encode("infiltration confession", prompt_name="web_search_query")
 
 Then pass the vector into the MCP query as a parameter:
 ```
-mcp__surreal__query(sql="
+surreal_query(sql="
   SELECT id, vector::similarity::cosine(embedding, $query_vec) AS score
   FROM transcript WHERE embedding != NONE ORDER BY score DESC LIMIT 5
 ", query_vec=query_vec)
@@ -59,16 +59,16 @@ Once you have a record ID, walk the graph to find connected entities.
 
 ```
 # What sources informed this topic?
-mcp__surreal__query(sql="SELECT *, <-extracted_from<-source.{id, title, url, author} AS source_docs FROM topic:abc123")
+surreal_query(sql="SELECT *, <-extracted_from<-source.{id, title, url, author} AS source_docs FROM topic:abc123")
 
 # What topics + persons does this source inform?
-mcp__surreal__query(sql="SELECT *, ->extracted_from->source.{id, title, url} AS linked_sources, <-extracted_from<-topic.name AS topics, <-extracted_from<-person.canonical_name AS persons FROM source:abc123")
+surreal_query(sql="SELECT *, ->extracted_from->source.{id, title, url} AS linked_sources, <-extracted_from<-topic.name AS topics, <-extracted_from<-person.canonical_name AS persons FROM source:abc123")
 
 # Everything about a person — photos, recordings, topics, sources
-mcp__surreal__query(sql="SELECT canonical_name, face_count, voice_count, ->appears_in->item.{id, type, timestamp, path} AS photos, ->speaks_in->item.{id, type, timestamp} AS recordings, <-extracted_from<-source.{id, title, url} AS sources FROM person WHERE canonical_name CONTAINS 'Grady'")
+surreal_query(sql="SELECT canonical_name, face_count, voice_count, ->appears_in->item.{id, type, timestamp, path} AS photos, ->speaks_in->item.{id, type, timestamp} AS recordings, <-extracted_from<-source.{id, title, url} AS sources FROM person WHERE canonical_name CONTAINS 'Grady'")
 
 # Items mentioned by a topic
-mcp__surreal__query(sql="SELECT *, ->mentions->item.{id, type, text[0:80] AS text_preview, sender, timestamp} AS items FROM topic ORDER BY name")
+surreal_query(sql="SELECT *, ->mentions->item.{id, type, text[0:80] AS text_preview, sender, timestamp} AS items FROM topic ORDER BY name")
 ```
 
 ## Layer 3 — Hybrid (vector + graph)
@@ -79,10 +79,10 @@ The most powerful pattern: use vector search to find a seed, then graph traversa
 
 ```
 # 1. Vector-search topics to find the seed
-mcp__surreal__query(sql="SELECT id, vector::similarity::cosine(centroid_embedding, fn::embed('infiltration informant double agent')) AS score FROM topic WHERE centroid_embedding != NONE ORDER BY score DESC LIMIT 1")
+surreal_query(sql="SELECT id, vector::similarity::cosine(centroid_embedding, fn::embed('infiltration informant double agent')) AS score FROM topic WHERE centroid_embedding != NONE ORDER BY score DESC LIMIT 1")
 
 # 2. Walk the graph from that seed (use the id from step 1)
-mcp__surreal__query(sql="SELECT name, summary, ->mentions->item.{id, sender, timestamp, text[0:100] AS text_preview} AS items, <-extracted_from<-source.{id, title, url, author} AS sources, <-mentions<-person.canonical_name AS persons FROM topic:<seed_id>")
+surreal_query(sql="SELECT name, summary, ->mentions->item.{id, sender, timestamp, text[0:100] AS text_preview} AS items, <-extracted_from<-source.{id, title, url, author} AS sources, <-mentions<-person.canonical_name AS persons FROM topic:<seed_id>")
 ```
 
 ## Layer 4 — Find similar entities
@@ -91,10 +91,10 @@ Useful for deduplication, identity resolution, and surfacing related content.
 
 ```
 # Find transcripts similar to a specific transcript
-mcp__surreal__query(sql="SELECT id, text[0:80] AS preview, vector::similarity::cosine(embedding, (SELECT embedding FROM transcript:04edb62cpdj3lfojdcf2)[0].embedding) AS score FROM transcript WHERE id != transcript:04edb62cpdj3lfojdcf2 AND embedding != NONE ORDER BY score DESC LIMIT 5")
+surreal_query(sql="SELECT id, text[0:80] AS preview, vector::similarity::cosine(embedding, (SELECT embedding FROM transcript:04edb62cpdj3lfojdcf2)[0].embedding) AS score FROM transcript WHERE id != transcript:04edb62cpdj3lfojdcf2 AND embedding != NONE ORDER BY score DESC LIMIT 5")
 
 # Find similar persons (by face centroid)
-mcp__surreal__query(sql="SELECT canonical_name, vector::similarity::cosine(face_centroid, (SELECT face_centroid FROM person:abc123)[0].face_centroid) AS score FROM person WHERE face_centroid != NONE ORDER BY score DESC LIMIT 5")
+surreal_query(sql="SELECT canonical_name, vector::similarity::cosine(face_centroid, (SELECT face_centroid FROM person:abc123)[0].face_centroid) AS score FROM person WHERE face_centroid != NONE ORDER BY score DESC LIMIT 5")
 ```
 
 ## Decision tree: which layer?

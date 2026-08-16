@@ -1,8 +1,8 @@
 # MEDIA_QA
 
-How to use the kernel's media-analysis MCP server to vibe-check gameplay screenshots, QA generated art, and batch-process playtest captures.
+How to use the media MCP server (media-mcp) to vibe-check gameplay screenshots, QA generated art, and batch-process playtest captures.
 
-The media server is wired into the kernel's MultiClient automatically. Its tools are exposed as `mcp__media-analysis__*` (analyze_image, detect_objects, tag_image, classify_nsfw, etc.). No HTTP wrapper needed.
+The `media` server comes from the shared catalog (`profiles/_shared/tool_servers.yaml`) and is NOT armed by default — the org must declare `{kind: mcp, ref: media}` in its org.yaml. Its tools surface as `media_*` (analyze_image, detect_objects, tag_image, classify_nsfw, etc.).
 
 ## Vibe Report Format
 
@@ -37,7 +37,7 @@ Every QA cycle writes `/sandbox/workspace/qa/cycle-N/vibe.json`:
 Run media tools against the screenshot:
 
 ```
-mcp__media-analysis__analyze_image(
+media_analyze_image(
     imageSource="file:///sandbox/workspace/qa/cycle-N/viewport.png",
     prompt="Score this 2.5D cyberpunk survival-horror screenshot 1-5 on: art direction, tone consistency (lonely/ominous), technical quality (composition, lighting). List any visual issues."
 )
@@ -60,7 +60,7 @@ Use `tag_image` to get objective labels. If tags include "cute", "cartoon", "ani
 Always run `classify_nsfw` on every screenshot:
 
 ```
-mcp__media-analysis__classify_nsfw(imageSource="file:///...")
+media_classify_nsfw(imageSource="file:///...")
 ```
 
 If `unsafe` score > 0.3, mark `tone_consistency` low, log to `/sandbox/workspace/qa/cycle-N/rejected.json`, and recommend `iterate` with stricter prompt.
@@ -70,7 +70,7 @@ If `unsafe` score > 0.3, mark `tone_consistency` low, log to `/sandbox/workspace
 Use `detect_objects` to verify expected entities are in frame:
 
 ```
-mcp__media-analysis__detect_objects(
+media_detect_objects(
     imageSource="file:///...",
     confidence=0.4
 )

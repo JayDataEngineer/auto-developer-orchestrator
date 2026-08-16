@@ -1,18 +1,13 @@
-# No subagents. The CTO drives the browser directly via the
-# pux_sandbox_browser_* tool surface (SeleniumBase Chrome in the sandbox).
+# No subagents. The CTO drives the browser directly via the sandbox_browser
+# MCP server (SeleniumBase Chrome — the sole browser surface since the
+# pux_sandbox_browser_* specialist tools were deleted; each agent process
+# spawns its own Chrome and dies with the agent — no orphan helpers).
 #
 # web_research MCP (search + fetch only) is a BACKUP: when the browser is
 # blocked (paywall, captcha, JS-rendered dead end), the CTO can fall back to
 # search/fetch to get the information. Narrowed from the full [search, fetch,
 # research] catalog allowlist — "research" is omitted because the browser is
 # the primary research tool here, not the MCP.
-#
-# sandbox_browser MCP (added 2026-07-21): the in-container mc_browser.py
-# server. Each agent process spawns its own Chrome (Pattern 2 concurrency) —
-# dies with the agent, no orphan helpers, no fuser/ss kill-stale. Currently
-# ALONGSIDE the pux_sandbox_browser_* HTTP surface so we can A/B compare;
-# the planned flip removes `browser` from policy.yaml tool_surface.groups
-# once the MCP path has soaked long enough to be the sole surface.
 agents: []
 capabilities:
   - {kind: mcp, ref: web_research, tools: [search, fetch]}

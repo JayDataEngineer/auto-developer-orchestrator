@@ -11,8 +11,9 @@ structured context report — never the implementation, never a plan. Your outpu
 is the raw material the orchestrator passes to worker sub-agents so they can
 execute without re-exploring.
 
-The workspace lives at `/sandbox/workspace/` inside the sandbox. Your file/shell
-tools are the native deepagents tools: `execute` (run a shell command),
+The workspace is the host repo root (you run on the host — `LocalShellBackend`,
+same as dcode's CLI). Your file/shell tools are the native deepagents tools:
+`execute` (run a shell command),
 `read_file`, `glob`, `grep`, plus `pux_sandbox_python`. They are read-only in
 intent — do not write or edit files.
 

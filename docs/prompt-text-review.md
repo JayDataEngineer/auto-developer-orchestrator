@@ -1,5 +1,15 @@
 # Prompt Text Review — Redundancy, Verbosity, Docstring Duplication
 
+> **Status:** audit snapshot (2026-07), covering the org tree at its pre-fold
+> location. The tree now lives under `profiles/` and the path abbreviations
+> below (`general/AGENTS.md`, `specialists/_demo/AGENTS.md`, `browser.md`, …)
+> mean `profiles/…` — **re-verify line references before acting on them.**
+> The text-quality findings (Patterns 1–4) remain valid for the surviving
+> `profiles/` files; the one tooling change that matters at the fold: the
+> browser family migrated to the native `sandbox_browser` MCP server, so the
+> browser.md / web-agent.md frontmatter and "30 tools by ref" claims are stale
+> — re-check those two files specifically before cutting anything.
+
 A file-by-file, line-referenced pass over **every prompt in the system** (11 org
 prompts + 27 subagent definitions), against three problems:
 
@@ -28,7 +38,7 @@ restatements of Operating Principles / Orchestrator pattern ARE redundant.
 → **Org-level (a) findings below are valid.**
 
 **2. The subagent prompt** = deepagents' 2-line `DEFAULT_SUBAGENT_PROMPT`
-(`pux-harness/.venv/.../deepagents/middleware/subagents.py:244` — *"you have a
+(`deepagents/middleware/subagents.py:244` in the workspace venv — *"you have a
 number of standard tools; the caller sees only your final message; ensure your
 final response contains the complete answer"*) **plus the agent's `.md` body.**
 **Subagents do NOT receive the org base.** The `.md` body is the subagent's
@@ -202,9 +212,10 @@ are `execute`/`read_file`/`glob`/`grep`/`pux_sandbox_python`; read-only in inten
   "`glob`/`grep` locate") = **docstrings the subagent already sees → cut (c).**
 - **"Read-only in intent / no writes"** = the agent's **role** → keep (scopes it).
 - **Workspace path `/sandbox/workspace/`** = operational fact the subagent needs
-  (it's *not* in the base for them). Keep one line where the agent does path work
-  — but verify the native tool docstrings don't already state the mount; if they
-  do, cut from all bodies.
+  (it's *not* in the base for them; the constant still lives in
+  `src/sandbox/exec.py`). Keep one line where the agent does path work — but
+  verify the native tool docstrings don't already state the mount; if they do,
+  cut from all bodies.
 - **Fix:** one line each: *"Read-only investigator. Workspace at
   `/sandbox/workspace/`. No writes/edits."* (−~4 lines × 4 files.)
 
@@ -221,6 +232,12 @@ own docstring the subagent sees — then the body re-describes them:
   `browser_click_at`, `browser_scroll_into_view`, `browser_a11y`, `browser_iframe`).
   **The clearest (c) violation in the system.** Cut to nothing (or 2 lines
   pointing at the docstrings). 137 → ~70 lines, no capability lost.
+
+> ⚠️ At the 2026-08 fold the browser tools moved behind the `sandbox_browser`
+> MCP server — **re-check the current `browser.md` frontmatter** (likely
+> `capabilities: [{kind: mcp, ref: sandbox_browser}]` + far fewer declared
+> tools) before applying the L5-35/L83-121 cuts; the body-level duplication
+> finding stands regardless.
 
 ### `web-agent.md` (101 lines) — duplicates browser.md (b + c)
 - L37-41 + L62-75 re-explain the same SoM/scroll/selector guidance as
@@ -307,6 +324,6 @@ docstring-duplication, an internal duplicate, or an over-long routing signal.
 The deep pass (this doc) is done per the "teamwork" split — your turn to do the
 manual rewrite. Want me to **execute Batch 1** (the unambiguous mechanical cuts:
 add the 2 base lines, strip the 8 "Operating Rules" blocks to org-specific-only,
-trim the 3 verbose `description:`s) and prove it green with the contract + kit
+trim the 3 verbose `description:`s) and prove it green with the guards + kit
 suites before you take over for voice work? Or keep this purely as a reference
 doc and you drive all edits?

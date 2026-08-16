@@ -3,6 +3,10 @@
 > **Goal:** Pux becomes a thin compiler over deepagents. The engine goes from
 > 31K LOC to ~200. Orgs stay exactly as they are. Tools move to MCP servers.
 > The end state is a CopilotKit website that drives game/waifu creation.
+>
+> **Status:** This plan (2026-07) was executed — and then exceeded — by the
+> 2026-08 fold: the workspace IS a dcode workspace, the engine is gone, and the
+> compiler + launch live in `src/`. Post-fold reality is annotated inline.
 
 ---
 
@@ -37,17 +41,17 @@ A thin compiler does exactly five things:
 ```python
 def build_graph(org: str):
     # 1. Read org config
-    config = read_yaml(f"orgs/{org}/org.yaml")
-    prompt = read(f"orgs/{org}/AGENTS.md")
+    config = read_yaml(f"profiles/{org}/org.yaml")
+    prompt = read(f"profiles/{org}/AGENTS.md")
 
     # 2. Parse agent definitions
-    subagents = [parse_agent_md(f) for f in glob(f"orgs/{org}/agents/*.md")]
+    subagents = [parse_agent_md(f) for f in glob(f"profiles/{org}/agents/*.md")]
 
     # 3. Connect MCP servers declared in capabilities
     mcp_tools = await open_org_mcp(org)
 
     # 4. Load model
-    model = get_model(config.get("model", "glm-5.2"))
+    model = _get_default_model_spec()   # dcode's own config — no pux model layer
 
     # 5. Compile
     return create_deep_agent(
@@ -58,100 +62,91 @@ def build_graph(org: str):
     )
 ```
 
-Everything else either becomes an MCP server, a stock deepagents middleware
-passed directly, or goes away.
+This is now literally `src/run.py` (`build_org_agent`), with steps 3–4 through
+dcode's own machinery: `resolve_and_load_mcp_tools` and `_get_default_model_spec()`.
+Everything else either became an MCP server, a stock deepagents middleware
+passed directly, or went away.
 
 ---
 
-## What Stays (Legitimate Bespoke)
+## What Stays (Legitimate Bespoke) — post-fold verdict
 
-| Layer | Module | LOC | Why it stays |
+| Layer | Pre-fold module | Post-fold (2026-08) |
+|---|---|---|
+| **Org system** | orgs.py, profile.py, kit/loaders.py (~2,300 LOC) | `src/profiles/loaders.py` + `src/profiles/_paths.py` (`discover_orgs`, `org_agent_slugs`, `build_system_prompt`, `_load_agent_spec`) — this IS the product |
+| **Sandbox** | docker_exec.py, container.py, backend.py (~2,300) | **RETIRED** — deepagents `LocalShellBackend` (`src/sandbox/local.py`), no Docker container; `src/sandbox/exec.py` selects the backend (`PUX_SANDBOX`) |
+| **MCP client** | mcp_client.py, tool_servers.py (790) | `src/run.py` (`_load_mcp` → dcode's `resolve_and_load_mcp_tools`), `src/protocol/mcp.py` (`_org_mcp_servers`) |
+| **Model factory** | model.py (773) | **RETIRED** — dcode's own `_get_default_model_spec()` (`src/run.py`) reads the operator's deepagents config |
+| **Aegra integration** | upstream.py, custom_app.py (454) | **RETIRED** — the TUI is dcode's own `run_textual_app` |
+
+---
+
+## What Moves (Engine → MCP Server) — what actually moved
+
+| Planned | Actual (2026-08) | Org that uses it |
+|---|---|---|
+| `sandbox/tools/browser.py` → `pux-browser` MCP | **DONE** — browser family migrated to the native `sandbox_browser` MCP server (in-container SeleniumBase) | browser-agent, coder |
+| `sandbox/tools/` specialists → `pux-sandbox` MCP | **SUPERSEDED** — the specialists stayed in-process as the registry-keyed surface (`src/tools/registry.py`, `pux_sandbox_*` prefix retained); file/shell ops come from deepagents' `FilesystemMiddleware` | all |
+| `context/` (EventStore, ctx_recall/search) → `pux-context` MCP | **never built** — the context lane retired with the fold | — |
+
+---
+
+## What Gets Cut (Framework → Direct) — post-fold verdict
+
+| Module | LOC | Today | Tomorrow → post-fold |
 |---|---|---|---|
-| **Org system** | orgs.py, profile.py, kit/loaders.py | ~2,300 | The multi-org config layer — this IS the product |
-| **Docker sandbox** | docker_exec.py, container.py, backend.py | ~2,300 | Implements deepagents' SandboxBackendProtocol — your IP |
-| **MCP client** | mcp_client.py, tool_servers.py | 790 | Already a thin wrapper over langchain_mcp_adapters |
-| **Model factory** | model.py | 773 | Multi-provider routing + fallback chains |
-| **Aegra integration** | upstream.py, custom_app.py | 454 | Already thin — generates graph__{org} per org |
+| `stack.py` | 1,331 | Middleware registry + resolver + factory | `src/run.py` `build_org_agent` — a pure org→graph projection, no registry |
+| `contract.py` | 1,695 | Build-time org validation | **Moved to the test suite** as planned: `tests/guards/tripwire_checks.py` (kit-import-isolation + the no-harness-refs gate) |
+| `prompt_parts.py` | 371 | Multi-source prompt assembly | `src/middlewares/rubric.py` (`RubricMiddleware`) + `src/profiles/loaders.py` (`build_system_prompt`; the `_shared` addenda are dormant prose behind `load_shared_prompt_body`) |
+| `agent/profile.py` middleware override system | ~300 | Per-org middleware add/remove | Middleware refs now resolve to `[rubric]` only (`src/middlewares/rubric.py`) |
 
-These are genuine infrastructure. They stay.
-
----
-
-## What Moves (Engine → MCP Server)
-
-Tools currently baked into the engine move OUT to MCP servers. The org
-declarations stay the same — only the tool source changes.
-
-| Today (baked in engine) | Tomorrow (MCP server) | LOC moved | Orgs that use it |
-|---|---|---|---|
-| `sandbox/tools/` (13 specialists) | `pux-sandbox` MCP | ~4,000 | coder, deep-research-engine |
-| `sandbox/tools/browser.py` | `pux-browser` MCP | 1,326 | browser-agent |
-| `context/` (EventStore, ctx_recall/search) | `pux-context` MCP or optional middleware | ~2,000 | deep-research-engine |
-
-Each MCP server wraps existing code — the Docker exec client, the SeleniumBase
-browser, the EventStore. The tools work identically; they just live outside
-the engine.
+**Net cut: ~3,000 LOC** from the engine — and the fold then cut the rest.
 
 ---
 
-## What Gets Cut (Framework → Direct)
-
-| Module | LOC | Today | Tomorrow |
-|---|---|---|---|
-| `stack.py` | 1,331 | Middleware registry + resolver + factory | ~50 LOC pure function returning create_deep_agent kwargs |
-| `contract.py` | 1,695 | Build-time org validation | Simplified to ~200 LOC or moved to test suite |
-| `prompt_parts.py` | 371 | Multi-source prompt assembly | Direct system_prompt from AGENTS.md + profile suffix |
-| `agent/profile.py` middleware override system | ~300 | Per-org middleware add/remove | Direct middleware list per org (simpler) |
-
-**Net cut: ~3,000 LOC** from the engine. Not 10K — that would require killing
-orgs. But 3K of genuine indirection that deepagents 0.7.x handles natively.
-
----
-
-## Migration Phases
+## Migration Phases — post-fold verdict
 
 ### Phase 0 — game-studio (ALREADY WORKS) ✅
 
 game-studio uses ONLY MCP servers (Ray inference, Godot, web-research).
-Zero dependency on baked-in engine tools. Proven today:
+Zero dependency on baked-in engine tools. Verified pre-fold:
 
-- AsyncSubAgent: supervisor → Aegra → generate(comfyui_video) → 235KB MP4
+- AsyncSubAgent: supervisor → (pre-fold: Aegra) → generate(comfyui_video) → 235KB MP4
 - Waifu pipeline: ComfyUI sprite → Godot scene → screenshot
 
 **Nothing to migrate. game-studio works on the thin engine today.**
 
-### Phase 1 — pux-sandbox MCP server
+### Phase 1 — pux-sandbox MCP server — SUPERSEDED
 
-Wrap `docker_exec.py` + specialist tools as a stdio MCP server.
+Plan: wrap `docker_exec.py` + specialist tools as a stdio MCP server.
 
 ```
-orgs/specialists/coder/org.yaml changes:
+profiles/specialists/coder/org.yaml changes:
   capabilities:
 -   - {kind: tool, ref: python}        # was baked in engine
 +   - {kind: mcp, ref: pux-sandbox}    # now an MCP server
 ```
 
-Unblocks: coder, deep-research-engine, any org that needs file/shell tools.
+What happened instead: the specialists stayed in-process under
+`src/tools/registry.py`, and the Docker exec client was retired with the
+container — file/shell capability is deepagents' native `FilesystemMiddleware`.
 
-### Phase 2 — pux-browser MCP server
+### Phase 2 — pux-browser MCP server ✅ DONE
 
-Wrap `sandbox/tools/browser.py` (SeleniumBase) as a stdio MCP server.
+Plan: wrap `sandbox/tools/browser.py` (SeleniumBase) as a stdio MCP server.
+Done as the **`sandbox_browser` MCP server** (in-container SeleniumBase),
+referenced per-agent via `{kind: mcp, ref: sandbox_browser}`.
 
-Unblocks: browser-agent.
+### Phase 3 — Thin the engine ✅ DONE (2026-08 fold)
 
-### Phase 3 — Thin the engine
+1. `stack.py:build_stack()` → `src/run.py` `build_org_agent` (~50 LOC pure function)
+2. Middleware passed directly to `create_deep_agent()` (rubric only)
+3. Prompt assembly from AGENTS.md + profile suffix (`src/profiles/loaders.py`)
+4. Contract validation moved to the test suite (`tests/guards/`)
 
-With tools in MCP servers, simplify the engine:
+### Phase 4 — pux-context MCP (optional) — never built
 
-1. Replace `stack.py:build_stack()` with a ~50 LOC pure function
-2. Pass middleware directly to `create_deep_agent()` (no registry)
-3. Simplify prompt assembly (read AGENTS.md + profile suffix, done)
-4. Move contract validation to the test suite
-
-### Phase 4 — pux-context MCP (optional)
-
-If deep-research-engine needs context management (ctx_recall/search), wrap
-the EventStore as an MCP server. Only research-heavy orgs arm it.
+The context/EventStore lane retired with the fold; no successor.
 
 ---
 
@@ -164,34 +159,30 @@ the EventStore as an MCP server. Only research-heavy orgs arm it.
 └────────────────────────┬────────────────────────────┘
                          │ AG-UI / SSE
 ┌────────────────────────▼────────────────────────────┐
-│              Aegra :9988 (Agent Protocol)            │
-│         langgraph-api — threads/runs/store           │
+│       dcode TUI + deepagents ACP (deepagents-acp)   │
+│              run_textual_app — the graph surface    │
 └────────────────────────┬────────────────────────────┘
                          │ graph__{org}
 ┌────────────────────────▼────────────────────────────┐
-│           Thin Engine (~200 LOC compiler)            │
-│    org.yaml + agents/*.md → create_deep_agent()     │
+│           Thin Compiler (src/compiler + src/run.py)  │
+│  profiles/<org>/{org.yaml, AGENTS.md} → create_deep_agent() │
 └────────────────────────┬────────────────────────────┘
                          │ MCP tools
 ┌────────────────────────▼────────────────────────────┐
 │                   MCP Servers                        │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────┐│
-│  │Ray (CUI) │ │Godot MCP │ │pux-sandbox│ │web-research││
-│  │images    │ │scenes    │ │file/shell │ │search   ││
-│  │video     │ │sprites   │ │code exec  │ │fetch    ││
-│  │audio     │ │screens   │ │           │ │         ││
-│  │3D        │ │GDScript  │ │           │ │         ││
-│  └──────────┘ └──────────┘ └──────────┘ └─────────┘│
-└─────────────────────────────────────────────────────┘
-                         │
-┌────────────────────────▼────────────────────────────┐
-│              Langfuse Observability                  │
+│  ┌──────────┐ ┌──────────┐ ┌──────────────┐ ┌───────┐│
+│  │Ray (CUI) │ │Godot MCP │ │sandbox_browser│ │web-research││
+│  │images    │ │scenes    │ │browser/eval  │ │search ││
+│  │video     │ │sprites   │ │screenshots   │ │fetch  ││
+│  │audio     │ │GDScript  │ │              │ │       ││
+│  │3D        │ │          │ │              │ │       ││
+│  └──────────┘ └──────────┘ └──────────────┘ └───────┘│
 └─────────────────────────────────────────────────────┘
 ```
 
 **User flow on the website:**
 1. User types: "Make a cyberpunk waifu with silver hair"
-2. CopilotKit streams the request to Aegra → game-studio graph
+2. CopilotKit streams the request to the game-studio graph
 3. Art-specialist calls Ray MCP → generates character sprite
 4. Gameplay-programmer calls Godot MCP → loads sprite into scene
 5. User sees the character appear in a Godot viewport, streamed back
@@ -199,13 +190,16 @@ the EventStore as an MCP server. Only research-heavy orgs arm it.
 
 ---
 
-## What NOT to Touch
+## What NOT to Touch — post-fold verdict
 
-- **Org files** — `org.yaml`, `agents/*.md`, `AGENTS.md`, `profile.yaml` stay
-- **Docker sandbox core** — `docker_exec.py`, `container.py`, `backend.py` stay
-- **MCP client** — `mcp_client.py`, `tool_servers.py` stay
-- **Model factory** — `model.py` stays
+- **Org files** — now under `profiles/`: `org.yaml`, `agents/*.md`, `AGENTS.md`,
+  `profile.yaml`, `policy.yaml` stay exactly as they are
+- **Docker sandbox core** — **RETIRED** with the container; the backend is
+  deepagents' `LocalShellBackend` (`src/sandbox/local.py`)
+- **MCP client** — replaced by dcode's `resolve_and_load_mcp_tools`
+  (`src/run.py`); `src/protocol/mcp.py` projects org refs onto `.mcp.json`
+- **Model factory** — **RETIRED**; dcode's `_get_default_model_spec()` rules
 - **All orgs** — game-studio, coder, deep-research-engine, browser-agent,
   twitter-agent, telegram-agent, orchestrator, video-production, etc. ALL stay
 
-The orgs are the product. The engine is plumbing. We're fixing the plumbing.
+The orgs are the product. The compiler is plumbing. The plumbing is now thin.

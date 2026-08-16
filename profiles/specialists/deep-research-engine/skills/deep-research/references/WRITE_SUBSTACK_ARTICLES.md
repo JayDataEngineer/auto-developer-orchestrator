@@ -1,6 +1,6 @@
 # WRITE_SUBSTACK_ARTICLES
 
-The substack-writer's checklist. Loaded automatically into the substack-writer's prompt via skills_dir.
+The substack-writer's checklist. A skill reference — read it when writing articles.
 
 ## Anatomy of a Substack article
 
@@ -118,7 +118,7 @@ Numbers should match. Each definition should point to a real source from the bri
 Save the article as a `source` record so future agents can find it via vector search ("have we written about X before?"):
 
 ```bash
-mcp__surreal__upsert(table="source", id="<headline>", data={"kind": "article", "path": "artifacts/article.md", "title": "<headline>"})
+surreal_upsert(table="source", id="<headline>", data={"kind": "article", "path": "artifacts/article.md", "title": "<headline>"})
 ```
 
 If the brief already saved a `source` record with kind=brief, this article gets its own kind=article record (different `path`, so they don't collide). The CTO can later query `SELECT * FROM source WHERE kind='article'` to list all published articles.

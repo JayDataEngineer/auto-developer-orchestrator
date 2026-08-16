@@ -83,9 +83,9 @@ If ambiguous, default to **twitter thread** (most flexible).
    from memory. Better to drop a weak claim than publish a false one.
 7. **Persist to SurrealDB** so future agents can find prior content on a
    topic ("have we already tweeted about X?"). Call the
-   `mcp__surreal__upsert` tool:
+   `surreal_upsert` tool:
    ```
-   mcp__surreal__upsert(
+   surreal_upsert(
        kind="<post|article>",
        path="artifacts/<...>",
        topic="<topic>"

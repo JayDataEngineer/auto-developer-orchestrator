@@ -78,8 +78,8 @@ def scripts_dir() -> Path:
 # Generic browser sessions (any domain, any host browser)
 # --------------------------------------------------------------------- #
 # This is the canonical path family for host-extracted browser cookies.
-# ``extract_browser_cookies.py`` writes JSON files here; the kernel's
-# ``restore_session`` browser tool reads them back. Domain-keyed so the
+# ``extract_browser_cookies.py`` writes JSON files here; the browser MCP's
+# ``restore_session`` tool reads them back. Domain-keyed so the
 # same org can hold sessions for multiple sites (linkedin.com, x.com, ...)
 # without collisions. Twitter-specific helpers below are kept for back-compat
 # with older bootstraps but new code should prefer browser_session(domain).

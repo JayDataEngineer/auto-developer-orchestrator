@@ -1,18 +1,14 @@
 ---
 documentation: |
-  The harness addendum — folded into EVERY supervisor (CTO) system prompt after
-  the AGENTS.md overlay (base org + specialist). Where this addendum conflicts
-  with an org's AGENTS.md, THIS FILE wins (it is authoritative).
+  The harness addendum — the canonical supervisor (CTO) prompt addendum text:
+  delegation instructions, the tool-surface map (pux_sandbox_* -> native
+  deepagents tools), and the workspace path.
 
-  This is the ONE place to change the delegation instructions, the tool-surface
-  map (pux_sandbox_* -> native deepagents tools), and the workspace path that
-  every org's CTO sees. Subagents do NOT see this addendum (they get their own
-  body + suffixes only).
-
-  Lifted from pux_harness/agent/prompt_parts.py::_ADDENDUM (the embedded
-  constant is now the fallback for minimal fixtures / packed archives that omit
-  _shared/). Edit THIS file — the change is picked up by `pux prompt show` and
-  at runtime with zero code edits.
+  Kept from the pre-fold harness (2026-08-16 fold): no live reader in the
+  folded workspace — the composition seam (load_shared_prompt_body) died with
+  the harness, as did the `pux prompt show` subcommand. Retained as the
+  canonical text if the seam returns. An experimenter who wants to tweak the
+  addendum wording edits THIS file.
 ---
 
 ## Harness addendum (deepagents) — authoritative

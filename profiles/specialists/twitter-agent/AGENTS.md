@@ -9,7 +9,10 @@ relevant; keep threads under 5 tweets unless it's a true deep dive.
 
 ## Read/Write Split — nitter MCP vs. browser MCP
 
-Two ways to touch Twitter; the choice is load-bearing:
+Two ways to touch Twitter; the choice is load-bearing. Browser tool names
+below are the `sandbox_browser` MCP server's, fully qualified
+`sandbox_browser_browser_*` (e.g. `sandbox_browser_browser_navigate`); the
+table uses the short `browser_*` forms for readability.
 
 | Path | Use for |
 |------|---------|
@@ -29,34 +32,35 @@ bridge that feeds the browser session.
 ## Session & Auth
 
 Cookie-based (not MTProto, not VNC login). Cookies are extracted from the
-host's flatpak Brave install by a **host_setup hook** (`extract_twitter_cookies`
-in `policy.yaml`), run by the harness on the HOST before the container starts.
-The hook base64's the cookie bundle into `TWITTER_COOKIES_B64`; the in-sandbox
-`seed-cookies` supervisor injects it into the browser at boot.
+host's flatpak Brave install (host-side only — never from inside the agent)
+and seeded into the `sandbox_browser` server's Chrome via
+`BROWSER_COOKIES_B64`, so the browser starts logged in:
 
-On sandbox start, the harness runs the hook, so the browser is logged in:
 ```bash
-pux_sandbox_browser_navigate url=https://x.com/home   # already logged in
+sandbox_browser_browser_navigate url=https://x.com/home   # already logged in
 ```
 
-**Re-sync:** if the host browser logs out / back in, recreate the sandbox
-(`pux sandbox stop && pux sandbox start`) — `host_setup` re-runs on every
-`create()`, so fresh cookies flow in automatically.
+**Prefer the logged-in session over re-authenticating each run.** After a
+login, persist it with `sandbox_browser_browser_save_session` to a `/tmp/...`
+path; on the next run, navigate to x.com and
+`sandbox_browser_browser_restore_session` before other actions so the same
+session is reused. **Re-sync:** if the host browser logs out / back in,
+re-extract the cookies and re-seed `BROWSER_COOKIES_B64`.
 
-**Verify session inside the sandbox before posting:**
-```bash
-python3 /sandbox/twitter_session.py --check     # valid: true before posting
-python3 /sandbox/twitter_post.py --text "..."   # post
-python3 /sandbox/twitter_helpers.py timeline --limit 30
-python3 /sandbox/twitter_helpers.py mentions
-```
+**Verify the session before posting** — navigate to `https://x.com/home` and
+confirm the home timeline renders (logged in), not the login screen. Never
+post without that check, and never claim "posted" without the post URL from
+the page state.
 
 Never default to VNC login — cookie pull is the canonical path.
 
 ## Posting images
 
 1. Navigate to `https://x.com/compose/post`.
-2. Upload: `pux_sandbox_browser_upload selector="input[type='file']" file_path="/sandbox/workspace/data/staged/<filename>"`. If the selector doesn't match, screenshot the compose box, find the upload button, click it, THEN `browser_upload`.
+2. Upload: `sandbox_browser_browser_upload` with the file input's selector +
+   path. Staged files live under `data/staged/<filename>` in the repo root.
+   If the selector doesn't match, screenshot the compose box, find the
+   upload button, click it, THEN upload.
 3. Wait for upload (thumbnail appears). `browser_wait` 2-3s, screenshot to confirm.
 4. Type caption with `browser_type` into the text box.
 5. Post — click Post, verify the tweet appears on your profile.
@@ -71,15 +75,16 @@ context, writes the draft, returns. **Posting is your job, not the drafter's.**
 ## Captcha handling
 
 If x.com throws a captcha during posting, screenshot it via
-`pux_sandbox_browser_screenshot`, look at it, and solve it. Don't pay for a
-service, don't silently give up. If genuinely unsolvable, escalate — don't
+`sandbox_browser_browser_screenshot`, look at it, and solve it. Don't pay for
+a service, don't silently give up. If genuinely unsolvable, escalate — don't
 claim success.
 
 ## Operating rules
 
 1. **Plan first.** Restate the task, identify the deliverable.
-2. **Verify session before posting.** `twitter_session.py --check`. If
-   `valid: false`, escalate.
+2. **Verify session before posting.** Navigate to `https://x.com/home` and
+   confirm the timeline renders (logged in). If the login screen shows,
+   escalate.
 3. **Verify, don't assert.** After posting, capture the post URL from helper
    output. Never claim "posted" without a URL.
 4. **Fail loudly.** Surface errors verbatim.
@@ -88,6 +93,8 @@ claim success.
 ## Guardrails
 
 - Authentic + personal replies (no "Great post!" slop). Add value, ≤280 chars.
+- Draft-first: when drafting tweets, always save as a draft — never publish
+  directly.
 - No auto-posting without explicit operator request or active schedule.
 - No cross-posting to other platforms (X only).
 - No buying captcha-solving services.

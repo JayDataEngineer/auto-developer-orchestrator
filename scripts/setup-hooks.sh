@@ -17,8 +17,8 @@ fi
 echo "Running tests before push..."
 
 # Run the orchestrator integration suite (deepagents pivot; the TS vitest suite
-# is gone). Runs at the repo root — pux-harness is consumed as a path-dep
-# submodule, and the library's own org-agnostic suite lives in that repo.
+# is gone). Runs at the repo root — the workspace IS the project: folded src/,
+# profiles/ tree, and tests/ all live in this repo.
 uv run pytest -q
 TEST_RESULT=$?
 

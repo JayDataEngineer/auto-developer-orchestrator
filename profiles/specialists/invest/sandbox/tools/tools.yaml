@@ -1,11 +1,10 @@
 # Declared sandbox tools for the invest org.
 #
-# Each entry is auto-translated (pux_harness/sandbox/tools/declared.py) into a
-# typed langchain StructuredTool whose func `docker exec`s the script
-# IN-CONTAINER. The model calls `pux_sandbox_<name>(typed args)` directly
-# instead of emitting untyped `python3 sandbox/<script>.py ...` shell — the
-# weak-model (mimo-v2.5) reliability bridge. The harness builds the shell;
-# the model can't get arg order/quoting wrong. Contract-validated + audited.
+# DORMANT (2026-08-16 fold): these are the opt-in sandbox arm's script
+# catalog — the declared.py auto-translation layer (typed StructuredTools
+# that docker exec'd the scripts IN-CONTAINER) died with the harness, so no
+# tool is built from this file today. Kept as the arm's spec for when the
+# PUX_SANDBOX=openshell adapter returns.
 #
 # Type vocab: string / integer / number / boolean.
 # invoke: flags (default, robust) -> --name value (boolean -> --name store_true).

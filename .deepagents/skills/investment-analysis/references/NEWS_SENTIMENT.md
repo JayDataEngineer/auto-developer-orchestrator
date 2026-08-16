@@ -4,12 +4,12 @@ How to gather + score news sentiment via web MCP. This skill is baked into the *
 
 ## Web MCP Patterns
 
-### Top tool: `mcp__web__research`
+### Top tool: `web_research_research`
 Searches + scrapes top results in one call. Returns title, URL, snippet, AND page content (capped at ~5K chars per result). Default for 90% of queries.
 
 ### Single-symbol news scan
 ```python
-mcp__web__research(
+web_research_research(
     query="$SYMBOL stock news today earnings upgrade",
     max_results=5,
     depth="quick"  # or "deep" for ~20 results
@@ -17,25 +17,22 @@ mcp__web__research(
 ```
 
 ### Structured extraction (news schema)
-For a specific article URL:
+For a specific article URL, `web_research_fetch` returns the full page content — pull the fields from it yourself:
 ```python
-mcp__web__extract(
-    url="https://finance.yahoo.com/news/...",
-    schema_type="news"
-)
-# Returns: {headline, author, date, content, summary, category}
+web_research_fetch(url="https://finance.yahoo.com/news/...")
+# Fields to extract from the page content: headline, author, date, content summary, category
 ```
 
 ### News by sector/theme
 ```python
-mcp__web__research(query="semiconductor stocks news TSMC NVDA AMD", max_results=5)
-mcp__web__research(query="AI infrastructure spending datacenter REITs", max_results=5)
-mcp__web__research(query="Fed interest rate decision next FOMC", max_results=3)
+web_research_research(query="semiconductor stocks news TSMC NVDA AMD", max_results=5)
+web_research_research(query="AI infrastructure spending datacenter REITs", max_results=5)
+web_research_research(query="Fed interest rate decision next FOMC", max_results=3)
 ```
 
 ### Time-filtered news
 ```python
-mcp__web__search(
+web_research_search(
     query="$SYMBOL earnings",
     time_filter="day",  # last 24h
     top_k=10
@@ -44,9 +41,9 @@ mcp__web__search(
 
 ### Macro / cross-asset
 ```python
-mcp__web__research(query="Federal Reserve interest rate decision this week", max_results=3)
-mcp__web__research(query="SEC crypto regulation news ETF approval", max_results=3)
-mcp__web__research(query="China GDP trade war impact stocks", max_results=3)
+web_research_research(query="Federal Reserve interest rate decision this week", max_results=3)
+web_research_research(query="SEC crypto regulation news ETF approval", max_results=3)
+web_research_research(query="China GDP trade war impact stocks", max_results=3)
 ```
 
 ## Source Authority Tiers

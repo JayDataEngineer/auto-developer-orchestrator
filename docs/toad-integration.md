@@ -1,71 +1,25 @@
-# Toad ↔ Pux (coding org) integration
+# Toad ↔ Pux (coding org) integration — RETIRED SURFACE, kept for the toad-side facts
 
-> Toad (`batrachian-toad`) is an ACP **client** TUI. Pux is an ACP **server**.
-> They already speak the same protocol — wiring is just "point toad at `pux acp`."
+> **Status: RETIRED (2026-08 fold).** The ACP server this doc wired to is gone:
+> `bin/pux` (the bash router), the harness ACP server, and the sandbox
+> container were all removed with the pre-fold harness. The repo now serves no
+> wire protocol of its own — the CLI is exactly `sync`/`check`/`compile`
+> (`src/compiler/cli.py`) and the editor/TUI surface is dcode's
+> `run_textual_app` + upstream `deepagents-acp`.
+>
+> What remains valid: the **toad-side knowledge** (agent-discovery quirks,
+> the `toad acp "<cmd>"` escape hatch, the app-store TOML shape, the upgrade
+> caveat) — toad 0.6.20 hasn't changed. If you ever need to drive an org from
+> toad again, serve it via the upstream `deepagents-acp` package and adapt the
+> template below. The pux-side mechanics are kept as the historical record so
+> nobody re-derives them.
 
-This doc exists so we never have to reverse-engineer the wiring again.
-
-Tested with: `toad 0.6.20`, `pux-harness` (master, `deepagents-acp>=0.0.9`).
-
----
-
-## Prerequisite — put `pux` on PATH (one-time)
-
-`pux` is NOT auto-installed. It's a bash launcher at `bin/pux` in this repo.
-Symlink it onto PATH (the launcher self-resolves its own symlink, so it works
-from any cwd):
-
-```bash
-ln -sf /home/user/Documents/programs/dev/auto-developer-orchestrator/bin/pux ~/.local/bin/pux
-hash -r
-which pux          # → /home/user/.local/bin/pux
-pux                # prints usage → confirms PATH wiring
-```
-
-⚠️ **Do NOT run `pux acp` bare in a shell.** It's a stdio JSON-RPC **server** —
-it blocks waiting for ACP protocol input on stdin. stdout stays clean (logging
-is pinned to stderr via `bootstrap_env_and_logging(pin_stderr=True)` so no
-library log corrupts the JSON-RPC stream). It is meant to be *spawned by an ACP
-client* (toad / Aethna / Hermes / Zed / VS Code), not invoked by a human.
-
-Quick sanity check it speaks ACP (no client needed) — feed it one handshake
-line, then EOF:
-
-```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":true,"writeTextFile":true},"terminal":true},"clientInfo":{"name":"manual","title":"manual","version":"0"}}}' \
-  | pux acp --org coder 2>/dev/null | head -1
-# → {"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"loadSession":true,...},"protocolVersion":1}}
-```
-
-A JSON-RPC response on stdout = the server is healthy and any ACP client can
-drive it.
+Original tested combination: `toad 0.6.20` as ACP client, the pre-fold harness
+as ACP server (`deepagents-acp>=0.0.9`).
 
 ---
 
-## TL;DR
-
-`cd` into the project you want to work on, then:
-
-```bash
-toad acp "pux acp --org coder"
-```
-
-That's it. Toad spawns `pux acp --org coder` as a subprocess, speaks ACP over
-stdio, and the **coder** org's compiled deepagents graph is the agent. Toad
-passes your cwd as the ACP `session/new` cwd; pux exports it as
-`PUX_PROJECT_PATH` so the sandbox mounts **your project** at
-`/sandbox/workspace` (Claude-Code-style "spawn in folder"). The sandbox
-self-boots lazily on first tool call (same as `pux direct`), so no prior
-`pux sandbox start` is needed.
-
-To target a different org, just change `--org` (`invest`, `deep-research-engine`,
-`game-studio`, …). Or `export PUX_ORG=coder` and shrink it to `toad acp "pux acp"`.
-
----
-
-## How the two pieces fit
-
-### Toad — ACP client
+## Toad-side facts (STILL VALID — toad 0.6.20)
 
 - Toad launches an agent **process** and talks JSON-RPC over the process's
   stdin/stdout. ACP is the *only* protocol toad supports
@@ -80,98 +34,57 @@ To target a different org, just change `--org` (`invest`, `deep-research-engine`
   (`toad/cli.py`): it wraps any ACP-speaking command as a one-shot agent with
   identity `f"{first_word}.custom.batrachian.ai"`. No TOML required.
 
-### Pux — ACP server
+---
 
-- `bin/pux acp` → `python -m pux_harness.acp` → `deepagents_acp.server.AgentServerACP`
-  wrapping `build_graph(org)`.
+## Historical — the pux ACP server (pre-fold, retired)
+
+- `bin/pux acp` → the pre-fold harness's `acp` entrypoint →
+  `deepagents_acp.server.AgentServerACP` wrapping `build_graph(org)`.
 - Org resolution (first wins): `--org` flag → `$PUX_ORG` → `general`.
-- `bin/pux` self-resolves its own symlink, exports
-  `PUX_PROJECT_ROOT="$REPO"`, `cd "$REPO"`, sources `./.env`. So it is safe to
-  invoke from any cwd — the harness always sees this repo's `orgs/` tree.
-- The stdout contract is enforced: `acp.py::run_acp` calls
-  `bootstrap_env_and_logging(pin_stderr=True)` first, pinning the root logger
-  to stderr so no library log ever corrupts the JSON-RPC stream.
+- `bin/pux` self-resolved its own symlink, exported
+  `PUX_PROJECT_ROOT="$REPO"`, `cd "$REPO"`, sourced `./.env` — safe from any
+  cwd; the harness always saw this repo's `profiles/` tree.
+- The stdout contract: the server pinned logging to stderr
+  (`bootstrap_env_and_logging(pin_stderr=True)`) so no library log corrupted
+  the JSON-RPC stream.
+- The stdio/SSE transports were already moved upstream to `deepagents_acp`
+  before the fold; the fold then removed the remaining wrapper.
 
-Net: **`pux acp` is a drop-in for any ACP editor** (Zed / vscode-acp / Neovim /
-**toad**).
+**Post-fold equivalents:**
+- `PUX_PROJECT_ROOT` survives as the root the workspace uses for `profiles/`
+  discovery + graph compilation (`src/profiles/_paths.py`); `--org` / `$PUX_ORG`
+  survive as the org selector in `uv run python src/run.py --org <org>`.
+- The container half (the second env var `PUX_PROJECT_PATH`, bind-mounting your
+  project at `/sandbox/workspace`) is **retired** with the Docker sandbox —
+  the backend is deepagents' `LocalShellBackend` on the host fs
+  (`src/sandbox/local.py`; `WORKSPACE_ROOT` constant survives in
+  `src/sandbox/exec.py`).
 
 ---
 
-## Wiring options
+## Wiring options (post-fold)
 
-### Option A — one-shot (recommended, zero persistence)
-
-```bash
-# cd into the project you want the agent to work on, then:
-toad acp "pux acp --org coder"
-```
-
-**The agent spawns in your cwd — Claude-Code-style.** Toad passes your launch
-dir as `cwd` in the ACP `session/new`. The pux ACP server exports it as
-`PUX_PROJECT_PATH` (`_capture_editor_cwd` in `acp.py`), so the lazily-booted
-sandbox container mounts **that folder** at `/sandbox/workspace`. The coder
-agent's `read_file`/`edit_file`/`execute`/`glob`/`grep` then operate on YOUR
-project, not the orchestrator repo. Each unique project path gets its own
-container (keyed by the `openshell.project-path` Docker label), so multi-project
-isolation is automatic.
+### Option A — one-shot (if an ACP server is running)
 
 ```bash
-cd ~/my-project && toad acp "pux acp --org coder"   # agent sees ~/my-project
+toad acp "<acp-server-command> --org coder"
 ```
 
-You can also pin the project explicitly via env (wins over the editor's cwd):
-
-```bash
-PUX_PROJECT_PATH=~/my-project toad acp "pux acp --org coder"
-```
-
-**How the cwd→workspace seam works (the two-env-var split):**
-
-| Env var | What it controls | Who sets it |
-|---|---|---|
-| `PUX_PROJECT_ROOT` | where `orgs/` + the harness live **on the host** (graph compilation, system prompt) | `bin/pux` → the orchestrator repo |
-| `PUX_PROJECT_PATH` | what the **container** bind-mounts at `/sandbox/workspace` (the agent's fs surface) | `_capture_editor_cwd(cwd)` from ACP `session/new`; falls back to `PUX_PROJECT_ROOT` |
-
-The harness compiles the coder org from the orchestrator repo's `orgs/` tree
-(host-side, via `PUX_PROJECT_ROOT`) regardless of what the container mounts.
-Only the container's workspace follows the editor's cwd. This is why the agent
-keeps its full system prompt + rubric gate + subagents when pointed at an
-external project — the org spec isn't in the container, it's on the host.
-
-**Known gap: skills.** The `load_skill` tool lists skills by reading
-`/sandbox/workspace/orgs/...` *inside the container*. When the workspace is an
-external project (no `orgs/` tree), skill discovery returns empty. The core
-tools (read/edit/exec/glob/grep) are unaffected. To close this, mount the
-orchestrator repo read-only at `/sandbox/harness` and remap the skill path —
-tracked separately.
-
-Flags that matter (from `toad acp --help`):
-- `-t/--title "Coder"` — pretty label in toad's status bar.
-- `-d/--project-dir <path>` or the positional `PATH` — the cwd toad passes to
-  the agent. **Honored** by pux (exported as `PUX_PROJECT_PATH` on the first
-  `session/new`).
-- `-s/--serve` — launch as a web app instead of TUI.
-
-Persist it as a shell alias so you don't retype it:
-
-```bash
-# ~/.bashrc or ~/.zshrc
-alias toad-coder='toad acp "pux acp --org coder"'
-```
+With the pre-fold harness this was `toad acp "pux acp --org coder"`. Today you
+would point it at a `deepagents-acp`-based server if one is running.
 
 ### Option B — permanent entry in toad's app store
 
-Use this if you want `coder` to show up in toad's agent picker alongside
+Use this if you want an org to show up in toad's agent picker alongside
 Claude Code / OpenHands / etc. You must write the TOML into the **installed
 package's** data dir (the only place `read_agents()` looks in 0.6.20):
 
 ```bash
-REPO=/home/user/Documents/programs/dev/auto-developer-orchestrator
 DST=$(python -c "import importlib.resources as r, toad.data; print(r.files('toad.data')/'agents')")
 cp "$REPO/docs/toad-coder.toml" "$DST/pux.coder.local.toml"
 ```
 
-Template (`docs/toad-coder.toml`):
+Template (`docs/toad-coder.toml` — still in the repo):
 
 ```toml
 # Schema: toad/agent_schema.py. Filename MUST be <identity>.toml.
@@ -190,13 +103,13 @@ tags = []
 help = '''
 # Pux — Coder
 
-The coding org from the auto-developer-orchestrator repo, served over ACP by
-`pux acp --org coder`. Includes dev-bot-explorer + the non-skippable
-RubricMiddleware ship-gate.
+The coding org from the auto-developer-orchestrator repo, served over ACP.
+Includes dev-bot-explorer + the non-skippable RubricMiddleware ship-gate.
 '''
-# Absolute path so toad can launch it from any cwd.
 # run_command is the ACP-server command to spawn; toad pipes JSON-RPC to it.
-run_command."*" = "/home/user/Documents/programs/dev/auto-developer-orchestrator/bin/pux acp --org coder"
+# ⚠️ ADAPT: the pre-fold value was ".../bin/pux acp --org coder" — bin/pux is
+# gone; point this at your deepagents-acp server command.
+run_command."*" = "<your-acp-server> --org coder"
 ```
 
 Then launch directly by short name:
@@ -207,12 +120,7 @@ toad -a pux-coder
 
 ⚠️ **Upgrade caveat**: `uv tool install -U batrachian-toad` replaces the package
 dir and wipes anything you dropped in `toad/data/agents/`. Re-copy the TOML
-after upgrading, or — better — script it:
-
-```bash
-# post-upgrade hook (run after `uv tool install -U batrachian-toad`)
-make toad-install-coder   # see Makefile target below
-```
+after upgrading, or — better — script it (Makefile target below).
 
 ⚠️ **Why we can't use `~/.config/toad/agents/`**: that path does not exist in
 toad 0.6.20. If a future toad release adds a user overlay (likely, given the
@@ -227,96 +135,62 @@ python -c "import toad.agents, inspect; print(inspect.getsource(toad.agents.read
 
 ## Makefile target (so it's not just prose)
 
-Suggested addition to the repo `Makefile`:
-
 ```make
-.PHONY: toad-install-coder toad-acp-coder
+.PHONY: toad-install-coder
 toad-install-coder: ## Install the coder org into toad's app store (re-run after toad upgrades)
 	@DST=$$(python -c "import importlib.resources as r; print(r.files('toad.data')/'agents')") && \
 	cp docs/toad-coder.toml "$$DST/pux.coder.local.toml" && \
 	echo "Installed pux.coder.local → $$DST"
-
-toad-acp-coder: ## Launch toad wired to `pux acp --org coder` (one-shot, no install)
-	toad acp "pux acp --org coder"
 ```
 
 ---
 
-## Troubleshooting
+## Troubleshooting (historical rows marked; toad-side rows still valid)
 
 | Symptom | Cause / fix |
 |---|---|
-| `toad` shows "Failed to initialize agent" / hangs on first prompt | `pux acp` printed to stdout. Don't run a custom wrapper that echoes — `pux_harness.acp` already pins logging to stderr. If you wrap it, your wrapper must not touch stdout. |
-| `toad acp "pux acp"` serves the **general** org | Org resolution fell through to default. Pass `--org coder` or `export PUX_ORG=coder`. |
-| Agent can't see `orgs/` / "unknown org" | `PUX_PROJECT_ROOT` not set. Don't bypass `bin/pux` — it sets the env var. If you call `python -m pux_harness.acp` directly, export `PUX_PROJECT_ROOT=/path/to/this/repo` first. |
-| Sandbox never boots / first tool call times out | Docker daemon down or `pux-sandbox` image missing. Run `make sandbox` once, then retry. `pux acp` lazily boots the sandbox on first tool use. |
-| `toad -a pux-coder` says "agent not found" after upgrade | Option B TOML was wiped by `uv tool install -U`. Re-run `make toad-install-coder`. |
+| "agent not found" after toad upgrade | Option B TOML was wiped by `uv tool install -U`. Re-run `make toad-install-coder`. |
+| (RETIRED) "Failed to initialize agent" / hangs on first prompt | The pre-fold `pux acp` printed to stdout — its logging was pinned to stderr; wrappers must not echo to stdout. N/A today. |
+| (RETIRED) Agent can't see the org tree / "unknown org" | `PUX_PROJECT_ROOT` not set; `bin/pux` set it. Today: run the workspace from the repo root — `src/profiles/_paths.py` resolves the project root itself. |
+| (RETIRED) Sandbox never boots / first tool call times out | The container sandbox; `make sandbox` pre-built the image. Retired with Docker. |
 | Want a different org (invest / dre / game-studio) | Change `--org` (Option A) or clone the TOML with a new `identity`/`short_name` (Option B). One TOML per org. |
-| Multiple toad sessions, different orgs | `toad acp "pux acp --org invest"` in another terminal. Each `toad acp` invocation is an independent agent process. |
-| Agent operates on the orchestrator repo, not my project | Your editor didn't pass a cwd (or it isn't a dir). `cd ~/my-project` before launching toad, or `PUX_PROJECT_PATH=~/my-project toad acp "pux acp --org coder"`. Verify with `docker ps --format '{{.Label "openshell.project-path"}}'`. |
-| `load_skill` finds nothing on an external project | Expected: skills live at `/sandbox/workspace/orgs/...` in-container; an external project has no `orgs/` tree. Core tools (read/edit/exec/glob/grep) are unaffected. |
-| Two containers running after switching projects | Correct — each unique project path gets its own container (keyed by the `openshell.project-path` label). `docker stop` the old one if you want to reclaim memory. |
+| Multiple toad sessions, different orgs | Each `toad acp` invocation is an independent agent process. |
+| (RETIRED) Agent operates on the orchestrator repo, not my project | The pre-fold container bind-mount followed the editor's cwd via `PUX_PROJECT_PATH`. Retired with the container. |
+| (RETIRED) `load_skill` finds nothing on an external project | Skills lived under the in-container org-tree mount. Retired with the container. |
 
 ---
 
-## Why not MCP?
+## Why not MCP? (decision record)
 
-Pux *also* speaks MCP (`pux mcp` — wraps the Agent Protocol REST API as an SSE
-server on :9987). That's a **different** integration: MCP gives an *editor's*
-agent (e.g. Claude Code inside Zed) access to pux's tools. Toad wants the
-*opposite* — toad wants to **be** the editor driving a coding agent. That's ACP.
-For toad, always use `pux acp`, never `pux mcp`.
+The pre-fold harness *also* spoke MCP (`pux mcp` — Agent Protocol REST wrapped
+as an SSE server). That was a **different** integration: MCP gives an *editor's*
+agent access to pux's tools. Toad wants the *opposite* — toad wants to **be**
+the editor driving a coding agent. That's ACP. The MCP surface is retired too;
+the reasoning stands: ACP for editors, MCP for tools.
 
 ---
 
-## Reference pointers (so future-you can re-derive this)
+## Reference pointers
 
 - `toad/agents.py` — `read_agents()`; the **only** place agents are loaded from.
 - `toad/agent_schema.py` — `Agent` TypedDict + `run_command` shape.
 - `toad/cli.py` — `acp` subcommand: identity `f"{cmd.split()[0].lower()}.custom.batrachian.ai"`.
-- `bin/pux` — the bash router; `acp)` branch → `python -m pux_harness.acp`.
-- `pux_harness/acp.py` — the ACP server; `--org` flag, stdout-pinned logging.
-- `orgs/specialists/coder/` — the org itself (`AGENTS.md`, `org.yaml`,
+- `docs/toad-coder.toml` — the app-store template (adapt `run_command`, see above).
+- `profiles/specialists/coder/` — the org itself (`AGENTS.md`, `org.yaml`,
   `profile.yaml`, `policy.yaml`, `agents/*.md`).
+- `src/run.py` — the launch (`--org`, `build_org_agent`, `run_textual_app`);
+  `src/profiles/_paths.py` — `PUX_PROJECT_ROOT` / `profiles/` discovery.
 
 ---
 
-## ACP is the universal pattern (not just a toad integration)
+## ACP is the universal pattern (not just a toad integration) — decision record
 
 > "PUX should be deployed as an ACP server. That is how Aethna / Hermes
 > communicates. A universal pattern." — the architectural framing.
 
-Toad is one client of the pux ACP surface, not a special case. **`pux acp
---org <org>` is the canonical, editor-agnostic integration point.** Every
-ACP-speaking client can drive every pux org the same way:
-
-| Client        | What it is                                  | How it consumes `pux acp`                          |
-|---------------|---------------------------------------------|----------------------------------------------------|
-| **Toad**      | Terminal TUI (`batrachian-toad`)            | `toad acp "pux acp --org coder"` — see TL;DR above |
-| **Aethna**    | Orchestrator/agent client                   | spawns `pux acp --org <org>` over stdio JSON-RPC   |
-| **Hermes**    | Agent daemon                                | same — `pux acp` is the editor surface it drives   |
-| **Zed / VS Code / Neovim** | ACP-aware editors              | `pux acp --org <org>` (the original design target) |
-
-Why this matters: the **stdout contract** (`pux_harness.acp` pins logging to
-stderr via `bootstrap_env_and_logging(pin_stderr=True)` so no library log can
-corrupt the JSON-RPC stream) and the **threading model** (`thread_id =
-session_id` in the checkpointer; `session/list` enumerates an org's sessions
-across `pux acp` process restarts) are owned once, server-side. Any ACP client
-that respects the protocol gets a working, resumable, org-scoped agent — no
-per-client glue.
-
-### Operating consequence
-
-Run **one `pux acp` per org** you want on the editor bus. The org is fixed at
-startup (`--org` / `$PUX_ORG`), so multi-org deployments run N processes. The
-shared thread store (`threads.open_thread_store`) makes session resume work
-across those process restarts. Do **not** try to multiplex orgs inside one
-`pux acp` — the ACP `session/new` doesn't take an org param by design (the
-graph is compiled once at boot).
-
-### Transports moved upstream
-
-The `pux acp` and `pux mcp` stdio/SSE transports have been removed from this
-repo — they are the same concern (external client → agent) and now live in the
-upstream `deepagents_acp` package. The Agent Protocol HTTP surface (Aegra
-`serve`) is the single runtime; editors connect via the upstream ACP adapter.
+That framing drove the pre-fold server (`pux acp --org <org>` as the canonical,
+editor-agnostic integration point; the stdout contract and threading model
+owned server-side). The fold kept the *conclusion* and deleted the *machinery*:
+the editor surface is now dcode's own TUI, and any ACP client needing the
+org graph would talk to upstream `deepagents-acp` directly. No per-client glue
+in this repo either way.

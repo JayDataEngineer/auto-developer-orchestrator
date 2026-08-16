@@ -1,16 +1,22 @@
 # Thin Architecture — The Simplification Mandate
 
-> **Status:** ACTIVE DECISION (2026-08-03). Supersedes the accumulation
-> approach of the prior 8 months. Every bespoke addition is suspect until
-> proven necessary. The goal is the thinnest possible layer between a smart
-> model and productive work.
+> **Status:** ACTIVE DECISION (2026-08-03) — **EXECUTED by the 2026-08 fold.**
+> The workspace is now a dcode workspace: the graph builder is deepagents'
+> `create_deep_agent` (`src/run.py`), the TUI is dcode's `run_textual_app`, the
+> compiler is `src/` (`src/compiler/`, `src/profiles/`, `src/plugins/`), and
+> every bespoke engine layer is gone. The principles below are the governing
+> philosophy; post-fold verdicts are annotated where the decision changed.
 
 ## The Decision
 
 Pux becomes a **thin wrapper over upstream deepagents.** We stop building
 custom agent infrastructure that the upstream now does better. We strip
 accumulated complexity. We keep only what upstream cannot provide: sandbox
-isolation, game-dev-specific tools, and the CopilotKit interface layer.
+isolation, game-dev-specific tools, and the editor interface layer.
+
+**Post-fold:** sandbox isolation is now deepagents' own `LocalShellBackend`
+(host fs — the Docker container was retired), game-dev tools are MCP servers,
+and the interface layer is dcode's own TUI + upstream `deepagents-acp`.
 
 ## Why
 
@@ -60,53 +66,45 @@ Every architectural decision must answer: "does this help ship Tech Noir?"
 If not, don't build it. We are not building a platform company. We are
 making a game with AI assistance.
 
-## What Stays (Infrastructure With Unique Value)
+## What Stays (Infrastructure With Unique Value) — post-fold verdict
 
-| Component | Why It Stays |
-|-----------|-------------|
-| Docker sandbox | Isolated execution — upstream doesn't provide this |
-| SurrealDB integration | Shared state across agents and sessions |
-| godot-mcp bridge | Godot editor control — game-specific, no upstream equivalent |
-| ACP (Agent Client Protocol) | UI-to-runtime separation — enables CopilotKit |
-| CopilotKit export | Web UI for visual creative work — text interfaces can't do game dev |
-| Pux harness (pux-harness/) | The deepagents graph builder + CLI — this IS the thin wrapper |
+| Component | Why It Stays | Post-fold (2026-08) |
+|-----------|-------------|---------------------|
+| Docker sandbox | Isolated execution — upstream doesn't provide this | **RETIRED** — the backend is deepagents' `LocalShellBackend` (`src/sandbox/local.py`), host fs, no container |
+| SurrealDB integration | Shared state across agents and sessions | unchanged (external — game infra, not repo code) |
+| godot-mcp bridge | Godot editor control — game-specific, no upstream equivalent | survives as an MCP server the game-studio org declares |
+| ACP (Agent Client Protocol) | UI-to-runtime separation — enables CopilotKit | **moved upstream** — the repo serves no ACP of its own; the surface is `deepagents-acp` |
+| CopilotKit export | Web UI for visual creative work — text interfaces can't do game dev | **RETIRED** with the server lane; the TUI is dcode's own `run_textual_app` |
+| Pux harness | The deepagents graph builder + CLI — this IS the thin wrapper | `src/` — the compiler (`src/compiler/`) + launch (`src/run.py`); CLI `pux` = exactly `sync`/`check`/`compile` (`src/compiler/cli.py`) |
 
-## What Gets Stripped (Bloat Replaced by Upstream or Deleted)
+## What Gets Stripped (Bloat Replaced by Upstream or Deleted) — all done
 
-| Component | Replacement |
-|-----------|-------------|
-| Custom agent orchestration | deepagents graphs (the upstream pattern) |
-| 200-line CTO overlay prompts | 20-line thin agent definitions |
-| Preloaded skill system | On-demand skill loading by task type |
-| Custom TUI (TOAD) | CopilotKit web UI |
-| Bespoke delegation protocol | deepagents task() delegation |
-| Accumulated "improvements" from 8 months | Deletion. The model doesn't need them. |
-| Forge API client | Ray's `/v1/run` via MCP tool wrapper |
-| Hardcoded model knowledge | Ray's `/v1/form-spec` — schema discovery |
+| Component | Replacement | Status |
+|-----------|-------------|--------|
+| Custom agent orchestration | deepagents graphs (the upstream pattern) | done — `src/run.py` `build_org_agent` → `create_deep_agent` |
+| 200-line CTO overlay prompts | 20-line thin agent definitions | done — the profiles tree IS the definitions (`profiles/`) |
+| Preloaded skill system | On-demand skill loading by task type | done — deepagents `SkillsMiddleware` (name+description only; body via `read_file`) |
+| Custom TUI (TOAD) | CopilotKit web UI | **changed** — the TUI is dcode's `run_textual_app` (upstream, not bespoke) |
+| Bespoke delegation protocol | deepagents task() delegation | done |
+| Accumulated "improvements" from 8 months | Deletion. The model doesn't need them. | done — the 2026-08 fold |
+| Forge API client | Ray's `/v1/run` via MCP tool wrapper | done — Ray MCP server |
+| Hardcoded model knowledge | Ray's `/v1/form-spec` — schema discovery | done; model config for the launch itself is dcode's `_get_default_model_spec()` |
 
-## The Target Stack
+## The Target Stack — post-fold reality
 
 ```
-CopilotKit (web UI)
-  ├── Thin custom components (<AssetGallery>, <SpriteReviewer>, 
-  │   <SubagentTree>, <GameViewport>, <VibeDashboard>)
-  └── Chat → delegates to agents
-      │
-      ▼
-deepagents (agent runtime — upstream, thin wrappers)
-  ├── Director (orchestrates, delegates, decides iterate/yield)
-  ├── Art Specialist (deepseek-v4-flash — cheap iteration)
-  ├── Playtester (deepseek-v4-flash — runs Godot, reports bugs)
-  ├── Audio Specialist (deepseek-v4-flash)
-  ├── Programmer (Claude or flash)
-  └── Narrative (flash)
-      │
-      ▼
+dcode TUI (run_textual_app) — the editor surface
+  └── deepagents graph (create_deep_agent — src/run.py build_org_agent)
+      ├── Supervisor (org CTO — profiles/<org>/AGENTS.md chain)
+      ├── Subagents (profiles/<org>/agents/*.md — native SubAgent dicts)
+      └── Middleware: [rubric] (src/middlewares/rubric.py)
+          │
+          ▼
 MCP Tools (self-describing — schema from Ray form-spec)
-  ├── generate_image(model, prompt, **params) → /v1/run
-  ├── generate_audio(model, prompt, **params) → /v1/run
-  ├── generate_video(model, prompt, **params) → /v1/run
-  └── [new models appear automatically via form-spec discovery]
+  ├── Ray MCP (generate_image / audio / video / 3D → /v1/run)
+  ├── godot-mcp (scenes, GDScript)
+  ├── sandbox_browser (in-container SeleniumBase — browser/eval)
+  └── web-research (search/fetch)
       │
       ▼
 Ray (inference engine — localhost:33080)
@@ -124,7 +122,7 @@ Tech Noir (Godot 4.6 — the actual game)
 
 ## The MCP Tool Pattern (The Shared Layer)
 
-The single most important new piece. ~100 lines. Makes every Ray model
+The single most important piece. ~100 lines. Makes every Ray model
 available as a self-describing MCP tool:
 
 ```python
@@ -143,8 +141,7 @@ the agent HOW to use the tool. The tool just executes. Three separate
 concerns, three separate layers, minimal context in each.
 
 When Ray adds a new model, it automatically appears as an MCP tool. Zero
-code changes in Pux. This is the opposite of the current Forge client, which
-hardcodes endpoints and parameters.
+code changes in Pux.
 
 ## Context Discipline Rules
 
@@ -173,27 +170,24 @@ Context discipline is what makes the cheap model viable. Viable cheap models
 are what make 50-iteration playtester loops affordable. Affordable playtester
 loops are what turn "static assets flying everywhere" into a polished game.
 
-## Migration Sequence
+## Migration Sequence — post-fold verdict
 
-### Phase 1: Build Thin (alongside Pux — no stripping yet)
-- [ ] MCP wrapper: Ray form-spec → MCP tool (~100 lines)
-- [ ] Thin agent definitions: 20-line deepagents graphs
-- [ ] Skill index: on-demand loading by task type
-- [ ] CopilotKit components: SpriteReviewer, SubagentTree, AssetGallery
-- [ ] Fix endpoints: game-studio org → localhost:33080
+### Phase 1: Build Thin (alongside Pux — no stripping yet) ✅ EXECUTED
+- [x] MCP wrapper: Ray form-spec → MCP tool
+- [x] Thin agent definitions: deepagents graphs from `profiles/` (loaders → native `SubAgent`s)
+- [x] Skill index: on-demand loading by task type
+- [x] CopilotKit components → **changed**: the TUI is dcode's `run_textual_app`
 
-### Phase 2: Prove (on Tech Noir real problems)
+### Phase 2: Prove (on Tech Noir real problems) — ongoing product work
 - [ ] "Generate club scene music" (the track that failed before)
 - [ ] "Playtest the club scene" (Godot headless → vision QA → vibe.json)
 - [ ] "Fix the detective sprite" (background removal → consistency check)
-- [ ] Measure: does thin outperform Pux's current bloat?
 
-### Phase 3: Strip (Pux bespoke parts — only after Phase 2 proves thin works)
-- [ ] Delete bespoke orchestration
-- [ ] Delete bloated agent prompts (replace with 20-line defs)
-- [ ] Delete preloaded skill system
-- [ ] Keep: Docker sandbox, SurrealDB, godot-mcp, ACP, harness
-- [ ] Pux becomes what it should always have been: thin deepagents wrapper + infra
+### Phase 3: Strip (Pux bespoke parts — only after Phase 2 proves thin works) ✅ EXECUTED
+- [x] Delete bespoke orchestration — gone at the 2026-08 fold
+- [x] Delete bloated agent prompts (replace with 20-line defs) — the profiles tree
+- [x] Delete preloaded skill system — deepagents `SkillsMiddleware` on-demand
+- [x] Keep: godot-mcp, sandbox_browser — MCP servers; Docker sandbox/SurrealDB/ACP/CopilotKit per the What-Stays verdicts above
 
 ## The Bet
 
@@ -208,7 +202,7 @@ Stop building platform. Start making the game.
 
 ## Related Documents
 
-- `game-studio/AGENTS.md` — will be rewritten to 20-line thin definitions
-- `game-studio/skills/` — skills stay, loading mechanism changes to on-demand
+- `profiles/specialists/game-studio/AGENTS.md` — the thin org definition (post-fold)
+- `profiles/specialists/game-studio/skills/` — on-demand skills
 - Ray repo `game-assets/PLAN.md` — the inference + pipeline layer (proven)
 - Ray repo `game-assets/skills/` — skill docs that agents consume on-demand

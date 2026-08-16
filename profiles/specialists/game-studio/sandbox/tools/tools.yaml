@@ -1,13 +1,15 @@
 # Declared sandbox tools for the game-studio org.
 #
-# Each entry is auto-translated (pux_harness/sandbox/tools/declared.py) into a
-# typed langchain StructuredTool whose func `docker exec`s the script
-# IN-CONTAINER.
+# DORMANT (2026-08-16 fold): these are the opt-in sandbox arm's script
+# catalog — the declared.py auto-translation layer (typed StructuredTools
+# that docker exec'd the scripts IN-CONTAINER) died with the harness, so no
+# tool is built from this file today. Kept as the arm's spec for when the
+# PUX_SANDBOX=openshell adapter returns.
 #
 # ── Godot is NOT here ─────────────────────────────────────────────────────
 # Godot tools come from the `godot-mcp-runtime` MCP SERVER declared in
 # org.yaml capabilities + profiles/_shared/tool_servers.yaml. The LLM sees
-# `mcp__godot-mcp-runtime__*` tools — the SAME surface regardless of whether
+# `godot-mcp-runtime_<tool>` names — the SAME surface regardless of whether
 # Godot was pre-installed on the host or bootstrapped from GitHub releases.
 # The resolution (PATH → cache → download) happens in godot_bootstrap.py,
 # invoked by the host_setup hook in policy.yaml BEFORE the MCP session opens.

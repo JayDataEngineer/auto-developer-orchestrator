@@ -29,32 +29,31 @@ https://efts.sec.gov/LATEST/search-index?q=%22going+concern%22&dateRange=custom&
 
 ### Get list of recent 10-Ks for a company
 ```python
-mcp__web__scrape(url="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000320193&type=10-K&dateb=&owner=include&count=10")
+web_research_fetch(url="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000320193&type=10-K&dateb=&owner=include&count=10")
 ```
 
 ### Read a specific 10-K (full text)
 ```python
-mcp__web__scrape(url="https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/aapl-20260926.htm")
+web_research_fetch(url="https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/aapl-20260926.htm")
 ```
 
 ### Search EDGAR full-text for risk language
 ```python
-mcp__web__scrape(url="https://efts.sec.gov/LATEST/search-index?q=%22going+concern%22&forms=10-K&dateRange=custom&startdt=2026-01-01")
+web_research_fetch(url="https://efts.sec.gov/LATEST/search-index?q=%22going+concern%22&forms=10-K&dateRange=custom&startdt=2026-01-01")
 ```
 
-### Crawl a company's full filing history
+### Enumerate a company's full filing history
+The armed web_research surface (search/fetch/research) has no crawler or sitemap-mapper — enumerate filing URLs via EDGAR full-text search, then read each document:
 ```python
-mcp__web__crawl(
-  url="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000320193&type=&dateb=&owner=include&count=40",
-  max_depth=2,
-  max_pages=20,
-  include_patterns=["*Archives*"]
-)
+web_research_fetch(url="https://efts.sec.gov/LATEST/search-index?q=&forms=10-K&dateRange=custom&startdt=2026-01-01")
+# then per filing URL from the results:
+web_research_fetch(url="https://www.sec.gov/Archives/edgar/data/<CIK>/<acc-no>/<primary-doc>.htm")
 ```
 
-### Map EDGAR sitemap (for bulk URL discovery)
+### Discover EDGAR URLs in bulk
+Same discovery path — EDGAR full-text search per form type (10-K, 10-Q, 8-K, 4), then fetch each hit. There is no domain-mapper in the armed surface:
 ```python
-mcp__web__map(domain="sec.gov", pattern="*Archives/edgar/data/320193/*", source="sitemap")
+web_research_fetch(url="https://efts.sec.gov/LATEST/search-index?q=<company>&forms=10-Q&dateRange=custom&startdt=2026-01-01")
 ```
 
 ## Reading Order (per filing type)
@@ -87,7 +86,7 @@ Read Items 2.02 (earnings), 5.02 (officer change), 8.01 (other events), 9.01 (fi
 ## CIK Lookup
 
 ```
-mcp__web__scrape(url="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=apple&output=atom")
+web_research_fetch(url="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=apple&output=atom")
 ```
 
 Returns XML with CIK. Parse the `<cik>` tag.
@@ -119,12 +118,12 @@ SEC filings don't change after filing. The `alt_data.py` script caches filings b
 
 ### Official Press Release (8-K Item 2.02)
 ```
-mcp__web__research(query="$SYMBOL Q earnings release site:investors.$SYMBOL.com OR site:ir.$SYMBOL.com", max_results=3)
+web_research_research(query="$SYMBOL Q earnings release site:investors.$SYMBOL.com OR site:ir.$SYMBOL.com", max_results=3)
 ```
 
 ### Earnings Call Transcript
 ```
-mcp__web__research(query="$SYMBOL Q earnings call transcript", max_results=3)
+web_research_research(query="$SYMBOL Q earnings call transcript", max_results=3)
 ```
 
 ### Guidance Update

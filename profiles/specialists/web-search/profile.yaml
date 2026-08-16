@@ -1,8 +1,0 @@
-# Pin base_model to whatever the active tier's worker_model resolves to.
-# Web-search is a fast lookup specialist — no need to burn the reasoning
-# model's budget on search queries. The @worker cross-reference means a
-# cloner's tier remap ripples through without per-org edits.
-models:
-  base_model: "@worker"
-
-ask_user: true

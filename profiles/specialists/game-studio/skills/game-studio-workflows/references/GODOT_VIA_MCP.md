@@ -4,7 +4,7 @@ How to drive Godot from the game-studio org via the `godot-mcp-runtime` MCP serv
 
 ## The MCP surface
 
-The LLM sees `mcp__godot-mcp-runtime__*` tools — 36 tools covering scene
+The LLM sees `godot-mcp-runtime_*` tools — 36 tools covering scene
 editing, node management, scripting, screenshots, input simulation, project
 management, autoloads, and more. This is the SINGLE Godot surface.
 
@@ -24,7 +24,7 @@ handles this. The LLM never sees the resolution — it just sees the tools.
 ### Launch the editor
 
 ```
-mcp__godot-mcp-runtime__launch_editor
+godot-mcp-runtime_launch_editor
 ```
 
 Launches the Godot editor (headless or GUI depending on the environment).
@@ -32,66 +32,66 @@ Launches the Godot editor (headless or GUI depending on the environment).
 ### Open / create / save scenes
 
 ```
-mcp__godot-mcp-runtime__create_scene
-mcp__godot-mcp-runtime__attach_project
-mcp__godot-mcp-runtime__save_scene
-mcp__godot-mcp-runtime__get_scene_tree
-mcp__godot-mcp-runtime__get_scene_dependencies
+godot-mcp-runtime_create_scene
+godot-mcp-runtime_attach_project
+godot-mcp-runtime_save_scene
+godot-mcp-runtime_get_scene_tree
+godot-mcp-runtime_get_scene_dependencies
 ```
 
 ### Node management
 
 ```
-mcp__godot-mcp-runtime__add_node
-mcp__godot-mcp-runtime__duplicate_node
-mcp__godot-mcp-runtime__delete_nodes
-mcp__godot-mcp-runtime__get_node_properties
-mcp__godot-mcp-runtime__set_node_properties
-mcp__godot-mcp-runtime__connect_signal
-mcp__godot-mcp-runtime__disconnect_signal
+godot-mcp-runtime_add_node
+godot-mcp-runtime_duplicate_node
+godot-mcp-runtime_delete_nodes
+godot-mcp-runtime_get_node_properties
+godot-mcp-runtime_set_node_properties
+godot-mcp-runtime_connect_signal
+godot-mcp-runtime_disconnect_signal
 ```
 
 ### Scripts
 
 ```
-mcp__godot-mcp-runtime__run_script       # live GDScript eval
-mcp__godot-mcp-runtime__attach_script
+godot-mcp-runtime_run_script       # live GDScript eval
+godot-mcp-runtime_attach_script
 ```
 
 ### Screenshots and input
 
 ```
-mcp__godot-mcp-runtime__take_screenshot
-mcp__godot-mcp-runtime__simulate_input
-mcp__godot-mcp-runtime__get_ui_elements
+godot-mcp-runtime_take_screenshot
+godot-mcp-runtime_simulate_input
+godot-mcp-runtime_get_ui_elements
 ```
 
 ### Run and debug
 
 ```
-mcp__godot-mcp-runtime__run_project
-mcp__godot-mcp-runtime__stop_project
-mcp__godot-mcp-runtime__get_debug_output
+godot-mcp-runtime_run_project
+godot-mcp-runtime_stop_project
+godot-mcp-runtime_get_debug_output
 ```
 
 ### Autoloads
 
 ```
-mcp__godot-mcp-runtime__list_autoloads
-mcp__godot-mcp-runtime__add_autoload
-mcp__godot-mcp-runtime__remove_autoload
-mcp__godot-mcp-runtime__update_autoload
+godot-mcp-runtime_list_autoloads
+godot-mcp-runtime_add_autoload
+godot-mcp-runtime_remove_autoload
+godot-mcp-runtime_update_autoload
 ```
 
 ### Project management
 
 ```
-mcp__godot-mcp-runtime__list_projects
-mcp__godot-mcp-runtime__get_project_info
-mcp__godot-mcp-runtime__get_project_settings
-mcp__godot-mcp-runtime__get_project_files
-mcp__godot-mcp-runtime__search_project
-mcp__godot-mcp-runtime__validate
+godot-mcp-runtime_list_projects
+godot-mcp-runtime_get_project_info
+godot-mcp-runtime_get_project_settings
+godot-mcp-runtime_get_project_files
+godot-mcp-runtime_search_project
+godot-mcp-runtime_validate
 ```
 
 ## Coordination

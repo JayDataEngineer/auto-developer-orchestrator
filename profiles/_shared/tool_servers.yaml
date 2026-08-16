@@ -2,18 +2,17 @@
 # Schema: {name: {kind, transport, url (sse/http) or command (stdio),
 #                headers?, tools? (allowlist), credentials?}}
 #
-# An org opts in via policy.yaml tool_servers: [name, ...] and may narrow
-# tools: per entry. The schema + env-injection rules are documented inline
-# per entry below.
+# An org opts in via its org.yaml `capabilities: {kind: mcp, ref: <name>}`
+# and may narrow tools: per entry. The schema + env-injection rules are
+# documented inline per entry below.
 #
 # URLs are NOT hardcoded here — every endpoint is deployment-specific
 # (Tailscale IP, cloud hostname, localhost) and must be injected via a
 # `${VAR}` placeholder resolved from the operator's env at load time. The
-# offline contract validates these structurally (the field is declared); the
-# runtime path fails loud if a var is unset, and McpSessionManager.open() then
-# logs ERROR + contributes zero tools for that server (per-server isolation —
-# one unset var can't brick the org). Set the documented PUX_MCP_* vars in
-# your shell / env manager before `pux direct`.
+# runtime path fails loud if a var is unset or a declared server fails to
+# load (src/run.py raises — the org's capability surface can never silently
+# shrink). Set the documented PUX_MCP_* vars in your shell / env manager
+# before `uv run python src/run.py --org <name>`.
 
 # ── ray_inference (Ray in-tree MCP) ──────────────────────────────────────────
 # Source: this stack — server/mcp_inference.py in the Ray repo.
@@ -209,35 +208,6 @@ sandbox_browser:
   transport: stdio
   command: docker
   args: ["exec", "-i", "${PUX_SANDBOX_CONTAINER}", "mc_browser.py"]
-
-# ── pux_sandbox (in-harness specialist tools MCP) ───────────────────────────
-# Source: this repo — pux-harness/pux_harness/mcp_servers/pux_sandbox.py.
-# A FastMCP stdio server that wraps the 44 ``pux_sandbox_*`` specialist tools
-# (python, describe_image, multimodal, desktop_*, browser_*, etc.) from the
-# engine's REGISTRY. Phase 1 of the engine simplification plan: tools move
-# OUT of the engine into a standalone MCP server. The engine becomes a thin
-# compiler; orgs declare ``{kind: mcp, ref: pux_sandbox}`` in org.yaml.
-#
-# Architecture: Pattern 2 (one MCP server per agent process). The host's
-# agent framework spawns this server as a child subprocess; the MCP client
-# connects over stdio. The server builds one DockerExecClient and serves
-# every specialist StructuredTool via MCP. When the agent disconnects (stdin
-# EOF), the server exits.
-#
-# Unlike sandbox_browser (which runs INSIDE the container because SeleniumBase
-# needs Chrome locally), pux_sandbox runs on the HOST — it uses
-# DockerExecClient to exec into the container, exactly as the engine does
-# today. The tool code is UNCHANGED — ``build_native_specialists`` builds the
-# same StructuredTool instances.
-#
-# Env: PUX_HARNESS_PYTHON — the path to the pux-harness venv Python binary
-# (e.g. /home/user/Pux/pux-harness/.venv/bin/python). Required — the server
-# imports pux_harness which is only installed in that venv.
-pux_sandbox:
-  kind: mcp
-  transport: stdio
-  command: ${PUX_HARNESS_PYTHON}
-  args: ["-m", "pux_harness.mcp_servers.pux_sandbox"]
 
 # ── nitter (READ-ONLY Twitter via direct GraphQL) ───────────────────────────
 # Source: this repo — infra/nitter/src/server.py. A FastMCP HTTP server that

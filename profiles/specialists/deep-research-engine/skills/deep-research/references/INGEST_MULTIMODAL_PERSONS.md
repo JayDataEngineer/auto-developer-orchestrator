@@ -24,7 +24,7 @@ Never assume a modality is present. Always query first.
 Run these counts. The answers determine which strategies are available:
 
 ```
-mcp__surreal__query(sql="
+surreal_query(sql="
   RETURN count(SELECT id FROM face_appearance);              -- faces detected?
   RETURN count(SELECT id FROM face_appearance WHERE cluster_id != -1);  -- face clusters?
   RETURN count(SELECT id FROM person WHERE voice_cluster_id != NONE);   -- voice clusters?
@@ -63,7 +63,7 @@ For each `speaker_turn` (a voice segment with start/end seconds in a video):
 
 ```
 # Find faces on screen during this voice segment
-mcp__surreal__query(sql="
+surreal_query(sql="
   SELECT cluster_id, item_id FROM face_appearance
   WHERE item_id = $video_id
     AND frame_sec >= $start_sec
@@ -84,7 +84,7 @@ Decision:
 
 ```
 # Videos where a face cluster and voice cluster both appear
-mcp__surreal__query(sql="
+surreal_query(sql="
   SELECT id,
     ->appears_in->person.face_cluster_id AS face_clusters,
     <-speaks_in<-person.voice_cluster_id AS voice_clusters
@@ -105,7 +105,7 @@ You send your own voice. So the sender of a voice item IS the speaker:
 
 ```
 # Which sender does each voice cluster belong to?
-mcp__surreal__query(sql="
+surreal_query(sql="
   SELECT voice_cluster_id,
          <-speaks_in<-item.sender AS senders,
          count() AS n
@@ -131,14 +131,14 @@ This is where YOU (the LLM) add value a script can't. Reason about context:
 
 1. Query which names appear in which transcripts:
    ```
-   mcp__surreal__query(sql="
+   surreal_query(sql="
      SELECT <-extracted_from<-source.text AS context
      FROM person:ent_grady
    ")
    ```
 2. Query the transcripts where each voice cluster speaks:
    ```
-   mcp__surreal__query(sql="
+   surreal_query(sql="
      SELECT ->speaks_in->item.text AS said_by_cluster
      FROM person:voice_cluster_5
    ")
@@ -157,7 +157,7 @@ associates) — not the same identity. Build a social graph:
 
 ```
 # For each photo, which face clusters appear together?
-mcp__surreal__query(sql="
+surreal_query(sql="
   SELECT item_id, cluster_id FROM face_appearance
   WHERE cluster_id != -1 ORDER BY item_id
 ")
@@ -201,7 +201,7 @@ One query surfaces all media for a person across all modalities.
 ## Step 4 — Audit
 
 ```
-mcp__surreal__query(sql="
+surreal_query(sql="
   RETURN count(SELECT id FROM same_as);
   RETURN count(SELECT id FROM person WHERE role = 'resolved_identity');
   RETURN count(SELECT id FROM pending_link);

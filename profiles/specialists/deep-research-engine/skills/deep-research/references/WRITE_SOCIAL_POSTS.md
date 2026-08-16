@@ -1,6 +1,6 @@
 # WRITE_SOCIAL_POSTS
 
-The social-post-writer's checklist. Loaded automatically into the social-post-writer's prompt via skills_dir.
+The social-post-writer's checklist. A skill reference — read it when writing posts.
 
 ## Platforms and limits
 
@@ -71,7 +71,7 @@ After drafting, save every post file as a `source` record so future agents can f
 ```bash
 for f in artifacts/posts/*.md; do
   [ "$(basename "$f")" = "_INDEX.md" ] && continue
-  mcp__surreal__upsert(table="source", id="$(basename ", data={"kind": "post", "path": "$f", "title": "$(basename "})$f" .md)"
+  surreal_upsert(table="source", id="$(basename ", data={"kind": "post", "path": "$f", "title": "$(basename "})$f" .md)"
 done
 ```
 
@@ -118,4 +118,4 @@ Write `artifacts/posts/_INDEX.md`:
 - **Hashtag limit** — ≤3 per post. More hurts engagement and looks spammy.
 - **Thread pacing** — first post needs to stand alone (some scroll past threads). Last post needs a payoff (people who finish the thread deserve a punchline).
 - **Cross-posting** — a 280-char Twitter post dumped unchanged on Mastodon is wasted space. Adapt per platform.
-- **Mastodon CW** — for sensitive content (this dataset qualifies), use a content warning: `mcp__web__scrape` won't help here, you need to actually format the post for Mastodon's CW field.
+- **Mastodon CW** — for sensitive content (this dataset qualifies), use a content warning: `web_research_fetch` won't help here, you need to actually format the post for Mastodon's CW field.

@@ -40,7 +40,7 @@ The criteria, all must pass (goals are parametric — see audit skill for SQL):
                           (lip-sync heuristic via temporal co-occurrence)
 [6] Entities           →  entity_extract.py batch → entities.json
                           (LLM extracts people/organizations/topics/locations/dates per chunk)
-[7] Knowledge Graph    →  SurrealDB MCP server (mcp__surreal__*)
+[7] Knowledge Graph    →  SurrealDB MCP server (surreal_*)
                           (item + transcript + speaker_turn + face_appearance + person + topic)
 [8] Audit              →  AUDIT_QUALITY_GATES
                           (if any fail, re-delegate the responsible ingestion step)
@@ -126,5 +126,5 @@ The auditor role should watch for:
 - `sandbox/context_engine.py` — main orchestrator
 - `sandbox/audio_client.py` — per-file audio processing
 - `sandbox/entity_extract.py` — LLM-based entity extraction
-- SurrealDB MCP server (`mcp__surreal__*`) — knowledge graph store
+- SurrealDB MCP server (`surreal_*`) — knowledge graph store
 - `sandbox/<format>_parser.py` — one parser per supported ingest format; `--help` lists flags + edge cases

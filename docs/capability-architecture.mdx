@@ -1,7 +1,7 @@
 ---
 title: Capability Architecture — Where Code Runs & How to Extend an Org
-description: The mental model for tools, skills, sandbox scripts, and MCP servers in the pux harness — what runs where, and how to add capability without editing the library.
-last_verified: 2026-07-06
+description: The mental model for tools, skills, sandbox scripts, and MCP servers in the pux workspace — what runs where, and how to add capability without editing the library.
+last_verified: 2026-07-06 (fold: 2026-08)
 ---
 
 # Capability Architecture
@@ -10,43 +10,41 @@ The single rule that prevents every confusion below:
 
 > **Execution site is dictated by the *invocation mechanism*, not by which folder a file sits in.**
 
-The `sandbox/` folder is *conventional staging* for files the agent uses inside its
-container. It does **not** mean "anything filed here runs in the sandbox." An MCP server
+The `sandbox/` folder is *conventional staging* for files the agent uses inside
+the workspace. It does **not** mean "anything filed here runs in the sandbox." An MCP server
 whose source lives under `sandbox/` still runs **host-side** (stdio) or **externally**
-(sse/http) — never in the container.
+(sse/http).
 
 ---
 
 ## 1. The execution sites
 
-Code executes at one of three *sites*: the **harness process (host)**, the **sandbox
-container**, or an **external daemon**. The table below enumerates the *invocation
-mechanisms* and the site each one lands at. Memorize it.
+Code executes at one of two *live* sites: the **host process**, or an **external daemon**.
+The table below enumerates the *invocation mechanisms* and the site each one lands at.
+Memorize it. (A third site — a Docker sandbox container — existed pre-fold and is retired;
+see the historical note below.)
 
 | Code lives at (file) | Invoked by | Actually executes at | What it sees |
 | --- | --- | --- | --- |
-| `pux-harness/pux_harness/sandbox/tools/*` (**REGISTRY**) | LLM tool call → in-process `factory` | **harness process (host)** | reaches *into* the container via `docker exec`; container fs at `/sandbox/workspace` |
-| `orgs/<org>/sandbox/tools/tools.yaml` (**DECLARED**) + `sandbox/<script>.py` | LLM tool call → synthesized `StructuredTool` → `docker exec` | **inside the container** | container fs; the harness builds the shell from the typed args |
-| `orgs/<org>/sandbox/*.py` (a script) | the agent's `execute`/bash tool | **inside the container** | container fs; paths under `/sandbox/...` |
-| **stdio MCP server** (source anywhere) | declared `tool_server: transport=stdio` | **host-side** (the harness forks it) | full host env (`os.environ`), host fs, host cwd |
-| **sse/http MCP server** (external daemon) | declared `tool_server: transport=sse\|http` | **wherever the operator runs the daemon** | that daemon's environment |
+| `src/tools/registry.py` (**REGISTRY**) | LLM tool call → in-process factory | **host process (dcode)** | runs against the workspace through the sandbox backend — deepagents `LocalShellBackend` (`src/sandbox/local.py`), host fs, **no container** |
+| `profiles/<org>/sandbox/*.py` (a script) | the agent's `execute`/bash tool | **the workspace (host fs)** | same host fs as the repo; paths under the project root |
+| **stdio MCP server** (source anywhere) | declared `capabilities:` / `tool_servers` `transport: stdio` | **host-side** (dcode forks it) | full host env (`os.environ`), host fs, host cwd |
+| **sse/http MCP server** (external daemon) | declared `capabilities:` / `tool_servers` `transport: sse\|http` | **wherever the operator runs the daemon** | that daemon's environment |
 
 Source references:
-- REGISTRY in-process factories: `pux-harness/pux_harness/sandbox/tools/registry.py`
-- DECLARED tool synthesis + in-container exec: `pux-harness/pux_harness/sandbox/tools/declared.py`
-- `docker exec` into container, `WORKSPACE_ROOT = "/sandbox/workspace"`: `pux-harness/pux_harness/sandbox/backend.py:41`
-- stdio child spawned host-side with `env = dict(os.environ)`: `pux-harness/pux_harness/agent/mcp_client.py:44-52`
-- sse/http carry only `url` + `headers` (no spawn): `pux-harness/pux_harness/agent/mcp_client.py:53-64`
+- REGISTRY in-process factories: `src/tools/registry.py`
+- workspace scripts run under the local backend: `src/sandbox/local.py` (`local_backend`), selected in `src/sandbox/exec.py` (`PUX_SANDBOX=local` default; `openshell` optional)
+- stdio children forked host-side by dcode's own loader: `src/run.py` (`_load_mcp` → deepagents `resolve_and_load_mcp_tools`)
 
-**The "typed tool that runs *inside* the container" gap is now closed — on purpose.** For a
-long time typed tools were either in-process host code (REGISTRY) or MCP (host/external), and
-in-container execution meant unstructured bash. **Declared sandbox tools** (§3e) cross that
-line deliberately: the model calls `pux_sandbox_<name>(typed, args)` directly, and the harness
-`docker exec`s the script in-container. The motivation is weak-model reliability (the pux
-default is mimo-v2.5): a typed, by-name, auto-documented tool removes the arg-quoting /
-CLI-recall / traceback-recovery tax of `execute("python3 sandbox/x.py …")`. REGISTRY and MCP
-are unchanged; this is a fourth channel for the case that needs *both* typing *and*
-in-container execution.
+**Historical (pre-fold harness, retired 2026-08).** Execution used to happen at three
+sites: harness process, a **Docker sandbox container** (`docker exec`, container fs at
+`/sandbox/workspace`), and external daemons. The container site is gone: the sandbox is now
+deepagents' `LocalShellBackend` on the host filesystem. **Declared sandbox tools**
+(`sandbox/tools/tools.yaml` → synthesized `pux_sandbox_<name>` `StructuredTool`s whose `func`
+`docker exec`'d a script in-container) are retired with it — any `tools.yaml` files still
+lying under `profiles/**/sandbox/` are dormant data no code reads. The typed, by-name,
+auto-documented channel for a weak model is now MCP (stdio host-side, or external
+sse/http) plus the REGISTRY specialists.
 
 ---
 
@@ -55,11 +53,10 @@ in-container execution.
 | You want to add… | Path | Project-portable? | Notes |
 | --- | --- | --- | --- |
 | **Custom agents** | org-local `agents/*.md`, `extends:` a base, `org.yaml` roster | ✅ | full override/inheritance grammar (`tools_add`/`tools_remove`/`model`/`prompt_append`/`skills_add`/`tool_description_overrides`) |
-| **Custom skills** | `orgs/<org>/skills/*/SKILL.md` | ✅ | surfaced to the model via `SkillsMiddleware` → `read_file` |
+| **Custom skills** | `profiles/<org>/skills/*/SKILL.md` | ✅ | surfaced to the model via the `list_skills` specialist tool + deepagents `SkillsMiddleware` → `read_file` |
 | **Custom tools (structured/foreign)** | MCP `tool_servers` — inline in `policy.yaml` or the catalog | ✅ | typed, model-callable; the godot-mcp path |
-| **Custom tools (unstructured scripts)** | `orgs/<org>/sandbox/*.py` via the agent's `execute` | ✅ | the invest / cpp_globber path |
-| **Custom tools (typed, in-container)** | `orgs/<org>/sandbox/tools/tools.yaml` + `sandbox/<script>.py` (**DECLARED**) | ✅ | weak-model-friendly: by-name, schema-validated, still runs in-container; see §3e |
-| **Custom tools (harness-native `ToolSpec`)** | edit `REGISTRY` in the library | ❌ | rare; only for tools that bind `DockerExecClient`/`backend`/`vision_model` |
+| **Custom tools (unstructured scripts)** | `profiles/<org>/sandbox/*.py` via the agent's `execute` | ✅ | the invest / cpp_globber path |
+| **Custom tools (harness-native `ToolSpec`)** | edit `REGISTRY` in the library (`src/tools/registry.py`) | ❌ | rare; only for tools that bind the sandbox backend / `vision_model` / org |
 
 **Override axes for tools are already unified with agents** under the same frontmatter-delta
 grammar: `tools:` allowlist (selection), `tool_description_overrides` (per-key description
@@ -73,91 +70,67 @@ system — it is the same `extends:` vocabulary.
 ### 3a. Harness-native tools — `REGISTRY`
 
 The single global source of truth for tool *implementations*:
-`pux-harness/pux_harness/sandbox/tools/registry.py`.
+`src/tools/registry.py`.
 
-- One `ToolSpec = {slug, category, needs, factory}` per tool, declared **once**.
-- Everything else (the `SPECIALISTS` / `NATIVE_FS_TOOLS` / `GRADERS` frozensets, the prefix
-  helpers, `build_tools`, `classify_slug`) **derives** from that list. No second copy.
+- One `ToolSpec = {slug, category, requirements, factory, …}` per tool, declared **once**.
+- Everything else (the `SPECIALISTS` / `NATIVE_FS_TOOLS` / `GRADERS` name sets, the prefix
+  helpers, `make_specialist_tools`, `classify_slug`, `resolve_tool_allowlist`) **derives**
+  from that list. No second copy.
 - Categories:
   - `NATIVE` — `ls`, `read_file`, `write_file`, `edit_file`, `glob`, `grep`, `execute`.
     `factory=None`; injected by deepagents `FilesystemMiddleware`.
   - `SPECIALIST` — `python`, `list_skills`, `describe_image`, `multimodal`,
-    `multimodal_mega`, `browser_*` (30), `desktop_*` (4). Factories bind
-    `exec_client`/`backend`/`vision_model`/`org` as declared in `Requirements`.
+    `multimodal_mega`, `desktop_*`. Factories bind
+    `sandbox`/`vision_model`/`org` as declared in `Requirements`.
   - `GRADER` — `pux_grader_*` evidence tools for `RubricMiddleware`.
 - An agent's frontmatter `tools:` is an **allowlist** (selection from this set), resolved by
-  `_resolve_tools` (`agent/orgs.py:203`, `kit/compile.py:42`). It is **not** a definition.
-- Adding one = add one `ToolSpec` line; every frozenset + resolver + builder updates
+  `resolve_tool_allowlist` (`src/tools/registry.py:159`). It is **not** a definition.
+- Adding one = add one `ToolSpec` line; every name set + resolver + builder updates
   automatically. This is intentionally a **library edit** (these tools bind harness
   internals; org dirs are declarative *data*, forbidden from importing internals by the
-  `kit-import-isolation` contract tripwire).
+  compile-time surface).
 
 ### 3b. MCP tool servers — foreign, typed tools
 
-Declared per-org, resolved to `ToolServerSpec`, bridged to namespaced `BaseTool`s
+Declared per-org, resolved to `ToolServerSpec`s, bridged to namespaced `BaseTool`s
 (`mcp__<server>__<tool>`). Two declaration styles:
 
-- **Catalog ref** — `tool_servers: [web_research]` → `orgs/_shared/tool_servers.yaml`.
-  The catalog is **per-project** (`_catalog_path → _orgs_dir()/_shared/…`, and
-  `_orgs_dir = project_root()/"orgs"`, which respects `PUX_PROJECT_ROOT`).
+- **Catalog ref** — `tool_servers: [web_research]` → `profiles/_shared/tool_servers.yaml`.
+  The catalog is **per-project** (resolved via `src/profiles/_paths.py`:
+  `project_root()/"profiles"`, which respects `PUX_PROJECT_ROOT`).
 - **Inline** — `tool_servers: [{name: …, kind: mcp, transport: …, …}]` directly in
   `policy.yaml`. No catalog needed; fully self-contained and export-portable.
 
-Resolver: `pux-harness/pux_harness/agent/tool_servers.py`.
-Async bridge: `pux-harness/pux_harness/agent/mcp_client.py` (`McpSessionManager`).
+Resolver: `src/protocol/mcp.py` (`_org_mcp_servers`).
+Load bridge: `src/run.py` (`_load_mcp` — the org's refs are projected onto a temp
+`.mcp.json` and loaded through dcode's own `resolve_and_load_mcp_tools`, fail-loud per
+server).
 
 **Transport semantics** (see §4 for the resolved stack):
 
-| transport | requires | runs at | harness spawns it? |
+| transport | requires | runs at | dcode spawns it? |
 | --- | --- | --- | --- |
-| `stdio` | `command` (+`args`,`env`) | **host-side** | yes — `stdio_client` forks it from the harness process |
-| `sse` | `url` | external daemon | no — harness dials the URL |
-| `http` (Streamable HTTP) | `url` | external daemon | no — harness dials the URL |
+| `stdio` | `command` (+`args`,`env`) | **host-side** | yes — `resolve_and_load_mcp_tools` forks it from the host process |
+| `sse` | `url` | external daemon | no — dcode dials the URL |
+| `http` (Streamable HTTP) | `url` | external daemon | no — dcode dials the URL |
 
 Per-server isolation: a server that is unreachable or fails `tools/list` contributes **zero**
 tools + a loud `ERROR` log; it does not crash the org.
 
-**Release-bootstrap for stdio binaries.** A stdio server needs a local binary
-on `command`. A catalog entry may carry a `github:` block so the harness fetches
-that binary on demand when it is not already present:
+**Historical.** The pre-fold harness's MCP client (`McpSessionManager`) additionally shipped
+a `github:` release-bootstrap block on stdio catalog entries (on-demand binary download
+keyed by `{os}`/`{arch}` tokens, cached under `.pux/mcp-servers/`). Retired with that client
+at the 2026-08 fold — stdio servers are now forked by dcode's own loader, which has its own
+discovery story. The `env`-substitution semantics and per-server isolation survive
+unchanged in `_load_mcp`.
 
-```yaml
-github:
-  kind: mcp
-  transport: stdio
-  command: github-mcp-server          # resolved: PATH → .pux cache → release download
-  args: [stdio]
-  env:
-    GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}   # .env → the server's own auth
-  github:
-    repo: github/github-mcp-server
-    asset: "github-mcp-server_*{os}*{arch}*.tar.gz"  # {os}/{arch} tokens glob the host asset
-    binary: github-mcp-server
-    version: latest                    # /releases/latest; or pin "v1.5.0" (cache is keyed by it)
-```
+### 3c. Sandbox scripts — in-workspace, unstructured
 
-`McpSessionManager.open()` calls `mcp_bootstrap.ensure_server(spec)` for each
-stdio spec with a `github:` block, **before** forking: `shutil.which` (happy
-path, zero network) → cache hit at `.pux/mcp-servers/<name>/<version>/<binary>`
-(warm `.pux/`, zero network) → FALLBACK download from the GitHub release
-(atomic scratch→move so the cache never holds a partial). On a resolved path the
-spec's `command` is rewritten to it; a failed download is indistinguishable from
-a broken server (the existing per-server isolation absorbs it). The release
-fetch is OPTIONAL-auth: a `GITHUB_TOKEN` lifts the rate limit, but public
-releases work with no token — a present-but-invalid token (expired PAT) is
-dropped on 401 and retried unauth. The `env` block is the server's OWN auth
-(a separate concern): `${GITHUB_TOKEN}` is substituted at load and reaches the
-forked process via `env = dict(os.environ, **spec.env)`.
+Plain Python (or any) programs in `profiles/<org>/sandbox/`, invoked by the agent through its
+`execute`/bash tool. They run in the **workspace** (host fs via `LocalShellBackend`) and see
+the project filesystem — the same fs the repo lives on.
 
-First consumer: `github-mcp-server` for `general` + `dev-bot` (the coding org).
-The `github:` block is generic — any release-hosted binary server reuses it.
-
-### 3c. Sandbox scripts — in-container, unstructured
-
-Plain Python (or any) programs in `orgs/<org>/sandbox/`, invoked by the agent through its
-`execute`/bash tool. They run **inside the container** and see the container filesystem.
-
-- The canonical heavy example: `orgs/specialists/invest/sandbox/` — a 17-module quant
+- The canonical heavy example: `profiles/specialists/invest/sandbox/` — a 17-module quant
   pipeline (`fetch_data`, `signals`, `regime`, `walkforward`, `risk`, `trade`, `journal`, …)
   + `run_scan.sh`, all driven via `python3 sandbox/<m>.py <subcommand>`.
 - The model does **not** see these as tools. It must know the CLI (documented in `AGENTS.md`
@@ -166,187 +139,76 @@ Plain Python (or any) programs in `orgs/<org>/sandbox/`, invoked by the agent th
   need structured, typed, by-name tool calls — use MCP for that.
 
 **From the agent's perspective**, a sandbox script is *not* a tool — it is just another
-thing to `execute`. REGISTRY and MCP tools are **auto-documented**: the harness injects each
+thing to `execute`. REGISTRY and MCP tools are **auto-documented**: the host injects each
 tool's description + JSON-schema into the model's tool list automatically (from the `factory`
 for REGISTRY, from `tools/list` for MCP). A sandbox script enters the model's context **only
 through prose** (AGENTS.md, agent frontmatter, a skill) — there is no schema, no arg
 validation, no automatic discovery. This is the deliberate tradeoff of the "just exec"
-channel: maximum simplicity, zero protocol overhead, in-container execution — at the cost of
-typed discovery. The real risk is **prose/script drift** (the doc says `--rank` but the
-script now expects `rank`); mitigate with **self-describing CLIs** (`argparse --help`, a
-`list` subcommand) the agent can call so the script documents itself at runtime, from its own
-truth. If you need auto-documented, schema-validated discovery **and the script must still run
-in-container**, declare it (§3e) — that is precisely the gap declared sandbox tools fill.
-Otherwise MCP (or a REGISTRY spec) is the typed channel; choosing raw bash is choosing
-*deliberately not* to get typing.
+channel: maximum simplicity, zero protocol overhead — at the cost of typed discovery. The
+real risk is **prose/script drift** (the doc says `--rank` but the script now expects
+`rank`); mitigate with **self-describing CLIs** (`argparse --help`, a `list` subcommand) the
+agent can call so the script documents itself at runtime, from its own truth. If you need
+auto-documented, schema-validated discovery, use MCP (or add a REGISTRY spec) — the typed
+channels; choosing raw bash is choosing *deliberately not* to get typing.
 
 ### 3d. Skills — declarative procedures, not callable tools
 
-`orgs/<org>/skills/*/SKILL.md` (+ optional `scripts/`, `references/`). Surfaced to the model
-as metadata via `SkillsMiddleware`; bodies are peeked through the native `read_file`. Skills
-are **documents**, not function-call tools.
+`profiles/<org>/skills/*/SKILL.md` (+ optional `scripts/`, `references/`). Surfaced to the
+model as metadata via the `list_skills` specialist tool + deepagents `SkillsMiddleware`;
+bodies are peeked through the native `read_file`. Skills are **documents**, not
+function-call tools.
 
-### 3e. Declared sandbox tools — in-container, typed (the weak-model bridge)
+### 3e. Declared sandbox tools — RETIRED
 
-The fourth channel. A per-org `sandbox/tools/tools.yaml` **declares** tools (name +
-description + script + typed args); the harness synthesizes a langchain `StructuredTool` per
-entry whose `func` `docker exec`s the script **in-container**. The model calls
-`pux_sandbox_<name>(typed, args)` directly; the harness builds the shell. This is the
-declarative, per-org, no-library-edit equivalent of a REGISTRY `ToolSpec` — it exists for the
-case that needs *both* typing *and* in-container execution (REGISTRY is typed but host-side;
-sandbox scripts are in-container but unstructured).
-
-**Why it exists.** The pux default model is mimo-v2.5 (a weak model). The two-step
-`execute("python3 sandbox/x.py --rank 5 --ticker AAPL")` indirection taxes it on three axes:
-(1) arg construction/quoting, (2) CLI discovery/recall, (3) error recovery on raw tracebacks.
-A typed, by-name, auto-documented tool collapses all three: the schema validates args, the
-description is injected into the tool list, and the runner returns a typed envelope.
-
-**Declaration** (`orgs/<org>/sandbox/tools/tools.yaml`):
-
-```yaml
-tools:
-  - name: hash_text              # snake_case -> surfaced as pux_sandbox_hash_text
-    description: "Compute the SHA-256 hash of a text string; return the hex digest."
-    script: sha256sum.py         # relative to this org's sandbox/ dir
-    invoke: flags                # flags (default) | positional
-    returns: text                # text (default) | json (parse stdout as JSON)
-    args:
-      - {name: text,   type: string,  required: true,  description: "The text to hash."}
-      - {name: length, type: integer, required: false, description: "Truncate the digest to N hex chars."}
-```
-
-- **Type vocab:** `string`→str, `integer`→int, `number`→float, `boolean`→bool.
-- **invoke: flags** (default, most robust — the model can't get arg order wrong): each present
-  arg → `--name <shlex.quote(str(value))>`; booleans → `--name` when True, omitted when False.
-- **invoke: positional:** `shlex.quote(str(value))` in declared order; `None` args skipped.
-- The runner emits `cd /sandbox/workspace/orgs/<org>/sandbox && python3 <script> <args>`
-  (the project is bind-mounted 1:1 at `WORKSPACE_ROOT`, so the script is reachable in-container)
-  and returns `{"success": exit==0, "command": …, "output": …}` (or `json` for `returns: json`).
-
-**Where it plugs in** (all in `pux-harness`):
-
-| Concern | Site |
-| --- | --- |
-| Synthesis + in-container exec | `pux_harness/sandbox/tools/declared.py` (`build_declared_tools`) |
-| Stack wiring (supervisor + subagents) | `pux_harness/agent/stack.py` (`build_stack`) |
-| Allowlist resolution (admits `pux_sandbox_*`) | `pux_harness/agent/orgs.py` (`_resolve_tools`) |
-| Offline contract body | `declared.validate_declared_tools` |
-| Contract wrapper + Rule 4 awareness | `pux_harness/agent/contract.py` (`_validate_sandbox_tools`, Rule 4) |
-
-Declared tools share the `pux_sandbox_` prefix with REGISTRY specialists, so they key into the
-same `tool_map`, resolve through the same `tools:` allowlist, and audit under the same namespace.
-
-**Contract + audit.** `validate_declared_tools` runs offline in `--check-contract` for every
-org (policy-independent — declared tools are their own channel): snake_case names, no reserved
-(`config`/`runtime`) / native / grader / `mcp__` shadow, no REGISTRY/legacy collision, no
-duplicate, the `script` file exists on disk, `type`/`invoke`/`returns` in their enums,
-`timeout > 0`, and no `required` arg may carry a default. Auditing is free:
-`AuditMiddleware.awrap_tool_call` records every tool call by name — when an org opts into audit
-(`middleware.supervisor.add: [audit]`), a `tool_audit` row lands for `pux_sandbox_<name>` with
-no declared-tool-specific wiring.
-
-**Verified live `2026-07-06`.** A `hash_text` declared tool on the `general` org: mimo-v2.5
-called `pux_sandbox_hash_text({'text': 'audit-e2e'})` **by name** (not via `execute`); the
-runner exec'd `cd /sandbox/workspace/orgs/general/sandbox && python3 sha256sum.py --text
-audit-e2e` in-container (exit 0, correct digest); and with audit opted-in, an EventStore
-`tool_audit` row (`tool=pux_sandbox_hash_text`) landed.
-
-**Verified live on a real org `2026-07-06`.** `orgs/specialists/invest/sandbox/tools/tools.yaml`
-ships `scan_signals` (wraps `signals.py score`). `pux direct --org invest`: mimo-v2.5's FIRST
-and ONLY tool call was `pux_sandbox_scan_signals({'ticker': 'AAPL'})` — by name, no `execute`.
-The runner exec'd `cd /sandbox/workspace/orgs/specialists/invest/sandbox && python3 signals.py
-score --ticker AAPL` in-container and returned the real fused score (`composite_score: 56.6`,
-`action_signal: buy`, full pillar breakdown). 4 messages, one typed call, `leaked: NONE`.
-
-**`returns: json` lesson (caught by the live run).** With `returns: text`, the success envelope
-carries only a `_tail` of stdout; for a tool that returns large structured output (signals.py
-emits a multi-pillar JSON object), the model couldn't see the full `composite_score` and
-re-ran the script via `execute` to recover it — 12 messages, defeating the bridge. Switching to
-`returns: json` parses stdout into a full `"json"` field, so one by-name call returns the
-complete score (4 messages, no re-run). **Rule of thumb: declare `returns: json` whenever the
-script's stdout is JSON** so the model gets the whole payload in one typed call.
-
-**Declaring a tool TAKES the script out of the agent's exec surface (the exec-guard).**
-Once a script is a typed `pux_sandbox_<name>` tool, the agent must reach it ONLY through
-that tool — not via a raw `execute("python3 <script> <subcommand> …")` shell. One
-representation of the capability in context, not two; and the weak-model bridge is
-*enforced*, not optional (the model cannot fall back to unstructured shell for a declared
-script). `RoutingMiddleware` (default-on for every supervisor) intercepts `execute`/`bash`
-and, when the command targets a declared `(script, subcommand)`, returns a redirect
-`ToolMessage` naming the typed tool — **without running the command**. Matching is
-per-`(script, subcommand)`: `scan_signals` wraps `signals.py score`, so `python3 …
-signals.py score` is redirected but `signals.py rank` (a *different* declared tool) and any
-un-exposed subcommand stay exec-able. The contract warns (`declared-exec-guard`) if an org
-declares tools yet removes `routing` — the one configuration that would silently disable
-the guard.
-
-The **seam** that makes this correct: agent-via-`execute` is a *tool call* (intercepted by
-the middleware); a declared tool's own `func` calls `exec_client.exec(cmd)` *directly* (not
-a tool call, never seen by the middleware). So redirecting declared-script exec does NOT
-break the declared tool's own in-container execution — agent-via-`execute` is blocked, the
-declared tool still runs. **Verified live `2026-07-06`:** `invest` ships 33 declared tools;
-with the guard armed (33 redirects), `pux direct --org invest` had the model call
-`pux_sandbox_scan_signals({'ticker': 'AAPL'})` by name and receive the real score (`56.6`),
-with `leaked: NONE` — the guard funneled the model to the typed tool and did not block its
-in-container exec.
-
-**Shipping note.** Adding a declared tool to a *real* org widens its supervisor surface beyond
-`SPECIALIST_TOOL_NAMES`, so the non-mock gate `tests/contract/test_real_orgs_build.py` was made
-declared-aware: `sup_names <= SPECIALIST_TOOL_NAMES | _declared_surface(org)` (and the same for
-subagent tools) — the same widening `contract.py` Rule 4 does offline. It still catches true
-phantom tools; it admits only the names an org declares in its OWN `tools.yaml`. `invest` is the
-first real org to ship a declared tool.
+**Historical (pre-fold harness).** A fourth channel once existed: a per-org
+`sandbox/tools/tools.yaml` **declared** tools (name + description + script + typed args);
+the harness synthesized a langchain `StructuredTool` per entry whose `func` `docker exec`'d
+the script **in-container**, and the model called `pux_sandbox_<name>(typed, args)` directly.
+It existed for the case that needed *both* typing *and* in-container execution (REGISTRY was
+typed but host-side; sandbox scripts were in-container but unstructured). It came with an
+exec-guard (`RoutingMiddleware` redirecting raw `execute` of declared scripts), a
+`returns: json` lesson (typed stdout parsing), and a `validate_declared_tools` offline
+contract. **All retired with the container sandbox at the 2026-08 fold.** The weak-model
+rationale survives as guidance: for a weak model, prefer typed, by-name, auto-documented
+channels (MCP / REGISTRY specialists) over raw `execute` with hand-quoted args.
 
 ---
 
 ## 4. The MCP resolved stack (stdio is fully wired)
 
-The whole chain from declaration to subprocess spawn is wired. Verified
-`2026-07-06` against installed versions **langchain-mcp-adapters 0.3.0** + **mcp SDK 1.28.1**:
+The whole chain from declaration to subprocess spawn:
 
 ```
-resolver  agent/tool_servers.py        parses stdio (command required), env-substitutes, contract-valid
+resolver  src/protocol/mcp.py (_org_mcp_servers)   org capabilities: mcp refs → .mcp.json entries
    ↓
-bridge    agent/mcp_client.py:44-52    _to_connection → {command, args, env, transport:"stdio"}
-   ↓                                   (stdio only: env = dict(os.environ) + spec.env  ← HOST env)
-adapter   langchain_mcp_adapters 0.3.0 MultiServerMCPClient.session() → create_session()
-                                        dispatches on transport=="stdio"  (sessions.py:457)
+projection  temp .mcp.json written at launch        (src/run.py; kept for the process lifetime)
    ↓
-mcp SDK   mcp 1.28.1                   StdioServerParameters(command,args,env,cwd)
-                                        async with stdio_client(params) as (read,write),
-                                                      ClientSession(read,write)   ← the fork/exec
+loader    deepagents resolve_and_load_mcp_tools(explicit_config_path=…)
+          dcode's OWN loader — full trust, no project-discovery, no approval prompts
+   ↓
+mcp SDK   StdioServerParameters(command, args, env, cwd) / sse / http sessions
 ```
+
+`_load_mcp` (src/run.py) is **fail-loud per server**: every declared server must come back
+with status `ok`; a skipped server raises with the reason named — an org's declared MCP
+surface can never silently shrink.
 
 ### The host-side finding (important)
 
-Because `_to_connection` builds the stdio env from `dict(os.environ)`, the stdio child
-inherits the **harness process's** environment and runs **host-side**. Consequences:
+Because stdio sessions are forked from the host process, the stdio child inherits the
+**host environment** and runs **host-side**. Consequences:
 
 - For **godot-mcp** this is *favorable*: it needs `ws://localhost:6505` to reach the Godot
   editor, and the npx child's `localhost` = the host loopback = where the editor runs. The
-  "local only" constraint is satisfied automatically. No bridging, no `host.docker.internal`.
-- For **project-local stdio MCP servers**: they see **host** fs/env, **not** the sandbox
-  container. A stdio "deploy" tool operates on host files; a tool that must edit the sandbox
-  workspace should instead be a native fs tool (`read_file`/`edit_file`).
+  "local only" constraint is satisfied automatically. No bridging.
+- For **project-local stdio MCP servers**: they see **host** fs/env, **not** a sandbox.
+  A stdio "deploy" tool operates on host files; a tool that must edit the workspace should
+  instead be a native fs tool (`read_file`/`edit_file`).
 
-### Two stdio-specific caveats
-
-1. **Per-call spawn = latency.** Each tool call opens a fresh session
-   (`mcp_client.py:110-111` docstring: *"each tool call opens a fresh per-call session"*).
-   For stdio, every call = fork `npx` + runtime startup + MCP handshake + (for godot)
-   websocket connect + invoke + teardown. A multi-call iteration can spend seconds in pure
-   spawn overhead. The adapter *supports* a persistent session
-   (`async with client.session(name)`); pux does **not** use it yet — `McpSessionManager`
-   uses the per-call `get_tools(server_name=)` model.
-2. **Unmanaged lifecycle.** `McpSessionManager.close()` is a no-op
-   (`mcp_client.py:200-202`). Acceptable *because* per-call sessions self-close; if a
-   persistent stdio session is ever added, child reaping must be built.
-
-> **Wired but not yet proven live.** Only `sse` (media) and `http` (web_research) have been
-> handshake-tested live in pux. stdio is fully wired end-to-end but had not been exercised
-> live as of `last_verified`. godot-mcp will be the first live stdio test — and it doubles as
-> the proof of the project-portable-tool story.
+> **Post-fold note.** Pre-fold, this chain was the harness's own resolver + hand-rolled
+> `McpSessionManager` bridge; the 2026-08 fold replaced both with dcode's
+> `resolve_and_load_mcp_tools`. The transport semantics and the host-side finding above are
+> unchanged.
 
 ---
 
@@ -355,33 +217,36 @@ inherits the **harness process's** environment and runs **host-side**. Consequen
 **You do not need to edit the global library to specialize an org.** Agents, skills, MCP
 tools, and sandbox scripts are all project-portable.
 
-### What `export.py` bundles per org
+### What the marketplace plugin bundles per org
 
-`pux-harness/pux_harness/export.py` carries, per org:
-`AGENTS.md`, `org.yaml`, `profile.yaml`, `policy.yaml`, `agents/*.md`, `skills/*/SKILL.md`,
-`sandbox/*.py`, `config/` — **plus** resolved shared dependencies
-(`orgs/_shared/agents/*.md`, `orgs/_shared/skills/`, `orgs/_shared/sandbox/`) **and**
-`tool_servers.yaml` when the policy declares `tool_servers`.
+`src/plugins/marketplace.py` (`emit_plugin` / `emit_marketplace`, the `pux compile
+--marketplace` lane) carries, per org: `AGENTS.md`, `org.yaml`, `profile.yaml`,
+`policy.yaml`, `agents/*.md`, `skills/*/SKILL.md`, `sandbox/*.py`, `config/` — **plus**
+resolved shared dependencies (`profiles/_shared/agents/*.md`, `profiles/_shared/skills/`,
+`profiles/_shared/sandbox/`) **and** `tool_servers.yaml` when the policy declares
+`tool_servers`.
 
-So an exported org is self-contained: its agents, skills, in-container scripts, and MCP
+So an exported org is self-contained: its agents, skills, scripts, and MCP
 catalog/declarations all travel.
 
 ### The co-pilot engine pattern
 
-1. Ship the engine as a library base org: `pux_harness/kit/bases/copilot-kit/`
-   (minimal CTO + extends-friendly roster + default profile).
-2. A consuming project sets `$PUX_ORG_PATHS` (or uses local `orgs/`) and declares a thin
-   local org: `extends: pux:copilot-kit`.
+1. Ship the engine as a base org, emitted as an installable marketplace plugin
+   (`pux compile --marketplace`; `src/plugins/marketplace.py`) with a minimal CTO +
+   extends-friendly roster + default profile.
+2. A consuming project installs the plugin and/or sets `$PUX_ORG_PATHS` (or uses local
+   `profiles/`) and declares a thin local org: `extends: <base>`.
 3. The project specializes **without touching the library**:
    - custom agents → local `agents/*.md` extending base roles
    - custom skills → local `skills/`
    - custom tools → **inline** MCP `tool_servers` in `policy.yaml`
-4. The `pux:` namespace resolves against shipped library bases **or** `$PUX_ORG_PATHS` roots.
+4. The `pux:` namespace resolves against shipped library bases **or** `$PUX_ORG_PATHS` roots
+   (`src/profiles/_paths.py`).
 
 ### Inline tool server (the portable structured-tool pattern)
 
 ```yaml
-# orgs/specialists/<my-org>/policy.yaml — inline, export-portable, no library edit
+# profiles/specialists/<my-org>/policy.yaml — inline, export-portable, no library edit
 tool_servers:
   - name: proj_tools
     kind: mcp
@@ -403,20 +268,20 @@ stateful systems.
 | Need | Use | Example |
 | --- | --- | --- |
 | A quick local helper (one function, low risk, rarely called) | **sandbox script** via `execute` | `cpp_globber.py`, `clean_build.py` |
-| A typed, in-container tool a weak model should call by name (not via `execute`) | **DECLARED** sandbox tool (`tools.yaml`) | `invest`'s `scan_signals` (wraps `signals.py score`); `hash_text` (§3e syntax example) |
-| Config files, mock data, templates, local binaries staged in the workspace | **sandbox/** folder (non-script payload) | `.eslintrc`, seed DB, fixtures |
-| A universal primitive every org needs, binding harness internals | **REGISTRY** `ToolSpec` (library edit, rare) | a new native fs/shell op |
 | A typed, model-callable tool for a foreign/stateful/complex system | **MCP** (`stdio` host-side or `sse`/`http` external) | godot-mcp (42 tools over websocket) |
+| A typed in-workspace primitive for a weak model | **REGISTRY specialist** (library edit) or an MCP server | `python`, `multimodal` |
+| A universal primitive every org needs, binding harness internals | **REGISTRY** `ToolSpec` (library edit, rare) | a new native fs/shell op |
+| Config files, mock data, templates, local binaries staged in the workspace | **sandbox/** folder (non-script payload) | `.eslintrc`, seed DB, fixtures |
 | A reusable procedure / playbook the model reads on demand | **skill** (`SKILL.md`) | "how to deploy this service" |
 | A specialized agent role | **agent** (`agents/*.md`, `extends:` a base) | "cpp-developer", "playtester" |
 
 **The cpp_globber test:** if the capability is a simple function, write a `sandbox/*.py`
 script and let the agent run it through `execute`. Wrapping it in an MCP server is
-over-engineering *and* moves its execution from the container to the host.
+over-engineering.
 
-**The weak-model test:** if the model is weak (mimo-v2.5-class) and the in-container script has
-typed args it must recall and quote correctly, **declare** it (`tools.yaml`) so the harness
-builds the shell and the model calls `pux_sandbox_<name>` by name. Keep `execute` for genuinely
+**The weak-model test:** if the model is weak (mimo-v2.5-class) and the script has
+typed args it must recall and quote correctly, put it behind a typed channel (a REGISTRY
+specialist or an MCP server) so the model calls it by name. Keep `execute` for genuinely
 ad-hoc one-offs where a typed declaration isn't worth it.
 
 **The godot test:** if the capability requires a persistent connection to a live external
@@ -431,17 +296,15 @@ system and exposes many operations, MCP is *less* complex than building a giant 
    (typed) or sandbox scripts (unstructured) are both project-portable and need no library
    edit.
 
-2. **"The `sandbox/` folder means the code runs in the sandbox."**
+2. **"The `sandbox/` folder means the code runs in a sandbox."**
    Only for scripts the *agent* invokes via `execute`. An MCP server filed under `sandbox/`
    runs host-side (stdio) or externally (sse/http). **The folder is staging; the mechanism
    decides where it runs.**
 
-3. **"Put the FastAPI MCP server in `sandbox/` and start it via `host_setup` inside the
-   container."**
-   Wrong for this harness. `host_setup` runs **host-side** (`subprocess.run`) and produces
-   *env vars* for the container — it is not a daemon launcher. sse/http servers are external
-   daemons the harness dials by URL; stdio servers are host-side forks. **No mechanism starts
-   an MCP daemon inside the container.**
+3. **"Put the FastAPI MCP server in `sandbox/` and start it via `host_setup`."**
+   Pre-fold, `host_setup` ran host-side and produced *env vars* for the Docker container;
+   it is retired with the container. sse/http servers are external daemons dialed by URL;
+   stdio servers are host-side forks. **No mechanism starts an MCP daemon in a sandbox.**
 
 4. **"Agents are composable but tools are monolithic."**
    The override-worthy parts of tools (description, selection, availability) are already
@@ -453,32 +316,19 @@ system and exposes many operations, MCP is *less* complex than building a giant 
    stdio MCP scales down to `python3 sandbox/my_tools.py` — a tiny local script with typed
    tools. "MCP" names the protocol/transport, not a deployment size.
 
-6. **"stdio will be slow / leak processes."**
-   The latency concern is real (per-call spawn — see §4). Process leakage is not: per-call
-   sessions self-close. The open follow-up is whether to wire a *persistent* stdio session
-   for latency-sensitive servers like godot-mcp.
-
-7. **"A declared tool is typed/callable, so it runs host-side like an MCP tool."**
-   No — invocation ≠ site (see the single rule at the top). A **DECLARED** tool is invoked like
-   REGISTRY/MCP (an LLM tool call) but its `func` `docker exec`s the script, so it runs
-   **inside the container**. It is the typed equivalent of a sandbox script, not a host-side
-   MCP server. Choose it when you need typing *and* in-container execution together.
-
 ---
 
 ## 8. Source map (jump table)
 
 | Concern | File |
 | --- | --- |
-| Tool implementations (the REGISTRY) | `pux-harness/pux_harness/sandbox/tools/registry.py` |
-| Declared sandbox tools (typed, in-container) | `pux-harness/pux_harness/sandbox/tools/declared.py` |
-| Frontmatter `tools:` allowlist resolution | `pux-harness/pux_harness/agent/orgs.py` (`_resolve_tools`), `kit/compile.py` |
-| Tool description/exclusion overrides | `pux-harness/pux_harness/agent/profile.py`, `kit/loaders.py` |
-| MCP catalog (per-project) | `orgs/_shared/tool_servers.yaml` |
-| MCP resolver | `pux-harness/pux_harness/agent/tool_servers.py` |
-| MCP async bridge / spawn | `pux-harness/pux_harness/agent/mcp_client.py` |
-| `docker exec` into container, `WORKSPACE_ROOT` | `pux-harness/pux_harness/sandbox/backend.py` |
-| `host_setup` (host-side env producer) | `pux-harness/pux_harness/sandbox/host_setup.py` |
-| Org export bundle | `pux-harness/pux_harness/export.py` |
-| Heavy sandbox-script example (quant pipeline) | `orgs/specialists/invest/sandbox/` |
-| godot-mcp target org | `orgs/specialists/game-studio/` |
+| Tool implementations (the REGISTRY) | `src/tools/registry.py` |
+| Frontmatter `tools:` allowlist resolution | `src/tools/registry.py` (`resolve_tool_allowlist`) |
+| Tool description/exclusion overrides | `src/profiles/loaders.py` (`_load_agent_spec`) |
+| MCP catalog (per-project) | `profiles/_shared/tool_servers.yaml` |
+| MCP resolver (org refs → `.mcp.json`) | `src/protocol/mcp.py` (`_org_mcp_servers`) |
+| MCP load bridge (dcode's own loader) | `src/run.py` (`_load_mcp` → `resolve_and_load_mcp_tools`) |
+| Sandbox backend (`LocalShellBackend`, no container) | `src/sandbox/local.py`, `src/sandbox/exec.py` (`PUX_SANDBOX`) |
+| Marketplace / org export bundle | `src/plugins/marketplace.py` |
+| Heavy sandbox-script example (quant pipeline) | `profiles/specialists/invest/sandbox/` |
+| godot-mcp target org | `profiles/specialists/game-studio/` |

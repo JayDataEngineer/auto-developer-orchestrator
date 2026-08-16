@@ -1,16 +1,14 @@
 ---
 documentation: |
-  The dynamic-dispatch upgrade notice — appended to the supervisor (CTO) prompt
-  ONLY when CodeInterpreterMiddleware is mounted (a strength-pro base, or an
-  explicit middleware.supervisor.add: [interpreter] override). Tells the CTO it
-  has the `eval` tool (a sandboxed JS REPL) and how to use it for parallel
-  multi-unit dispatch.
+  The dynamic-dispatch upgrade notice — the canonical wording for a
+  `eval`-tool (sandboxed JS REPL) dynamic-dispatch prompt.
 
-  Subagents do NOT see this (they don't get the eval tool). An experimenter who
+  Kept from the pre-fold harness (2026-08-16 fold): the interpreter lane
+  (CodeInterpreterMiddleware mounting, strength-pro gating) died with the
+  harness, and this fragment has no live reader in the folded workspace.
+  Retained as the canonical text if the seam returns. An experimenter who
   wants to tweak the dispatch strategy (Promise.all fan-out, lean-thread
-  discipline, the task() API shape) edits THIS file. Lifted from
-  pux_harness/agent/prompt_parts.py::_DYNAMIC_DISPATCH_SUFFIX (the embedded
-  constant is now the fallback for minimal fixtures / packed archives).
+  discipline, the task() API shape) edits THIS file.
 ---
 
 ## Dynamic dispatch (you are interpreter-enabled)

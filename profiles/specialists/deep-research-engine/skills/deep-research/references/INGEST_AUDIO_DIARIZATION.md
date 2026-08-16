@@ -100,7 +100,7 @@ INGEST_STRUCTURED_EXPORT run) + 1 `transcript` node + N `speaker_turn` nodes:
 
 ```python
 import json
-# Use mcp__surreal__query / mcp__surreal__insert MCP tools for DB operations
+# Use surreal_query / surreal_insert MCP tools for DB operations
 
 rec = json.loads(open("/tmp/turns.json").read())
 client = SurrealClient()

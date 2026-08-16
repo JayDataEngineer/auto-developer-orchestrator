@@ -82,19 +82,20 @@ def _org_path(name: str, project_root: Path) -> Path:
 # --- org inheritance (``org.yaml extends:``) ---------------------
 #
 # An org may declare ``extends: <parent-org>`` in its ``org.yaml`` to inherit
-# the parent's ROSTER (``agents:``), AGENTS.md overlay, and profile.yaml. This
-# is the org-level analogue of an agent's ``extends:``: the parent is
-# the BASE, the child SPECIALIZES. Three things compose root→child:
+# the parent's ROSTER (``agents:``) and AGENTS.md overlay. This is the
+# org-level analogue of an agent's ``extends:``: the parent is the BASE, the
+# child SPECIALIZES. Two things compose root→child:
 #
 # * roster — parent ``agents:`` ∪ own (``org_agent_slugs``); an inherited slug
 #   resolves through the child's agent dirs FIRST (``_agent_search_dirs`` is
 #   chain-aware), so a child specializes an inherited agent by dropping a
 #   same-named ``<slug>.md`` in its own ``agents/``.
 # * AGENTS.md overlay — parent + own concatenated own-last (``_chain_overlay``).
-# * profile.yaml — deep-merged root→child (``profile._resolved_profile_yaml``).
 #
-# ``policy.yaml`` is NEVER inherited (security — each org owns its egress); the
-# contract warns on a policy-less child (Safeguard S6).
+# ``profile.yaml`` (the pre-fold harness's org config format) is NOT part of
+# this spec — it was retired at the 2026-08-16 fold after proving to have no
+# reader in the dcode track. ``policy.yaml`` + ``sandbox/`` are the opt-in
+# sandbox arm's data (dormant; ``PUX_SANDBOX=openshell`` fails loud).
 #
 # Cycle-safety: ``org_extends_chain`` RAISES on a cycle / unresolvable parent
 # (mirrors ``_load_agent_spec``'s agent-extends recursion); the runtime loaders

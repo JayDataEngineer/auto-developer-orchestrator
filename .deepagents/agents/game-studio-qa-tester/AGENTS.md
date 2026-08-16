@@ -47,7 +47,7 @@ Read the playthrough state at `/tmp/tech_noir_playthrough/playthrough_state.json
 
 ## Skills (reference)
 
-- **MEDIA_QA** — the kernel's `media-analysis` MCP server for image description, OCR, object detection, NSFW classification. Use these tools to score screenshots and write `vibe.json` for the CTO.
+- **MEDIA_QA** — the `media` MCP server (shared catalog — `profiles/_shared/tool_servers.yaml`; armed via `{kind: mcp, ref: media}` in org.yaml capabilities) for image description, OCR, object detection, NSFW classification. Use these tools to score screenshots and write `vibe.json` for the CTO.
 
 When the CTO delegates a QA cycle, write your output to `/sandbox/workspace/qa/cycle-N/vibe.json` per the MEDIA_QA schema. The `recommendation` field (`iterate` | `yield` | `abort`) is what drives the loop — don't bury it.
 
