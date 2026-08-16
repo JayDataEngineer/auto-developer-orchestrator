@@ -72,7 +72,7 @@ top-to-bottom) match. Return JSON: {tiles: [0,3,5]}"
 ## When to give up
 
 After 5 failed attempts on the same captcha:
-1. Save the screenshot to `/sandbox/workspace/captcha_failed_<timestamp>.png`
+1. Save the screenshot to `captcha_failed_<timestamp>.png`
 2. Run `sync_session` to refresh cookies (cookie may have stale arkose token)
 3. If a fresh session still hits the captcha, report: `"captcha_unsolvable", challenge_type, screenshot_path`
 4. The CTO can escalate to a human

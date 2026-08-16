@@ -17,11 +17,11 @@ assets, synthesize, and write `data/signals.json` + a research report.
    shifted, report that + exit.
 2. **Run scripts directly.** Trivial; don't delegate.
    ```bash
-   python3 sandbox/fetch_data.py            # → data/market_data.json
-   python3 sandbox/regime.py detect         # → data/regime_history.json
-   python3 sandbox/signals.py rank          # → stdout ranked table
-   python3 sandbox/signals.py consensus     # → stdout JSON
-   python3 sandbox/journal.py stats 2>/dev/null  # accuracy trend
+   python3 .deepagents/skills/investment-analysis/scripts/fetch_data.py            # → data/market_data.json
+   python3 .deepagents/skills/investment-analysis/scripts/regime.py detect         # → data/regime_history.json
+   python3 .deepagents/skills/investment-analysis/scripts/signals.py rank          # → stdout ranked table
+   python3 .deepagents/skills/investment-analysis/scripts/signals.py consensus     # → stdout JSON
+   python3 .deepagents/skills/investment-analysis/scripts/journal.py stats 2>/dev/null  # accuracy trend
    ```
    Do NOT redirect with `2>&1` — these emit progress to stderr + JSON to
    stdout. Use `2>/dev/null` to silence stderr, or let it spill.
@@ -51,8 +51,8 @@ assets, synthesize, and write `data/signals.json` + a research report.
 
 ## Path Discipline
 
-Project root mounted at `/sandbox/workspace/` inside the sandbox. All paths
-relative to project root. Run `python3 sandbox/paths.py` to debug.
+Project root mounted at `` inside the sandbox. All paths
+relative to project root. Run `python3 .deepagents/skills/investment-analysis/scripts/paths.py` to debug.
 
 ## Anti-patterns (don't do these)
 

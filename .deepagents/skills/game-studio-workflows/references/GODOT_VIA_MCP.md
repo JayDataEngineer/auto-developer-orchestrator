@@ -105,6 +105,6 @@ godot-mcp-runtime_validate
 
 | Failure | Recovery |
 |---------|----------|
-| Server unreachable | The host_setup hook resolves GODOT_PATH before the session opens; if the download itself failed, check network + disk space, then re-run `python3 profiles/specialists/game-studio/sandbox/godot_bootstrap.py` |
+| Server unreachable | The host_setup hook resolves GODOT_PATH before the session opens; if the download itself failed, check network + disk space, then re-run `python3 .deepagents/skills/game-studio-workflows/scripts/godot_bootstrap.py` |
 | Editor hung (timeout) | Don't retry — likely mid-modal. Surface the error and stop |
 | Script error | Read the error, fix the GDScript, retry once |

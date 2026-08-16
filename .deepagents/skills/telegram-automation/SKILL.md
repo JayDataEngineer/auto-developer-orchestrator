@@ -7,14 +7,14 @@ description: Drive Telegram via Telethon (MTProto) and the telegram_helpers Pyth
 
 Library of Telegram helpers for agent-written scripts. Import from `telegram_helpers`.
 
-All functions raise `RuntimeError` with a clear message if the session is missing or invalid. Run `python3 /sandbox/telegram_session.py --check` to diagnose.
+All functions raise `RuntimeError` with a clear message if the session is missing or invalid. Run `python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --check` to diagnose.
 
 ## Setup (one-time)
 
 ```bash
-python3 /sandbox/telegram_session.py --setup-credentials API_ID API_HASH +PHONE
-python3 /sandbox/telegram_session.py --bootstrap     # interactive SMS auth
-python3 /sandbox/telegram_session.py --check         # verify
+python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --setup-credentials API_ID API_HASH +PHONE
+python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --bootstrap     # interactive SMS auth
+python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --check         # verify
 ```
 
 Get api_id + api_hash from https://my.telegram.org/apps.
@@ -119,7 +119,7 @@ if not has_valid_session():
 ```
 
 ### `load_credentials() -> dict`
-Read `/sandbox/.telegram-credentials.json`. Returns `{api_id, api_hash, phone, saved_at}`.
+Read `data/.telegram-credentials.json`. Returns `{api_id, api_hash, phone, saved_at}`.
 
 ## Common patterns
 

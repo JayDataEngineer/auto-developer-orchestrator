@@ -2,7 +2,7 @@
 name: media-studio-pipeline-engineer
 description: Pipeline Engineer — drives Ray YAML character pipelines (list, validate,
   start, poll, stop/resume). Real GLB artifacts only.
-model: deepseek-v4-flash
+model: pux-openai:glm-5-turbo
 ---
 
 You run **Ray YAML character pipelines** end-to-end. You are the only

@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Universal LLM client for DRE sandbox scripts.
+"""Universal LLM client for the deep-research skill scripts.
 
-Replaces the per-script duplicated call_llm + raw HTTP pattern.
-Resolves the model from models.yaml -- the SAME single source of truth the
-harness uses (policy.py::_resolve_llm_endpoint).
+Replaces the per-script duplicated call_llm + raw HTTP pattern. Resolves the
+model from dcode's own user config (``~/.deepagents/config.toml``) — the same
+single source of truth the dcode CLI uses:
 
 Resolution chain:
-  1. models.yaml -> tier (default) -> role (worker) -> model id
-  2. models.yaml -> model id -> provider profile (base_url, api_key_env)
-  3. .env -> api_key_env -> actual key value
-  4. Builds api_url = f"{base_url}/chat/completions"
+  1. $LLM_MODEL env var ("provider:model") — explicit override
+  2. config.toml [models] default
+  3. provider entry -> base_url + api_key_env; key from the environment or
+     the workspace root's .env
+  4. api_url = f"{base_url}/chat/completions"
 """
 
 from __future__ import annotations
@@ -18,8 +19,8 @@ import json
 import os
 from pathlib import Path
 
-_WORKSPACE_ROOT = Path("/sandbox/workspace")
-_MODELS_YAML = _WORKSPACE_ROOT / "pux-harness" / "pux_harness" / "agent" / "models.yaml"
+_WORKSPACE_ROOT = Path(__file__).resolve().parents[5]
+_CONFIG_TOML = Path.home() / ".deepagents" / "config.toml"
 
 
 def _load_env_file():
@@ -39,48 +40,45 @@ def _load_env_file():
     return env
 
 
-def _resolve_endpoint(role="worker"):
-    """Resolve a model role to (api_url, model_id, api_key) via models.yaml."""
-    import yaml
+def _resolve_endpoint():
+    """Resolve (api_url, model_id, api_key) from ~/.deepagents/config.toml."""
+    import tomllib
 
-    if not _MODELS_YAML.exists():
+    if not _CONFIG_TOML.exists():
         raise RuntimeError(
-            f"models.yaml not found at {_MODELS_YAML}. "
-            "Cannot resolve LLM endpoint."
+            f"{_CONFIG_TOML} not found — configure a model provider first "
+            "(this is dcode's own config)."
         )
 
-    with _MODELS_YAML.open() as f:
-        spec = yaml.safe_load(f)
+    with _CONFIG_TOML.open("rb") as f:
+        spec = tomllib.load(f)
 
-    tier_name = os.environ.get("PUX_TIER", spec.get("default_tier", "default"))
-    tier = spec.get("tiers", {}).get(tier_name, {})
-    role_key = f"{role}_model"
-    model_id = tier.get(role_key)
+    model_id = os.environ.get("LLM_MODEL") or spec.get("models", {}).get("default", "")
     if not model_id:
-        raise RuntimeError(
-            f"Role {role!r} not found in tier {tier_name!r}."
-        )
+        raise RuntimeError("no default model in config.toml [models] and no $LLM_MODEL")
 
-    model_entry = spec.get("models", {}).get(model_id, {})
-    provider_name = model_entry.get("provider", spec.get("default_provider", ""))
-    providers = spec.get("providers", {})
-    provider = providers.get(provider_name, {})
+    provider_name, _, bare_model = model_id.partition(":")
+    if not bare_model:
+        # bare model id: use the sole provider if there is exactly one
+        providers = spec.get("models", {}).get("providers", {})
+        if len(providers) == 1:
+            provider_name, _ = next(iter(providers.items()))
+            bare_model = model_id
+        else:
+            raise RuntimeError(
+                f"model {model_id!r} has no provider prefix and config.toml "
+                f"defines {len(providers)} providers"
+            )
 
+    provider = spec.get("models", {}).get("providers", {}).get(provider_name, {})
     base_url = provider.get("base_url", "")
     api_key_env = provider.get("api_key_env", "")
-    kind = provider.get("kind", "openai")
-
-    if kind != "openai":
-        raise RuntimeError(
-            f"Model {model_id!r} uses provider kind {kind!r}. "
-            "Sandbox scripts require OpenAI-compatible endpoint."
-        )
+    if not base_url:
+        raise RuntimeError(f"provider {provider_name!r} has no base_url")
 
     api_url = f"{base_url}/chat/completions"
-    env_file = _load_env_file()
-    api_key = os.environ.get(api_key_env) or env_file.get(api_key_env, "")
-
-    return api_url, model_id, api_key
+    api_key = os.environ.get(api_key_env) or _load_env_file().get(api_key_env, "")
+    return api_url, bare_model, api_key
 
 
 def _http_post(url, headers, payload, timeout=180):
@@ -96,16 +94,18 @@ def call_llm(prompt, *, model=None, temperature=0.1, max_tokens=10000,
              disable_thinking=True, role="worker"):
     """Send a prompt to the LLM and return the response text.
 
-    Resolves endpoint from models.yaml (single source of truth).
+    Endpoint comes from ~/.deepagents/config.toml (dcode's config); $LLM_MODEL
+    overrides the model. ``role`` is accepted for call compatibility and
+    ignored — there is one default model per provider now.
     Handles reasoning models by disabling thinking by default.
     Falls back to reasoning_content, then retries with doubled budget.
     """
-    api_url, resolved_model, api_key = _resolve_endpoint(role)
+    api_url, resolved_model, api_key = _resolve_endpoint()
     model_id = model or resolved_model
 
     headers = {
         "Content-Type": "application/json",
-        "User-Agent": "pux-harness-sandbox/1.0",
+        "User-Agent": "deep-research-scripts/1.0",
     }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"

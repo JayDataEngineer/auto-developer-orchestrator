@@ -21,7 +21,7 @@ writer can turn into content.
 - **Echo-chamber detection.** When 5 web articles all derive from 1 press
   release, that's 1 source, not 5. Don't pretend you have 5-source consensus.
 - **Verification.** When a load-bearing claim feels thin, use
-  `python3 sandbox/context_engine.py search "..."` to verify or fill the
+  `python3 .deepagents/skills/deep-research/scripts/context_engine.py search "..."` to verify or fill the
   gap. Don't fabricate a "balanced view" no source expressed.
 
 ## Workflow
@@ -84,7 +84,7 @@ writer can turn into content.
    (a real app the source data never mentions is still an unsupported claim).
    Run it AFTER writing the brief, fix every flag, then re-run until PASS:
    ```bash
-   python3 sandbox/grounding_check.py check \
+   python3 .deepagents/skills/deep-research/scripts/grounding_check.py check \
      --report artifacts/brief.md \
      --corpus data/<source-dir>,artifacts/audio_transcripts,artifacts/video_frames
    ```
@@ -113,7 +113,7 @@ Suggested next step: <hand to writer | re-research X | good enough to yield>
 
 ## Path Discipline
 
-Project root mounted at `/sandbox/workspace/` inside the sandbox. All paths relative
+Project root mounted at `` inside the sandbox. All paths relative
 to project root.
 
 ## Anti-patterns (don't do these)
@@ -134,3 +134,48 @@ to project root.
   subject. Both are unsupported claims. This is the #1 quality failure in
   intelligence synthesis. The grounding check exists to catch these —
   skipping it is an automatic gate fail.
+
+## Quality bar
+
+The bar every deliverable is graded against (verbatim from the rubric spec):
+
+Grade whether the brief was actually SYNTHESIZED with citation integrity,
+not just summarized. Read artifacts/brief.md — do NOT trust a "brief
+complete" claim without checking the file. The synthesizer fails this gate
+by default; only mark `satisfied` when EVERY clause is proven from the
+written brief.
+- artifacts/brief.md EXISTS and was read back to verify (cite the read
+  command + the Bottom line line).
+- The provenance header is present + well-formed: pux:agent=dre-synthesizer,
+  pux:saved=<ISO 8601 UTC>, pux:task=<8-char sha256>, pux:stage=brief.
+- Every load-bearing claim in Key claims has ≥1 citation marker ([N])
+  AND every [N] used maps to a real entry in the Sources list. Dangling
+  or missing-number citations are an automatic fail.
+- Each claim carries a Confidence: high|medium|low — not unstated.
+- The Conflicts and uncertainty section is present. If sources genuinely
+  agree everywhere, it says "none identified" explicitly — silence is a fail.
+- The Open questions section lists what no source answers — an empty list
+  where the brief is thin is a fail (every brief has gaps; surface them).
+- No vague hedges: "some say", "experts believe", "it is widely known",
+  "many people think" — every claim names its source or moves to Open
+  questions.
+- Echo-chamber detection: where N web articles derive from 1 primary
+  source, the brief counts them as 1 source, not N. The citation list
+  shows distinct primary sources, not a press-release echo chamber.
+- GROUNDING (the ungrounded-claim gate): the synthesizer
+  RAN `python3 sandbox/grounding_check.py check --report artifacts/brief.md
+  --corpus <source-dirs>` and cited the command + its verdict line. If the
+  verdict was FAIL, every UNGROUNDED entity was either (a) removed from
+  the brief, (b) corrected to a grounded form, or (c) explicitly marked
+  [UNVERIFIED] in the brief text. An UNGROUNDED entity is any named entity
+  (person, org, product, place, tool) that does not appear in ANY source
+  data. Note: "ungrounded" includes BOTH fabricated names AND real entities
+  misattributed to the subject (e.g. asserting the subject uses a real app
+  that the source data never mentions — the app exists, but the claim about
+  THIS subject is unsupported). Either way, leaving it in the brief unmarked
+  is an automatic fail. The grounding check's exit code (0=PASS, 1=FAIL) +
+  the UNGROUNDED ENTITIES list must be visible in the transcript.
+- The brief was persisted to SurrealDB via the `surreal_upsert`
+  tool so future agents can discover it (cite the tool call + its output).
+- The return summary cites claim count, source count, conflict count,
+  open-question count — matching what's in the file.

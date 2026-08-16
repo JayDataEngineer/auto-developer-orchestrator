@@ -18,7 +18,7 @@ Usage in agent scripts:
             print(f"{author}: {text}")
 
 Cookie source:
-    /sandbox/workspace/data/.twitter-session.json — populated by session.py
+    data/.twitter-session.json — populated by session.py
     (use `session.py --cookies-from-browser brave` first).
 """
 import json

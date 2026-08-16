@@ -5,7 +5,7 @@ How to call Forge on the Ray cluster to generate images.
 ## Health Check (always do this first)
 
 ```bash
-python3 /sandbox/forge_client.py health
+python3 .deepagents/skills/game-studio-workflows/scripts/forge_client.py health
 ```
 
 Expected output: JSON with `vram_free_mb`, `gpu`, `loaded`. If you see "FORGE DOWN", abort.
@@ -13,10 +13,10 @@ Expected output: JSON with `vram_free_mb`, `gpu`, `loaded`. If you see "FORGE DO
 ## Generate One Image
 
 ```bash
-python3 /sandbox/forge_client.py generate \
+python3 .deepagents/skills/game-studio-workflows/scripts/forge_client.py generate \
     "isometric 3D neural network, cyberpunk neon, dark background" \
     --mode image \
-    --out /sandbox/workspace/images/img_1.png
+    --out images/img_1.png
 ```
 
 The client handles 3 response shapes:
@@ -27,10 +27,10 @@ The client handles 3 response shapes:
 ## Generate With Params
 
 ```bash
-python3 /sandbox/forge_client.py generate "portrait photo" \
+python3 .deepagents/skills/game-studio-workflows/scripts/forge_client.py generate "portrait photo" \
     --mode image \
     --params '{"seed": 42, "width": 1024, "height": 1024, "steps": 30}' \
-    --out /sandbox/workspace/images/img_2.png
+    --out images/img_2.png
 ```
 
 Params are forwarded as-is to Forge. Common ones:

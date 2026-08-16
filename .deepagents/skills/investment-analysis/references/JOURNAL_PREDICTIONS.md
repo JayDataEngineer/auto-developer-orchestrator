@@ -100,29 +100,29 @@ First Monday of each month, the reporter runs:
 
 ## The `journal.py` Script
 
-Located at `sandbox/journal.py`. CLI:
+Located at `.deepagents/skills/investment-analysis/scripts/journal.py`. CLI:
 
 ```bash
 # Record today's signals as predictions
-python3 sandbox/journal.py record-signals
+python3 .deepagents/skills/investment-analysis/scripts/journal.py record-signals
 
 # Evaluate all open predictions whose horizon has passed
-python3 sandbox/journal.py evaluate
+python3 .deepagents/skills/investment-analysis/scripts/journal.py evaluate
 
 # Show stats (last 30 days)
-python3 sandbox/journal.py stats
+python3 .deepagents/skills/investment-analysis/scripts/journal.py stats
 
 # Calibration curve
-python3 sandbox/journal.py calibration
+python3 .deepagents/skills/investment-analysis/scripts/journal.py calibration
 
 # Per-signal-type breakdown
-python3 sandbox/journal.py by-type
+python3 .deepagents/skills/investment-analysis/scripts/journal.py by-type
 
 # Per-asset-class breakdown
-python3 sandbox/journal.py by-asset
+python3 .deepagents/skills/investment-analysis/scripts/journal.py by-asset
 
 # Generate monthly review
-python3 sandbox/journal.py monthly-review
+python3 .deepagents/skills/investment-analysis/scripts/journal.py monthly-review
 ```
 
 ## Storage

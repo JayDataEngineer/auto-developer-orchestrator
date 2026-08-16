@@ -3,7 +3,7 @@
 
 Usage:
   python3 forge_client.py health
-  python3 forge_client.py generate "prompt text" --mode image --out /sandbox/workspace/images/x.png
+  python3 forge_client.py generate "prompt text" --mode image --out images/x.png
   python3 forge_client.py generate "prompt" --mode image --params '{"seed":42,"width":1024,"height":1024}'
 
 Env:

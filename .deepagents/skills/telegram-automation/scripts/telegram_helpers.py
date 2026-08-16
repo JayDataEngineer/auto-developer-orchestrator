@@ -8,8 +8,8 @@ no cleverness, full docstrings.
 
 Unlike twitter_helpers (which injects cookies into a SeleniumBase session),
 Telegram uses MTProto via Telethon. The session state lives in a SQLite
-file at /sandbox/workspace/data/.telegram-session.session — populated once by
-`python3 /sandbox/session.py --bootstrap` and reused forever.
+file at data/.telegram-session.session — populated once by
+`python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --bootstrap` and reused forever.
 
 Usage in agent scripts:
 
@@ -31,9 +31,9 @@ Usage in agent scripts:
 
 Setup checklist (one-time):
   1. Get api_id + api_hash from https://my.telegram.org/apps
-  2. python3 /sandbox/session.py --setup-credentials API_ID API_HASH +PHONE
-  3. python3 /sandbox/session.py --bootstrap
-  4. Verify: python3 /sandbox/session.py --check  → valid: true
+  2. python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --setup-credentials API_ID API_HASH +PHONE
+  3. python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --bootstrap
+  4. Verify: python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --check  → valid: true
 """
 import json
 import os
@@ -59,7 +59,7 @@ def load_credentials() -> dict:
     if p is None or not p.exists():
         raise RuntimeError(
             f"No Telegram credentials at {p}. "
-            f"Run: python3 /sandbox/session.py --setup-credentials API_ID API_HASH PHONE"
+            f"Run: python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --setup-credentials API_ID API_HASH PHONE"
         )
     with open(p) as f:
         data = json.load(f)
@@ -104,7 +104,7 @@ def telegram_session():
         import telethon.sync  # noqa: F401 — enables sync wrappers
     except ImportError as e:
         raise RuntimeError(
-            "telethon not installed. Add 'telethon' to pux.yaml pip_packages."
+            "telethon not installed. pip install telethon."
         ) from e
 
     if not has_valid_session():
@@ -114,7 +114,7 @@ def telegram_session():
             f"Session not ready. Files missing:\n"
             f"  credentials: {cp} ({'ok' if cp and cp.exists() else 'MISSING'})\n"
             f"  session:     {sp} ({'ok' if sp and sp.exists() else 'MISSING'})\n"
-            f"Run: python3 /sandbox/session.py --bootstrap"
+            f"Run: python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --bootstrap"
         )
 
     creds = load_credentials()
@@ -124,7 +124,7 @@ def telegram_session():
         if not client.is_user_authorized():
             raise RuntimeError(
                 "Session file exists but Telegram no longer recognizes it. "
-                "Re-run: python3 /sandbox/session.py --bootstrap"
+                "Re-run: python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --bootstrap"
             )
         yield client
     finally:

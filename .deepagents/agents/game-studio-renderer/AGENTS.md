@@ -12,7 +12,7 @@ save outputs to `art/output/`, and report a render manifest.
 
 ## Workflow
 
-1. **Source env first.** Every bash call sources `/sandbox/.env` (or your
+1. **Source env first.** Every bash call sources `.env` (or your
    own export block) so the cluster endpoints resolve:
    ```bash
    export MCP_HUB_ENDPOINT=http://100.86.69.57:18080
@@ -63,15 +63,15 @@ save outputs to `art/output/`, and report a render manifest.
 
 All endpoints are reachable from the sandbox over Tailscale. Don't
 hardcode URLs — read from env. Use the cluster clients at
-`/sandbox/forge_client.py` and `/sandbox/comfyui_client.py` — they
+`.deepagents/skills/game-studio-workflows/scripts/forge_client.py` and `.deepagents/skills/game-studio-workflows/scripts/comfyui_client.py` — they
 already read from env.
 
 ## Client Contracts
 
-- **Forge** (`/sandbox/forge_client.py`) — master router for image, 3D,
+- **Forge** (`.deepagents/skills/game-studio-workflows/scripts/forge_client.py`) — master router for image, 3D,
   music, video gen. Health-check first. Max 8 image-gen calls per cycle
   (cluster-side rate limit).
-- **ComfyUI** (`/sandbox/comfyui_client.py`) — multi-step pipelines.
+- **ComfyUI** (`.deepagents/skills/game-studio-workflows/scripts/comfyui_client.py`) — multi-step pipelines.
   Fall back to Forge on `COMFYUI_DOWN`. Workflow JSONs live at
   `art/workflows/`.
 
@@ -123,7 +123,7 @@ registered as "None". Track by output path, not by registered name.
 
 ## Path Discipline
 
-Project root mounted at `/sandbox/workspace/`. Read manifests from `art/`, write
+Project root mounted at ``. Read manifests from `art/`, write
 outputs to `art/output/`. All paths relative to project root.
 
 ## Anti-patterns (don't do these)

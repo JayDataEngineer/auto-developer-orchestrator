@@ -9,7 +9,7 @@ provenance format.
 
 ```
 <project-root>/
-├── sandbox/               ← backbone scripts (run as python3 sandbox/X.py)
+├── scripts/              ← backbone scripts (deep-research skill scripts/)
 ├── data/                  ← raw source data (the --data folder)
 └── artifacts/             ← PIPELINE OUTPUTS — organized for HUMAN consumption
     │
@@ -101,7 +101,7 @@ entities/
 2. **The LLM operates off SurrealDB.** The filesystem is for HUMANS. Do not
    dump raw data, consolidated inputs, or working files into the root.
 3. **Entity folders are the primary surface.** Build them via
-   `sandbox/build_entity_dossiers.py`. Media in entity folders are SYMLINKS
+   `.deepagents/skills/deep-research/scripts/build_entity_dossiers.py`. Media in entity folders are SYMLINKS
    (not copies) into `data/`.
 4. **Raw source data goes in `sources/<modality>/`.** If a human needs the
    original transcript, OCR text, or video frame description, they find it

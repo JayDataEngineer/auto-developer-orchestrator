@@ -10,7 +10,7 @@ read INGEST_MULTIMODAL_PERSONS.md instead/after.
 ## Step 0 — Deterministic Pre-Processing (RUN THIS FIRST)
 
 The raw data folder arrives via `$DATA_DIR` (set by the `--data` parameter on
-`pux direct` — the path is NEVER in your task/prompt). Your first action is to
+direct invocation — the path is NEVER in your task/prompt). Your first action is to
 run the deterministic preprocessing pipeline on it:
 
 ```bash
@@ -71,18 +71,18 @@ pass. These are CODE — no reasoning. They produce:
 #    near-duplicate clusters). Reads *_embeddings.json, overwrites
 #    *_clusters.json. Run AFTER Step 0 produced embeddings, BEFORE ingest.
 RUN_DIR="artifacts/run-$(date +%Y-%m-%d)/"
-python3 sandbox/recluster.py "$RUN_DIR" 0.80 0.30   # face_thr voice_thr
+python3 .deepagents/skills/deep-research/scripts/recluster.py "$RUN_DIR" 0.80 0.30   # face_thr voice_thr
 
 # 1. Ingest artifacts into SurrealDB (items, faces, voice clusters, edges).
-python3 sandbox/pipeline_ingest.py --run-dir "$RUN_DIR" --skip-embeddings
+python3 .deepagents/skills/deep-research/scripts/pipeline_ingest.py --run-dir "$RUN_DIR" --skip-embeddings
 
 # 2. Deterministic identity resolution (creates voice_cluster nodes,
 #    resolves senders, cross-links via video co-occurrence, writes
 #    same_as edges). Idempotent.
-python3 sandbox/resolve_identities.py "$RUN_DIR"
+python3 .deepagents/skills/deep-research/scripts/resolve_identities.py "$RUN_DIR"
 
 # 3. Preliminary dossier build — surfaces all entities + clusters.
-python3 sandbox/build_entity_dossiers.py "$RUN_DIR"
+python3 .deepagents/skills/deep-research/scripts/build_entity_dossiers.py "$RUN_DIR"
 ```
 
 After this step:
@@ -118,7 +118,7 @@ context and proposes labels.
    - If you can propose a label with confidence ≥ 0.6, write a `same_as`
      edge linking the cluster to the named entity using the helper CLI:
      ```bash
-     python3 sandbox/link_cluster.py face_cluster_2 ent_Christopher_Semok \
+     python3 .deepagents/skills/deep-research/scripts/link_cluster.py face_cluster_2 ent_Christopher_Semok \
          --confidence 0.75 \
          --signal llm_visual_context_reasoning \
          --reasoning "Cluster photos show screenshots of Telegram convos \
@@ -137,7 +137,7 @@ context and proposes labels.
 4. After writing all proposed `same_as` edges, rebuild the dossiers so named
    entities' `photos/` and `audio/` populate from the newly-linked clusters:
    ```bash
-   python3 sandbox/build_entity_dossiers.py "$RUN_DIR"
+   python3 .deepagents/skills/deep-research/scripts/build_entity_dossiers.py "$RUN_DIR"
    ```
 
 ### Discipline — clustering is the SOLE determiner of media in an entity folder

@@ -17,7 +17,7 @@ Three stages, each independently resumable:
 Usage:
     # Full pipeline — extract + embed + narrate
     python3 video_frames.py process --video video.mp4 --source-id source:abc \\
-        --item-id item:xyz --output /sandbox/workspace/video_work/video_stem
+        --item-id item:xyz --output video_work/video_stem
 
     # Stage-by-stage (resumable)
     python3 video_frames.py extract-scenes --video video.mp4 --output work/
@@ -253,7 +253,7 @@ def _surreal_client_path() -> str:
         from paths import sandbox_module
         return str(sandbox_module("surreal_client.py"))
     except ImportError:
-        for candidate in ("surreal_client.py",):
+        for candidate in (Path(__file__).resolve().parent / "surreal_client.py",):
             if os.path.exists(candidate):
                 return candidate
         return "surreal_client.py"

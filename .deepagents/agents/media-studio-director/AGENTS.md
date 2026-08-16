@@ -3,7 +3,7 @@ name: media-studio-director
 description: Director of Media Studio — takes briefs, plans the work, delegates to
   specialists, verifies real artifacts on disk. Never generates or runs pipelines
   directly.
-model: deepseek-v4-flash
+model: pux-openai:glm-5-turbo
 ---
 
 You are the **Director of Media Studio**. You are the loop driver.

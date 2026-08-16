@@ -1,18 +1,11 @@
 #!/usr/bin/env python3
-"""Canonical path resolver for org sandbox scripts.
+"""Canonical path resolver for skill scripts.
 
-WHY THIS EXISTS
----------------
-System A backbone scripts used to hardcode ``/sandbox/<file>`` paths for
-cookies, credentials, calendars. That drifted: the same constant was
-defined in 3 places (session, post, helpers), and any layout change broke
-them silently.
-
-This module is the single source of truth. Scripts import from here
-instead of hardcoding. Defaults match the in-container layout
-(``/sandbox/<name>.py`` for init_files, ``/sandbox/workspace/`` for the
-project bind-mount). Override via env vars for testing or non-standard
-layouts.
+Single source of truth for session/credential/artifact paths so sibling
+scripts never hardcode them. Defaults are repo-relative: this module lives
+at ``.deepagents/skills/<skill>/scripts/paths.py``, the workspace root is
+four levels up, and runtime data lands under ``<root>/data/``. Every path
+is overridable via env vars (no prefix — plain names).
 
 USAGE
 -----
@@ -25,15 +18,9 @@ USAGE
 
 LAYOUT
 ------
-- ``/sandbox/<name>.py`` — backbone scripts (chmod 0444, git-tracked)
-- ``/sandbox/workspace/`` — project bind-mount (host: <project>/)
-- ``/sandbox/workspace/data/`` — project-scoped data (host: <project>/data/)
-- ``/sandbox/workspace/scripts/`` — agent-authored scratch (System B)
-
-The data/ dir is the canonical home for session files because it survives
-container restarts and is reachable from both the host-side cookie
-extractor (``profiles/_shared/sandbox/extract_browser_cookies.py``) and
-in-container code.
+- ``.deepagents/skills/<skill>/scripts/`` — these scripts (git-tracked)
+- ``<workspace root>/`` — the repo you run dcode in
+- ``<workspace root>/data/`` — runtime data (sessions, credentials, caches)
 """
 from __future__ import annotations
 
@@ -49,29 +36,27 @@ def _env_path(env_var: str, default: Path) -> Path:
     return default
 
 
-def sandbox_root() -> Path:
-    """Root of the in-container sandbox layout (default: /sandbox)."""
-    return _env_path("PUX_SANDBOX_ROOT", Path("/sandbox"))
+_WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 
 
 def workspace_root() -> Path:
-    """Project bind-mount root (default: /sandbox/workspace)."""
-    return _env_path("PUX_WORKSPACE_ROOT", sandbox_root() / "workspace")
+    """The workspace (repo) root this skill lives in."""
+    return _env_path("WORKSPACE_ROOT", _WORKSPACE_ROOT)
 
 
 def data_dir() -> Path:
-    """Project-scoped data dir (default: /sandbox/workspace/data).
+    """Project-scoped data dir (default: <workspace root>/data).
 
     Created on first access if missing.
     """
-    d = _env_path("PUX_DATA_DIR", workspace_root() / "data")
+    d = _env_path("DATA_DIR", workspace_root() / "data")
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def scripts_dir() -> Path:
-    """System B agent-authored scratch dir (default: /sandbox/workspace/scripts)."""
-    return _env_path("PUX_SCRIPTS_DIR", workspace_root() / "scripts")
+    """Agent-authored scratch dir (default: <workspace root>/scripts)."""
+    return _env_path("SCRIPTS_DIR", workspace_root() / "scripts")
 
 
 # --------------------------------------------------------------------- #
@@ -98,7 +83,7 @@ def browser_session(domain: str) -> Path:
     if safe.startswith("www."):
         safe = safe[4:]
     return _env_path(
-        f"PUX_BROWSER_SESSION_{safe.replace('.', '_').upper()}",
+        f"BROWSER_SESSION_{safe.replace('.', '_').upper()}",
         data_dir() / f".browser-session-{safe}.json",
     )
 
@@ -119,17 +104,17 @@ def browser_session_search(domain: str) -> list[Path]:
 
 def twitter_cookies() -> Path:
     """Twitter session cookies JSON. Project-scoped via data_dir."""
-    return _env_path("PUX_TWITTER_COOKIES", data_dir() / ".twitter-session.json")
+    return _env_path("TWITTER_COOKIES", data_dir() / ".twitter-session.json")
 
 
 def twitter_calendar() -> Path:
     """Posting calendar JSON. Project-scoped via workspace_root."""
-    return _env_path("PUX_TWITTER_CALENDAR", workspace_root() / "calendar.json")
+    return _env_path("TWITTER_CALENDAR", workspace_root() / "calendar.json")
 
 
 def twitter_drafts() -> Path:
     """Draft tweets JSON. Project-scoped via workspace_root."""
-    return _env_path("PUX_TWITTER_DRAFTS", workspace_root() / "drafts.json")
+    return _env_path("TWITTER_DRAFTS", workspace_root() / "drafts.json")
 
 
 # --------------------------------------------------------------------- #
@@ -138,17 +123,17 @@ def twitter_drafts() -> Path:
 
 def telegram_credentials() -> Path:
     """Telegram API credentials JSON (api_id, api_hash, phone)."""
-    return _env_path("PUX_TELEGRAM_CREDENTIALS", data_dir() / ".telegram-credentials.json")
+    return _env_path("TELEGRAM_CREDENTIALS", data_dir() / ".telegram-credentials.json")
 
 
 def telegram_session() -> Path:
     """Telethon SQLite session file (auth state)."""
-    return _env_path("PUX_TELEGRAM_SESSION", data_dir() / ".telegram-session.session")
+    return _env_path("TELEGRAM_SESSION", data_dir() / ".telegram-session.session")
 
 
 
 # --------------------------------------------------------------------- #
-# Sibling module resolver (for scripts that import other /sandbox/*.py)
+# Sibling module resolver (for scripts that import other scripts/*.py)
 # --------------------------------------------------------------------- #
 
 def sandbox_module(name: str) -> Path:
@@ -158,7 +143,7 @@ def sandbox_module(name: str) -> Path:
     (e.g. ``video_frames`` → ``surreal_client``). Returns the first existing
     candidate from a resolution chain:
 
-    1. ``PUX_SANDBOX_MODULE_<NORMALIZED>`` env var (explicit override)
+    1. ``SKILL_MODULE_<NORMALIZED>`` env var (explicit override)
     2. ``<sandbox_root>/<name>`` (in-container, chmod 0444)
     3. ``<cwd>/<name>`` (dev / test / project-local)
     4. ``<this file's dir>/<name>`` (sibling discovery)
@@ -167,17 +152,16 @@ def sandbox_module(name: str) -> Path:
     nothing exists.
     """
     normalized = name.upper().replace(".", "_").replace("-", "_")
-    env_var = f"PUX_SANDBOX_MODULE_{normalized}"
+    env_var = f"SKILL_MODULE_{normalized}"
     candidates = [
         _env_path(env_var, Path("/nonexistent")),  # explicit override or miss
-        sandbox_root() / name,
+        Path(__file__).resolve().parent / name,    # sibling script (default)
         Path.cwd() / name,
-        Path(__file__).resolve().parent / name,
     ]
     for c in candidates:
         if c.exists():
             return c
-    return sandbox_root() / name  # useful default for error messages
+    return Path(__file__).resolve().parent / name  # useful default for errors
 
 
 # --------------------------------------------------------------------- #

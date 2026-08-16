@@ -6,29 +6,29 @@ How to read Telegram messages via the Telethon session.
 
 ```bash
 # 1. Get API credentials from https://my.telegram.org/apps
-python3 /sandbox/telegram_session.py --setup-credentials API_ID API_HASH PHONE
+python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --setup-credentials API_ID API_HASH PHONE
 
 # 2. Bootstrap (sends SMS, you enter code, ~30 seconds)
-python3 /sandbox/telegram_session.py --bootstrap
+python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --bootstrap
 
 # 3. Verify
-python3 /sandbox/telegram_session.py --check
+python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --check
 ```
 
-Session persists at `/sandbox/.telegram-session.session` (SQLite file). Survives across runs.
+Session persists at `data/.telegram-session.session` (SQLite file). Survives across runs.
 
 ## Read Messages
 
 ```bash
 # List available chats
-python3 /sandbox/telegram_helpers.py list-chats --limit 50
+python3 .deepagents/skills/telegram-automation/scripts/telegram_helpers.py list-chats --limit 50
 
 # Read recent messages from a chat
-python3 /sandbox/telegram_helpers.py read-messages \
+python3 .deepagents/skills/telegram-automation/scripts/telegram_helpers.py read-messages \
     --chat "Saved Messages" --limit 100
 
 # Search messages
-python3 /sandbox/telegram_helpers.py search-messages \
+python3 .deepagents/skills/telegram-automation/scripts/telegram_helpers.py search-messages \
     --query "AI agents" --limit 20
 ```
 
@@ -72,4 +72,4 @@ A message is "interesting" if any of:
 
 ## Output Format
 
-Write to `/sandbox/workspace/research/telegram.json`. See telegram-researcher role prompt for the schema.
+Write to `research/telegram.json`. See telegram-researcher role prompt for the schema.

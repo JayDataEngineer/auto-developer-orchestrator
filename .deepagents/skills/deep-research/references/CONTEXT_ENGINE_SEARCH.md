@@ -14,7 +14,7 @@ surreal_query(sql="<SurrealQL statement>")
 ```
 
 For vector search, embed the query via the in-sandbox embed helper
-(`sandbox/embed.py`, harrier-oss-v1-0.6b, 1024-dim), then pass the vector
+(`.deepagents/skills/deep-research/scripts/embed.py`, harrier-oss-v1-0.6b, 1024-dim), then pass the vector
 into a cosine similarity query.
 
 ## Layer 1 — Vector search (semantic similarity)

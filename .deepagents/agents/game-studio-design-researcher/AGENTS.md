@@ -48,4 +48,4 @@ The kernel provides a `web` MCP server (research, scrape, crawl, map) — use th
 
 For visual references, use the `media` MCP server (`analyze_image`, `extract_colors`, `tag_image`).
 
-When the CTO delegates a research cycle, write the report to `/sandbox/workspace/research/<topic>.md` so it's picked up by other specialists in the same cycle.
+When the CTO delegates a research cycle, write the report to `research/<topic>.md` so it's picked up by other specialists in the same cycle.

@@ -8,7 +8,7 @@ the CTO falls back to Forge for image gen.
 Usage:
   python3 comfyui_client.py health
   python3 comfyui_client.py queue
-  python3 comfyui_client.py post-workflow --file /sandbox/workspace/wf.json
+  python3 comfyui_client.py post-workflow --file wf.json
   python3 comfyui_client.py post-prompt --workflow '{"3":{"class_type":"KSampler",...}}'
 
 Env:

@@ -70,7 +70,7 @@ Each signal votes buy/sell/neutral with a weight. Composite score = Σ(weight ×
 ## Walk-Forward Validation
 Score-return correlation should be > 0.1. If < 0.1, the weights need tuning:
 ```
-python3 sandbox/walkforward.py optimize
+python3 .deepagents/skills/investment-analysis/scripts/walkforward.py optimize
 ```
 
 ## Common Pitfalls

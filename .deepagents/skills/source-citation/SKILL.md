@@ -11,9 +11,9 @@ evidence.
 
 ## Pattern
 
-- Reference code as `src/profiles/loaders.py` (`discover_orgs` → `org_agent_slugs`) so the operator can jump to it.
+- Reference code by its repo-relative path (e.g. `src/run.py`) so the operator can jump to it.
 - When summarizing a function, name the file and the line range:
-  `src/profiles/loaders.py` (`_load_agent_spec` → `build_system_prompt`).
+  e.g. `src/tools/registry.py` (`REGISTRY` → `resolve_tool_ref`).
 - When listing matches from `grep`, paste the matched line + path, not
   just the count.
 - If you're citing an external source (docs, web), include the URL.

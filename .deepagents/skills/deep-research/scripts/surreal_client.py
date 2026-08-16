@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SurrealDB client — the persistence layer for the DRE knowledge graph.
 
-This is the SCRIPT behind the pux_sandbox_surreal_* declared tools. It reads
+This is the SurrealDB client script for the deep-research pipeline. It reads
 SURREALDB_URL / SURREALDB_NS / SURREALDB_DB from the environment (injected by
 the harness via policy.yaml sandbox.env) and exposes subcommands for every
 graph operation the DRE pipeline needs:
@@ -603,7 +603,7 @@ def cmd_backfill(args):
 def _embed(text: str) -> list[float]:
     """Embed text via the in-sandbox sentence-transformers model.
 
-    Uses sandbox/embed.py which loads microsoft/harrier-oss-v1-0.6b once
+    Uses .deepagents/skills/deep-research/scripts/embed.py which loads microsoft/harrier-oss-v1-0.6b once
     (module-level cache) and encodes in-process. No HTTP hop, no env URL.
     Returns a 1024-dim L2-normalized vector.
     """

@@ -57,14 +57,14 @@ After ask_user returns:
 
 ## Reading the Bundle
 
-The bundle path is `/sandbox/workspace/drafts/bundle.json`. Each option has:
+The bundle path is `drafts/bundle.json`. Each option has:
 
 ```json
 {
   "id": "A",
   "text": "..." or null,
   "thread": [...] or null,
-  "image_path": "/sandbox/workspace/images/img_1.png" or null,
+  "image_path": "images/img_1.png" or null,
   "angle": "contrarian take",
   "platforms": ["twitter", "telegram"]
 }
@@ -95,7 +95,7 @@ delegate_to(
 
 If the user picks Cancel:
 - Mark the SurrealDB task_run as `status: cancelled`
-- Return a brief summary: "Pipeline cancelled at presentation. Research and drafts are at /sandbox/workspace/ for your review."
+- Return a brief summary: "Pipeline cancelled at presentation. Research and drafts are at  for your review."
 - Do NOT post anything
 
 ## User Feedback (Free Text)

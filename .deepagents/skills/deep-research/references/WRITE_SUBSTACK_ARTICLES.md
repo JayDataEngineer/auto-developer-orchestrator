@@ -60,14 +60,14 @@ Write `artifacts/article_outline.md`:
 Review the outline before drafting. Does each section earn its place? Cut anything that's "interesting but not load-bearing."
 
 ### Step 4 — Draft
-Write `artifacts/article.md`. Markdown format. Footnotes as `[^N]` markers in text, defined at the bottom. The file MUST start with the pux provenance block (see AGENTS.md "Provenance") so it links back to this run:
+Write `artifacts/article.md`. Markdown format. Footnotes as `[^N]` markers in text, defined at the bottom. The file MUST start with the run provenance block so it links back to this run:
 
 ```markdown
 <!--
-pux:agent=dre-writer
-pux:saved=<UTC ISO 8601, from `date -u +%Y-%m-%dT%H:%M:%SZ`>
-pux:task=<first 8 of sha256 of the original user task>
-pux:stage=article
+run:agent=dre-writer
+run:saved=<UTC ISO 8601, from `date -u +%Y-%m-%dT%H:%M:%SZ`>
+run:task=<first 8 of sha256 of the original user task>
+run:stage=article
 -->
 
 # <headline>

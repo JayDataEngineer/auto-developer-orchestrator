@@ -141,6 +141,6 @@ When the CTO delegates a cycle, consult these skills for the exact HTTP contract
 - **FORGE_WORKFLOW** — Forge on Ray (image / 3D / music / video). Always health-check first. Max 8 image gen per cycle.
 - **COMFYUI_WORKFLOW** — ComfyUI on Ray for multi-step pipelines. Fall back to Forge on `COMFYUI_DOWN`.
 
-Use `/sandbox/forge_client.py` and `/sandbox/comfyui_client.py` — they read endpoints from env (`MCP_HUB_ENDPOINT`, `COMFYUI_URL`). Don't hardcode URLs.
+Use `.deepagents/skills/game-studio-workflows/scripts/forge_client.py` and `.deepagents/skills/game-studio-workflows/scripts/comfyui_client.py` — they read endpoints from env (`MCP_HUB_ENDPOINT`, `COMFYUI_URL`). Don't hardcode URLs.
 
-When the CTO hasn't delegated you and you're running standalone, same skills apply — just produce assets into `/sandbox/workspace/art/` and report a manifest.
+When the CTO hasn't delegated you and you're running standalone, same skills apply — just produce assets into `art/` and report a manifest.

@@ -12,11 +12,11 @@ video keyframes). You want to answer "who appears in these images, and where?"
 
 Do NOT run this skill until you have:
 - The image corpus on disk (file paths accessible to the sandbox).
-- CompreFace up and `.env.local` populated (it is, if `./bootstrap.sh` ran).
+- CompreFace up (default `http://localhost:8000`) and `COMPREFACE_API_KEY` set.
 
 ## Tool
 
-`sandbox/face_client.py` — wraps CompreFace REST API. Six subcommands:
+`.deepagents/skills/deep-research/scripts/face_client.py` — wraps CompreFace REST API. Six subcommands:
 
 | Subcommand | Purpose |
 |------------|---------|
@@ -46,7 +46,7 @@ photos = [str(p) for p in photos if 'thumb' not in p.name]
 print(json.dumps(photos))
 " > /tmp/image_list.json
 
-python3 sandbox/face_client.py batch-recognize \
+python3 .deepagents/skills/deep-research/scripts/face_client.py batch-recognize \
     --input /tmp/image_list.json \
     --output /tmp/batch_out.json \
     --min-similarity 0.0   # keep all faces; cluster step decides identity
@@ -78,7 +78,7 @@ similarity (>0.9 typically).
 ### Step 2 — Cluster embeddings into identity groups
 
 ```bash
-python3 sandbox/face_client.py cluster \
+python3 .deepagents/skills/deep-research/scripts/face_client.py cluster \
     --input /tmp/batch_out.json \
     --output /tmp/clusters.json \
     --min-cluster-size 2
@@ -102,7 +102,7 @@ instead of "Unknown":
 
 ```bash
 # Register by name
-python3 sandbox/face_client.py add-subject --name "Jane Doe" \
+python3 .deepagents/skills/deep-research/scripts/face_client.py add-subject --name "Jane Doe" \
     --image data/.../photo_with_jane.jpg
 
 # Then re-run batch-recognize — Jane will show up with confidence >0.9
@@ -131,28 +131,28 @@ Or batch-insert via a small Python helper that iterates `clusters.json`.
 
 ## Smoke test
 
-After `./bootstrap.sh`, verify the face pipeline works end-to-end with a
+With CompreFace up, verify the face pipeline works end-to-end with a
 single known image:
 
 ```bash
 set -a && . ./.env.local && set +a
 
-# 1. Subject DB starts empty (bootstrap.sh wiped demo data)
-python3 sandbox/face_client.py list-subjects
+# 1. Subject DB starts empty (fresh CompreFace install)
+python3 .deepagents/skills/deep-research/scripts/face_client.py list-subjects
 # Expected: (0 subjects) []
 
 # 2. Add a subject (use any image with a clear face)
-python3 sandbox/face_client.py add-subject --name "TestSubject" --image <face.jpg>
+python3 .deepagents/skills/deep-research/scripts/face_client.py add-subject --name "TestSubject" --image <face.jpg>
 
 # 3. Recognize the same image → confidence should be 1.0
-python3 sandbox/face_client.py recognize --image <face.jpg> --min-similarity 0.5
+python3 .deepagents/skills/deep-research/scripts/face_client.py recognize --image <face.jpg> --min-similarity 0.5
 
 # 4. Cluster a batch — verify HDBSCAN runs cleanly
-python3 sandbox/face_client.py cluster --input <batch.json> --output /tmp/c.json
+python3 .deepagents/skills/deep-research/scripts/face_client.py cluster --input <batch.json> --output /tmp/c.json
 # Expected: "Found N identity clusters from M faces" on stderr
 
 # 5. Cleanup
-python3 sandbox/face_client.py delete-subject --name "TestSubject"
+python3 .deepagents/skills/deep-research/scripts/face_client.py delete-subject --name "TestSubject"
 ```
 
 ## Troubleshooting

@@ -87,10 +87,10 @@ The web MCP server has its own per-domain cache, but it's not perfect. For expen
 
 ```bash
 # Cache-wrapped web fetch
-python3 sandbox/alt_data.py fetch --url "https://www.sec.gov/..." --cache-key "sec_10k_aapl_2025"
+python3 .deepagents/skills/investment-analysis/scripts/alt_data.py fetch --url "https://www.sec.gov/..." --cache-key "sec_10k_aapl_2025"
 
 # Cache-wrapped research query
-python3 sandbox/alt_data.py research --query "AAPL earnings Q2 2026" --cache-key "aapl_news_q2"
+python3 .deepagents/skills/investment-analysis/scripts/alt_data.py research --query "AAPL earnings Q2 2026" --cache-key "aapl_news_q2"
 ```
 
 Cache lives at `.cache/` with content-hash filenames. TTL defaults to 1 hour (configurable via `--ttl`).

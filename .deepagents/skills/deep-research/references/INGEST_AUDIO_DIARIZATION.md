@@ -12,7 +12,7 @@ to answer "what was said, by whom, when?"
 
 Do NOT run this skill until you have:
 - Audio files on disk (paths accessible to the sandbox).
-- `./bootstrap.sh` has run (brings up `research-media-mcp` on `:8102`).
+- The media analysis service is reachable (`MEDIA_MCP_URL`, default `http://localhost:8101`).
 - `MEDIA_PYANNOTE_TOKEN` set in `.env` (HF token with pyannote licenses accepted).
 
 ## Identity resolution — embed_voice is now preferred
@@ -32,7 +32,7 @@ The full pipeline is now:
 
 ## Tool
 
-`sandbox/audio_client.py` — wraps the local media MCP HTTP API. Four subcommands:
+`.deepagents/skills/deep-research/scripts/audio_client.py` — wraps the local media MCP HTTP API. Four subcommands:
 
 | Subcommand | Purpose |
 |------------|---------|
@@ -54,7 +54,7 @@ the docker bridge IP `172.17.0.1`. To override (e.g., use Tailscale), set
 ```bash
 export MEDIA_MCP_URL=http://localhost:8102
 
-python3 sandbox/audio_client.py process \
+python3 .deepagents/skills/deep-research/scripts/audio_client.py process \
     --audio data/<export_dir>/<audio_subdir>/audio_1@13-03-2026_08-59-37.ogg \
     --output /tmp/turns.json \
     --wait-for-mcp       # blocks up to 120s for MCP to be ready on first call
@@ -84,7 +84,7 @@ whose Pyannote window contains the chunk's midpoint. If no window overlaps
 ### Step 2 — Batch process a directory
 
 ```bash
-python3 sandbox/audio_client.py batch \
+python3 .deepagents/skills/deep-research/scripts/audio_client.py batch \
     --input data/<export_dir>/<audio_subdir>/ \
     --output /tmp/voice_turns/ \
     --wait-for-mcp
@@ -156,7 +156,7 @@ or contextual clues.
 
 ## Smoke test
 
-After `./bootstrap.sh`, verify the audio pipeline works end-to-end with a
+With the media service up, verify the audio pipeline works end-to-end with a
 single known voice file:
 
 ```bash
@@ -166,7 +166,7 @@ export MEDIA_MCP_URL=http://localhost:8102
 curl -sf http://localhost:8102/health || echo "MCP not up"
 
 # 2. Process one file (use any .ogg/.mp3 with speech)
-python3 sandbox/audio_client.py process \
+python3 .deepagents/skills/deep-research/scripts/audio_client.py process \
     --audio data/<export_dir>/<audio_subdir>/<some_file>.ogg \
     --output /tmp/smoke.json \
     --wait-for-mcp

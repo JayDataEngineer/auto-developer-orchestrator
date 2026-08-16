@@ -91,3 +91,27 @@ check.
 mode); treating a screenshot as the assertion when `browser_evaluate` would be
 exact; marking UNVERIFIED when `browser_drag` / `browser_click_at` / a pixel
 assertion could test it.
+
+## Quality bar
+
+The bar every deliverable is graded against (verbatim from the rubric spec):
+
+Grade whether the browser task was actually VERIFIED, not just attempted.
+Read the agent's tool output — do NOT trust a "PASS" claim without the
+evidence behind it. The agent fails this gate by default; only mark
+`satisfied` when EVERY clause is proven from the agent's own tool output
+(browser_evaluate return values, screenshot paths).
+- Every check the task named was actually run (not skipped, not marked
+  UNVERIFIED when a tool existed to test it).
+- Each PASS cites a DOM assertion (the `browser_evaluate` expression + its
+  returned value) or a screenshot path for visual checks — not "it looks
+  right".
+- Each FAIL has a screenshot path + the specific observed-vs-expected gap.
+- For <canvas> elements, a pixel-buffer assertion (`getImageData` non-zero
+  count) was used — a `querySelector !== null` check alone does NOT prove
+  the canvas painted.
+- Console errors were captured after navigation + after any failing action.
+- The viewport size was recorded.
+- No check was marked PASS based solely on a screenshot when a DOM/pixel
+  assertion was feasible (assertions are exact; screenshots are not).
+- The final report has the structured RESULT/CHECKS/EVIDENCE format.

@@ -38,9 +38,8 @@ $VIDEO_PRODUCTION_ROOT if set, otherwise ~/video-productions/
 ```
 
 The four helper scripts — `init_video_job`, `synth_kokoro`, `archive_video`,
-`host_video` — are symlinked onto `PATH` by the `video-production` sandbox
-image (see `profiles/specialists/video-production/Dockerfile`), so invoke them as **bare
-commands**. In any other environment, resolve `scripts/<name>.py` relative to
+`host_video` — live in this skill's `scripts/` dir. Invoke them as **bare
+commands** when they are already on `PATH`, otherwise resolve `scripts/<name>.py` relative to
 this skill folder (e.g. `python scripts/synth_kokoro.py`).
 
 Initialize every non-trivial video job:
@@ -100,19 +99,19 @@ Use `synth_kokoro --check` to validate Kokoro + ffmpeg availability. If unavaila
 
 ### Manim environment
 
-Manim is NOT pre-installed in the Pux sandbox base image. Bootstrap once per
-sandbox via `scripts/bootstrap.sh`, then source the venv before invoking manim:
+Manim is not pre-installed. Bootstrap once per workspace into a venv, then
+source it before invoking manim:
 
 ```bash
-cd /sandbox/workspace
-./scripts/bootstrap.sh                # idempotent; installs manim + kokoro + deps
+python3 -m venv .venv
 source .venv/bin/activate
+pip install manim                      # + kokoro deps for synth_kokoro
 manim -qm --fps 30 src/video.py SceneName
 ```
 
 Use `-ql` for draft checks, `-qm` for fast delivery, and higher quality only when needed.
 
-The bootstrap creates `/sandbox/workspace/.venv/` which persists across sandbox
+The bootstrap creates `.venv/` which persists across sandbox
 restarts. Subsequent shells in the same sandbox only need the `source` line.
 
 If you're running on the host (outside the sandbox), the same flow works —

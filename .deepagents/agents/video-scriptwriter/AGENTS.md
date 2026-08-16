@@ -90,7 +90,7 @@ it (`pdftoppm` + PIL) and reference the cropped path in `visual_notes`.
 
 ## Path Discipline
 
-Project root mounted at `/sandbox/workspace/`. Job artifacts live under
+Project root mounted at ``. Job artifacts live under
 `$VIDEO_PRODUCTION_ROOT/jobs/<YYYY-MM-DD-HHMM-slug>/`. The `init_video_job`
 helper is symlinked onto `PATH` by the `video-production` sandbox image —
 invoke it as a **bare command**. Initialize the job workspace before writing:

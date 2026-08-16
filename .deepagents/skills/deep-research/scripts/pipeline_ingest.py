@@ -40,7 +40,7 @@ SURREAL_USER = os.environ.get("SURREALDB_USER", "root")
 SURREAL_PASS = os.environ.get("SURREALDB_PASS", "root")
 
 RUN_DIR = Path(os.environ.get("RUN_DIR",
-    "/sandbox/workspace/profiles/specialists/deep-research-engine/artifacts/run-2026-07-12"))
+    "artifacts/run-2026-07-12"))
 
 BATCH_SIZE = 50
 

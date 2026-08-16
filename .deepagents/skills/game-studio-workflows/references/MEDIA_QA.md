@@ -6,7 +6,7 @@ The `media` server comes from the shared catalog (`profiles/_shared/tool_servers
 
 ## Vibe Report Format
 
-Every QA cycle writes `/sandbox/workspace/qa/cycle-N/vibe.json`:
+Every QA cycle writes `qa/cycle-N/vibe.json`:
 
 ```json
 {
@@ -38,7 +38,7 @@ Run media tools against the screenshot:
 
 ```
 media_analyze_image(
-    imageSource="file:///sandbox/workspace/qa/cycle-N/viewport.png",
+    imageSource="file://qa/cycle-N/viewport.png",
     prompt="Score this 2.5D cyberpunk survival-horror screenshot 1-5 on: art direction, tone consistency (lonely/ominous), technical quality (composition, lighting). List any visual issues."
 )
 ```
@@ -63,7 +63,7 @@ Always run `classify_nsfw` on every screenshot:
 media_classify_nsfw(imageSource="file:///...")
 ```
 
-If `unsafe` score > 0.3, mark `tone_consistency` low, log to `/sandbox/workspace/qa/cycle-N/rejected.json`, and recommend `iterate` with stricter prompt.
+If `unsafe` score > 0.3, mark `tone_consistency` low, log to `qa/cycle-N/rejected.json`, and recommend `iterate` with stricter prompt.
 
 ## Object Detection for Composition
 

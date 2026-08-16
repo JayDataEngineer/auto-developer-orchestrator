@@ -5,7 +5,7 @@ How to write tweet/thread options from research findings.
 ## Read Research First
 
 ```bash
-cat /sandbox/workspace/research/summary.json | jq .
+cat research/summary.json | jq .
 ```
 
 Note:
@@ -58,7 +58,7 @@ Each option can include an `image_prompt` field — concrete description for the
 
 ## Output Schema
 
-Write to `/sandbox/workspace/drafts/options.json`:
+Write to `drafts/options.json`:
 
 ```json
 {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entity extraction client for Pux sandbox workers.
+"""Entity extraction client for the deep-research pipeline.
 
 Standalone CLI — extracts named entities from text using LLM.
 No DRE engine dependencies.
@@ -189,7 +189,7 @@ def cmd_batch(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Entity extraction for Pux sandbox")
+    parser = argparse.ArgumentParser(description="Entity extraction for the deep-research pipeline")
     sub = parser.add_subparsers(dest="command")
 
     p = sub.add_parser("extract", help="Extract entities from text or file")

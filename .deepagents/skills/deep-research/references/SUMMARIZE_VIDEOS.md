@@ -24,7 +24,7 @@ Both outputs are paired together so the researcher can see "this person said X a
 
 ```bash
 # Inside the sandbox (resemblyzer/webrtcvad are sandbox deps):
-python3 profiles/specialists/deep-research-engine/sandbox/video_summarize.py
+python3 .deepagents/skills/deep-research/scripts/video_summarize.py
 ```
 
 Environment variables (all optional — sensible defaults):

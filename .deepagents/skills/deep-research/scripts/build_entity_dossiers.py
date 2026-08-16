@@ -427,7 +427,7 @@ def discover_entities(run_dir, arts):
             'notes': (f'Unidentified person whose face appears in {len(photos)} photo(s). '
                       f'Senders who posted: {", ".join(senders) or "unknown"}. '
                       f'Identity resolution not yet performed — link to a named '
-                      f'person via a same_as edge (see sandbox/link_cluster.py) '
+                      f'person via a same_as edge (see .deepagents/skills/deep-research/scripts/link_cluster.py) '
                       f'to populate that person\'s photos/ folder with this cluster.'),
             'item_count': row.get('n', 0),
             'voice_cluster_ids': [],
@@ -1069,7 +1069,7 @@ def main():
         index_lines.append("Proven-same-face/voice sets whose names haven't "
                            "been linked to a named entity yet. An investigator "
                            "(or the DRE agent) proposes labels via "
-                           "`sandbox/link_cluster.py`; see AGENTS.md Step 2.\n")
+                           "`.deepagents/skills/deep-research/scripts/link_cluster.py`; see AGENTS.md Step 2.\n")
         index_lines.append("\n| Cluster | Kind | Photos | Audio | Dossier |\n")
         index_lines.append("|---------|------|--------|-------|---------|\n")
         for ent, ev, doss in sorted(cluster_built, key=lambda x: x[0]['name']):

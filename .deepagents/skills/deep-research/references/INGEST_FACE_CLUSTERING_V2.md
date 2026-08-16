@@ -46,22 +46,22 @@ cd /sandbox/workspace && python3 -m http.server 9876 &
 photos=$(find data/<export_dir>/photos -type f -name "*.jpg" \
     | grep -v thumb | sort)
 
-# Video keyframes — use sandbox/video_frames.py, NOT raw ffmpeg.
+# Video keyframes — use .deepagents/skills/deep-research/scripts/video_frames.py, NOT raw ffmpeg.
 # video_frames.py runs scene-detection + temporal fallback (captures every
 # cut AND forces a frame every ~5s on single-take videos). Naive fps=1
 # misses fast cuts and wastes compute on static scenes.
-mkdir -p /sandbox/workspace/video_work
+mkdir -p video_work
 for video in data/<export_dir>/<video_subdir>/*.mp4 \
              data/<export_dir>/<video_subdir>/*.MP4; do
     [ -e "$video" ] || continue
     name=$(basename "$video" | tr 'A-Z' 'a-z' | sed 's/\.mp4$//')
-    python3 /sandbox/video_frames.py extract-scenes \
+    python3 .deepagents/skills/deep-research/scripts/video_frames.py extract-scenes \
         --video "$video" \
-        --output /sandbox/workspace/video_work/"$name"
+        --output video_work/"$name"
 done
-# Keyframes are now at /sandbox/workspace/video_work/<name>/frame_*.png
+# Keyframes are now at video_work/<name>/frame_*.png
 # with frames.json carrying pts_time + scene_score per frame.
-keyframes=$(find /sandbox/workspace/video_work -name 'frame_*.png' | sort)
+keyframes=$(find video_work -name 'frame_*.png' | sort)
 ```
 
 ### Step 2 — Embed every face in every image
@@ -84,7 +84,7 @@ for image_path in all_images:
             })
 
 # Save
-with open("/sandbox/workspace/face_embeddings.json", "w") as f:
+with open("face_embeddings.json", "w") as f:
     json.dump(results, f)
 ```
 
@@ -96,7 +96,7 @@ Expected output shape: a flat list of `{image, bbox, confidence, embedding[512]}
 # Extract just the embedding vectors into a JSON array
 python3 -c "
 import json
-data = json.load(open('/sandbox/workspace/face_embeddings.json'))
+data = json.load(open('face_embeddings.json'))
 embeddings = [r['embedding'] for r in data]
 print(json.dumps(embeddings))
 " > /tmp/face_vectors.json
@@ -206,10 +206,10 @@ curl -sX POST http://localhost:8102/mcp \
 After running, sanity-check:
 ```bash
 # Total faces embedded
-jq 'length' /sandbox/workspace/face_embeddings.json
+jq 'length' face_embeddings.json
 
 # Distinct images covered
-jq -r '.[].image' /sandbox/workspace/face_embeddings.json | sort -u | wc -l
+jq -r '.[].image' face_embeddings.json | sort -u | wc -l
 
 # Cluster distribution
 # (run via cluster_embeddings output inspection)

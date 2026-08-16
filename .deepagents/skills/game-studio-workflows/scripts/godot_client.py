@@ -11,7 +11,7 @@ Usage:
   python3 godot_client.py scene-save
   python3 godot_client.py script-read res://scripts/player.gd
   python3 godot_client.py script-update res://scripts/player.gd --content /path/to/new.gd
-  python3 godot_client.py screenshot-viewport --out /sandbox/workspace/qa/shot.png
+  python3 godot_client.py screenshot-viewport --out qa/shot.png
   python3 godot_client.py runtime-errors-get
   python3 godot_client.py call <tool_name> --args '{"key":"value"}'
 

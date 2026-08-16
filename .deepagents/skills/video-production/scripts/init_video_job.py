@@ -9,25 +9,14 @@ from pathlib import Path
 
 # Default ROOT resolution priority:
 #   1. $VIDEO_PRODUCTION_ROOT env var (explicit override)
-#   2. /sandbox/workspace/video-productions (Pux sandbox — bind-mounted to host,
-#      survives container deletion). Preferred when /sandbox/workspace is a real
-#      directory (not a symlink to /app/workspace as in the dedicated container).
+#   2. video-productions (workspace-relative; survives container deletion)
 #   3. /workspace/video-productions (dedicated video-production container path;
 #      bind-mounted via the named volume in research-video-producer)
 #   4. ~/video-productions (fallback for host-side dev)
 def _detect_default_root() -> str:
-    pux_bind = Path("/sandbox/workspace/video-productions")
+    local = Path("video-productions")
     dedicated = Path("/workspace/video-productions")
-    # In pux-sandbox, /sandbox/workspace is a real directory bind-mounted to host.
-    # In research-video-producer, it's a symlink to /app/workspace (NOT bind-mounted).
-    pux_bind_active = (
-        Path("/sandbox/workspace").is_dir() and not Path("/sandbox/workspace").is_symlink()
-    )
-    if pux_bind_active:
-        candidates = [pux_bind, dedicated, Path.home() / "video-productions"]
-    else:
-        candidates = [dedicated, pux_bind, Path.home() / "video-productions"]
-    for c in candidates:
+    for c in [local, dedicated, Path.home() / "video-productions"]:
         try:
             c.mkdir(parents=True, exist_ok=True)
             return str(c)

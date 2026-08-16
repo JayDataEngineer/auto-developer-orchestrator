@@ -5,7 +5,7 @@ This is the agent-facing CLI for LLM identity resolution (Agent Pipeline
 Step 2 in AGENTS.md). After reasoning about a cluster's photos, OCR, and
 surrounding message context, the agent calls this to persist the linkage:
 
-    python3 sandbox/link_cluster.py face_cluster_2 ent_Christopher_Semok \
+    python3 .deepagents/skills/deep-research/scripts/link_cluster.py face_cluster_2 ent_Christopher_Semok \
         --confidence 0.75 \
         --signal llm_visual_context_reasoning \
         --reasoning "Cluster photos show screenshots of Telegram convos \
@@ -141,7 +141,7 @@ def main():
     if args.reasoning:
         print(f"  reasoning: {args.reasoning}")
     print(f"\nNext: rebuild dossiers to populate {entity_node}'s appears_in/ folder:")
-    print(f"  python3 sandbox/build_entity_dossiers.py \"$RUN_DIR\"")
+    print(f"  python3 .deepagents/skills/deep-research/scripts/build_entity_dossiers.py \"$RUN_DIR\"")
     return 0
 
 

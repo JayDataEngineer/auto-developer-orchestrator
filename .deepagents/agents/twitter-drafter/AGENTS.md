@@ -24,21 +24,21 @@ The CTO's task string carries:
 
 1. **Read slot spec if it exists.**
    ```bash
-   cat /sandbox/workspace/prompts/<slot>.md 2>/dev/null || echo "no slot spec"
+   cat prompts/<slot>.md 2>/dev/null || echo "no slot spec"
    ```
    Slot specs define what the slot should accomplish (morning = workout
    tip + book highlight, etc.).
 
 2. **Read recent timeline context.**
    ```bash
-   python3 /sandbox/twitter_session.py --check
-   python3 /sandbox/twitter_helpers.py timeline --limit 20
+   python3 .deepagents/skills/twitter-automation/scripts/twitter_session.py --check
+   python3 .deepagents/skills/twitter-automation/scripts/twitter_helpers.py timeline --limit 20
    ```
    If session invalid, return an error — do not try to re-extract
    cookies (host-side only). For `reply` or `quote_tweet`, also pull
    mentions + the specific tweet to respond to.
 
-3. **Draft.** Write 2-3 variations to `/sandbox/workspace/data/draft.md`.
+3. **Draft.** Write 2-3 variations to `data/draft.md`.
 
    Voice rules:
    - Direct, knowledgeable, no fluff. Not generic hustle culture.
@@ -122,4 +122,4 @@ The CTO's task string carries:
 
 Your final message: the draft file path + a one-line summary
 (`wrote N variations for <slot>, angles: ...`). The CTO reads
-`/sandbox/workspace/data/draft.md` for the drafts.
+`data/draft.md` for the drafts.

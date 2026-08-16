@@ -17,7 +17,7 @@ pipeline; read its `references/` for production standards + source playbooks.
 
 1. **Activate the venv.** Manim + Kokoro are NOT on PATH until you do:
    ```bash
-   source /sandbox/workspace/.venv/bin/activate
+   source .venv/bin/activate
    ```
    If `.venv/` doesn't exist, run `cd /workspace && ./scripts/bootstrap.sh`
    first (idempotent, persists across sandbox restarts). Do NOT call
@@ -89,9 +89,9 @@ pipeline; read its `references/` for production standards + source playbooks.
 
 ## Path Discipline
 
-Project root mounted at `/sandbox/workspace/`. Job artifacts under
+Project root mounted at ``. Job artifacts under
 `$VIDEO_PRODUCTION_ROOT/jobs/<slug>/` (default
-`/sandbox/workspace/video-productions/jobs/<slug>/`). The four skill
+`video-productions/jobs/<slug>/`). The four skill
 helper scripts (`synth_kokoro`, `archive_video`, `host_video`,
 `init_video_job`) are symlinked onto `PATH` by the `video-production`
 sandbox image — invoke them as **bare commands**, not via `.py` paths.
@@ -110,7 +110,7 @@ Outputs:
 
 | Issue | Action |
 |-------|--------|
-| `manim` not on PATH | Venv not active — `source /sandbox/workspace/.venv/bin/activate` first |
+| `manim` not on PATH | Venv not active — `source .venv/bin/activate` first |
 | pip install outside venv | Use `bootstrap.sh` or `.venv/bin/pip` |
 | MathTex empty boxes | LaTeX isn't installed — use animated shapes instead |
 | Kokoro import fails | Fall back to espeak OR write `src/timings.json` manually. Surface the gap in `render.md` |

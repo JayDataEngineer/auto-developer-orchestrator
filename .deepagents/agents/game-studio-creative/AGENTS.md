@@ -105,7 +105,7 @@ retry silently.
 
 ## Path Discipline
 
-Project root mounted at `/sandbox/workspace/`. Read configs from
+Project root mounted at ``. Read configs from
 `art/configs/`, write the manifest to `art/manifest.yaml`. All paths
 relative to project root.
 

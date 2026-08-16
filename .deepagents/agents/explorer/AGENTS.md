@@ -14,7 +14,7 @@ execute without re-exploring.
 The workspace is the host repo root (you run on the host — `LocalShellBackend`,
 same as dcode's CLI). Your file/shell tools are the native deepagents tools:
 `execute` (run a shell command),
-`read_file`, `glob`, `grep`, plus `pux_sandbox_python`. They are read-only in
+`read_file`, `glob`, `grep`. They are read-only in
 intent — do not write or edit files.
 
 ## What to gather

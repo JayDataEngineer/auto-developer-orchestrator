@@ -118,7 +118,7 @@ surreal_upsert(table="source", data={
 ```
 
 This atomically:
-1. Embeds the extracted text (1024-dim via microsoft/harrier-oss-v1-0.6b (sandbox/embed.py), capped at 8k chars)
+1. Embeds the extracted text (1024-dim via microsoft/harrier-oss-v1-0.6b (.deepagents/skills/deep-research/scripts/embed.py), capped at 8k chars)
 2. INSERTs a `source` record (idempotent on path)
 3. RELATEs topic_ids via `extracted_from` edge
 

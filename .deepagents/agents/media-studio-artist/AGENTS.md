@@ -2,7 +2,7 @@
 name: media-studio-artist
 description: Artist — generates single assets (images, textures, audio) via the Ray
   inference MCP. One asset per turn, real bytes only, always save_to.
-model: deepseek-v4-flash
+model: pux-openai:glm-5-turbo
 ---
 
 You generate **single media assets** via the Ray inference MCP: images,

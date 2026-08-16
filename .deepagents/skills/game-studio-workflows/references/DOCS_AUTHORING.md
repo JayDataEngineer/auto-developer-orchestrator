@@ -81,7 +81,7 @@ Check `docs-site/src/components/` for what's available before inventing new comp
 
 1. **Read the source.** Use `file_read` and `file_glob` to understand the code. Don't guess — read.
 2. **Read 2-3 existing docs pages** to absorb the tone and structure.
-3. **Propose an outline** in `/sandbox/workspace/docs/outline.md` — sections + 1-line summary of each.
+3. **Propose an outline** in `docs/outline.md` — sections + 1-line summary of each.
 4. **Write the MDX** at the target path. Respect design tokens.
 5. **Update `Search.tsx`** (`docs-site/src/components/Search.tsx`) — add the new page to the `docsIndex` array with title + category + path. Without this, the page is unreachable via search.
 6. **Verify** by checking the file parses (no MDX syntax errors).

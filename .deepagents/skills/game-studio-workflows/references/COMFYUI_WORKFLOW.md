@@ -5,7 +5,7 @@ How to drive ComfyUI on the Ray cluster for VFX, sprite post-processing, and bat
 ## Health Check
 
 ```bash
-python3 /sandbox/comfyui_client.py health
+python3 .deepagents/skills/game-studio-workflows/scripts/comfyui_client.py health
 ```
 
 If `COMFYUI_DOWN`: Forge can cover most needs — fall back to FORGE_WORKFLOW. Only ComfyUI gives you node-graph control.
@@ -21,11 +21,11 @@ If `COMFYUI_DOWN`: Forge can cover most needs — fall back to FORGE_WORKFLOW. O
 
 ## Post a Workflow File
 
-Build a workflow in the ComfyUI UI, save as JSON, drop it in `/sandbox/workspace/art/workflows/`:
+Build a workflow in the ComfyUI UI, save as JSON, drop it in `art/workflows/`:
 
 ```bash
-python3 /sandbox/comfyui_client.py post-workflow \
-    --file /sandbox/workspace/art/workflows/char_refine.json
+python3 .deepagents/skills/game-studio-workflows/scripts/comfyui_client.py post-workflow \
+    --file art/workflows/char_refine.json
 ```
 
 The response includes `prompt_id` — poll `/queue` or `/history/{prompt_id}` for completion.
@@ -35,7 +35,7 @@ The response includes `prompt_id` — poll `/queue` or `/history/{prompt_id}` fo
 For workflows the agent constructs programmatically (rare — usually you want a file):
 
 ```bash
-python3 /sandbox/comfyui_client.py post-prompt \
+python3 .deepagents/skills/game-studio-workflows/scripts/comfyui_client.py post-prompt \
     --workflow '{"3":{"class_type":"KSampler","inputs":{"seed":42,"cfg":7,"model":["4",0]}}}'
 ```
 
@@ -56,7 +56,7 @@ ComfyUI is async — the POST returns immediately. To check completion:
 
 ```bash
 # Queue depth
-python3 /sandbox/comfyui_client.py queue
+python3 .deepagents/skills/game-studio-workflows/scripts/comfyui_client.py queue
 
 # Once prompt_id is done, output is in /workspace/output/ on the cluster
 # Retrieve via the Ray proxy: GET $COMFYUI_URL/view?filename=<name>&type=output
@@ -69,7 +69,7 @@ python3 /sandbox/comfyui_client.py queue
 | `COMFYUI_DOWN` | Fall back to Forge; document what workflow couldn't run |
 | Workflow JSON parse error | Validate with `jq . <file>` before posting |
 | Queue stuck > 5min | Cancel via `DELETE /queue` on the proxy, retry once, then abort |
-| Missing node (custom node not installed) | Log the node name to `/sandbox/workspace/art/missing_nodes.txt`; use Forge instead |
+| Missing node (custom node not installed) | Log the node name to `art/missing_nodes.txt`; use Forge instead |
 
 ## Endpoint
 

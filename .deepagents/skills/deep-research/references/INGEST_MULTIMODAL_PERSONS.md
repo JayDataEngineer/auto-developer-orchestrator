@@ -225,11 +225,11 @@ voice segment). Review them manually and resolve or leave deferred.
 
 ## Implementation
 
-The strategies above are implemented in `sandbox/resolve_identities.py`. Run it
+The strategies above are implemented in `.deepagents/skills/deep-research/scripts/resolve_identities.py`. Run it
 after `close_graph_gaps.py`:
 
 ```bash
-python3 sandbox/resolve_identities.py
+python3 .deepagents/skills/deep-research/scripts/resolve_identities.py
 ```
 
 It executes all 6 steps automatically: face distributor recording, voice

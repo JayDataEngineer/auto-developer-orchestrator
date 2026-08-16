@@ -52,24 +52,24 @@ The criteria, all must pass (goals are parametric — see audit skill for SQL):
 
 ```bash
 # Full autonomous run on a corpus directory
-python3 sandbox/context_engine.py run \
+python3 .deepagents/skills/deep-research/scripts/context_engine.py run \
   --input data/<corpus_dir>/ \
   --work-dir /tmp/context-engine
 
 # Skip audio (use cached transcripts from work_dir/transcripts/) — fast iteration
-python3 sandbox/context_engine.py run \
+python3 .deepagents/skills/deep-research/scripts/context_engine.py run \
   --input data/<corpus_dir>/ \
   --work-dir /tmp/context-engine \
   --skip-audio
 
 # Override synthesis model
-python3 sandbox/context_engine.py run \
+python3 .deepagents/skills/deep-research/scripts/context_engine.py run \
   --input data/<corpus_dir>/ \
   --work-dir /tmp/context-engine \
   --model anthropic/claude-3.5-sonnet
 ```
 
-Run `python3 sandbox/context_engine.py --help` to see all flags.
+Run `python3 .deepagents/skills/deep-research/scripts/context_engine.py --help` to see all flags.
 
 ## Output artifacts (in work_dir/)
 
@@ -123,8 +123,8 @@ The auditor role should watch for:
 
 ## Files
 
-- `sandbox/context_engine.py` — main orchestrator
-- `sandbox/audio_client.py` — per-file audio processing
-- `sandbox/entity_extract.py` — LLM-based entity extraction
+- `.deepagents/skills/deep-research/scripts/context_engine.py` — main orchestrator
+- `.deepagents/skills/deep-research/scripts/audio_client.py` — per-file audio processing
+- `.deepagents/skills/deep-research/scripts/entity_extract.py` — LLM-based entity extraction
 - SurrealDB MCP server (`surreal_*`) — knowledge graph store
 - `sandbox/<format>_parser.py` — one parser per supported ingest format; `--help` lists flags + edge cases

@@ -25,8 +25,8 @@ Getting API credentials:
   6. Run: python3 session.py --setup-credentials 12345 abcdef phone_here
 
 Files written:
-  /sandbox/workspace/data/.telegram-credentials.json   # api_id, api_hash, phone
-  /sandbox/workspace/data/.telegram-session.session    # Telethon SQLite session (auth state)
+  data/.telegram-credentials.json   # api_id, api_hash, phone
+  data/.telegram-session.session    # Telethon SQLite session (auth state)
 """
 import argparse
 import asyncio
@@ -109,7 +109,7 @@ def save_credentials(api_id, api_hash, phone):
         "path": str(creds_file),
         "api_id": api_id_int,
         "phone": phone,
-        "next_step": "python3 /sandbox/telegram_session.py --bootstrap",
+        "next_step": "python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --bootstrap",
     }, indent=2))
 
 
@@ -127,7 +127,7 @@ def _get_client():
     if not creds:
         print(json.dumps({
             "error": f"No credentials at {_credentials_path()}.",
-            "hint": "Run: python3 /sandbox/telegram_session.py --setup-credentials API_ID API_HASH PHONE",
+            "hint": "Run: python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --setup-credentials API_ID API_HASH PHONE",
         }))
         sys.exit(4)
 
@@ -205,14 +205,14 @@ def check_session():
         return {
             "valid": False,
             "reason": f"No credentials at {_credentials_path()}",
-            "next_step": "python3 /sandbox/telegram_session.py --setup-credentials API_ID API_HASH PHONE",
+            "next_step": "python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --setup-credentials API_ID API_HASH PHONE",
             "hint": "Get api_id + api_hash from https://my.telegram.org/apps",
         }
     if not session_exist():
         return {
             "valid": False,
             "reason": f"No session file at {_session_path()}",
-            "next_step": "python3 /sandbox/telegram_session.py --bootstrap",
+            "next_step": "python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --bootstrap",
         }
 
     client, _ = _get_client()
@@ -223,7 +223,7 @@ def check_session():
                 "valid": False,
                 "reason": "Session file exists but Telegram no longer recognizes it. "
                           "Session may have been revoked.",
-                "next_step": "python3 /sandbox/telegram_session.py --bootstrap",
+                "next_step": "python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --bootstrap",
             }
         me = client.get_me()
         return {

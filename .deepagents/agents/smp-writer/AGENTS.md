@@ -24,7 +24,7 @@ The CTO's task string carries:
 
 1. **Read research if present.**
    ```bash
-   cat /sandbox/workspace/data/research.json 2>/dev/null || echo "no research"
+   cat data/research.json 2>/dev/null || echo "no research"
    ```
    Note topics, top posts, gaps. Don't copy — find angles nobody has
    covered yet.

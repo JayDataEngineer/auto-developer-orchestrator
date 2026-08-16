@@ -151,7 +151,7 @@ surreal_query(sql="RETURN count(SELECT id FROM person WHERE count(<-appears_in<-
 runs this INDEPENDENTLY — never trusts the synthesizer's own grounding check.
 
 ```
-python3 sandbox/grounding_check.py check \
+python3 .deepagents/skills/deep-research/scripts/grounding_check.py check \
   --report artifacts/brief.md \
   --corpus data/<source-dir>,artifacts/<run>
 ```

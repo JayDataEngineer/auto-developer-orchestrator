@@ -19,9 +19,9 @@ import librosa
 from sklearn.cluster import HDBSCAN
 
 AUDIO_DIR = Path(os.environ.get("AUDIO_DIR",
-    "/sandbox/workspace/data/telegram-dump/ChatExport_2026-03-13/extracted_audio"))
+    "data/telegram-dump/ChatExport_2026-03-13/extracted_audio"))
 RUN_DIR = Path(os.environ.get("RUN_DIR",
-    "/sandbox/workspace/profiles/specialists/deep-research-engine/artifacts/run-2026-07-12"))
+    "artifacts/run-2026-07-12"))
 
 _encoder = None
 def encoder():

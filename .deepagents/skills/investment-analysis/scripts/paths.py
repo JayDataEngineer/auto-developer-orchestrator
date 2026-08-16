@@ -1,8 +1,7 @@
 """Path discovery for invest org sandbox scripts.
 
 Auto-discovers all paths relative to this file's location, so scripts work:
-  - On host: invoked as `python3 sandbox/X.py` from project root, or with absolute paths
-  - In Docker sandbox: invoked as `python3 /sandbox/X.py` (legacy mount layout still works)
+  - From the workspace root: `python3 .deepagents/skills/investment-analysis/scripts/X.py`
 
 Env overrides (all optional):
   INVEST_PROJECT_DIR  default = parent of sandbox/ dir
@@ -21,11 +20,12 @@ Usage in a sibling script:
 from __future__ import annotations
 import os
 
-# This file lives at <project>/sandbox/paths.py
+# This file lives at .deepagents/skills/investment-analysis/scripts/paths.py
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Project root is the parent of sandbox/
-_PROJECT_FROM_SCRIPT = os.path.dirname(SCRIPT_DIR)
+# Workspace root: four levels up from this script's dir (skill -> skills ->
+# .deepagents -> repo root)
+_PROJECT_FROM_SCRIPT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(SCRIPT_DIR))))
 
 # Project dir: env override wins, else derived from script location.
 # Special case: if running inside /sandbox/ (Docker mount), PROJECT_DIR is /workspace.

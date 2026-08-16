@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CompreFace face recognition client for Pux sandbox workers.
+"""CompreFace face recognition client for the deep-research pipeline.
 
 Standalone CLI — face recognition via CompreFace REST API.
 No DRE engine dependencies.
@@ -18,10 +18,10 @@ Environment:
                            Caddy routes /api/v1/* → compreface-api:8080.
                            To bypass Caddy, set this to http://localhost:8001
                            with `ports:` published directly.
-    COMPREFACE_API_KEY    (required — bootstrap.sh writes this to .env.local after setup)
+    COMPREFACE_API_KEY    (required — export it, or put it in .env.local)
 
 CompreFace is part of the deep-research-engine docker-compose.yml stack.
-Run `./bootstrap.sh` to bring it up and run first-time setup automatically.
+CompreFace must be up and COMPREFACE_API_KEY exported (or in .env.local).
 """
 
 import argparse
@@ -40,7 +40,7 @@ def get_api_key():
     if not key:
         print(
             "ERROR: COMPREFACE_API_KEY not set.\n"
-            "Run `./bootstrap.sh` from the repo root — it writes the API key to .env.local "
+            "Export COMPREFACE_API_KEY (or put it in .env.local) "
             "after first-time CompreFace setup.\n"
             "Or set it manually if you already have one: export COMPREFACE_API_KEY=<key>",
             file=sys.stderr,
@@ -415,7 +415,7 @@ def cmd_cluster(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="CompreFace face recognition client for Pux sandbox")
+    parser = argparse.ArgumentParser(description="CompreFace face recognition client for the deep-research pipeline")
     sub = parser.add_subparsers(dest="command")
 
     p = sub.add_parser("recognize", help="Recognize faces in an image")

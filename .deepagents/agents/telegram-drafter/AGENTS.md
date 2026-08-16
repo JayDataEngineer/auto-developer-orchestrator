@@ -23,21 +23,21 @@ The CTO's task string carries:
 
 1. **Verify session.**
    ```bash
-   python3 /sandbox/telegram_session.py --check
+   python3 .deepagents/skills/telegram-automation/scripts/telegram_session.py --check
    ```
    If `valid: false`, return an error — do not try to bootstrap. The
    CTO/operator handles auth.
 
 2. **Read context.** Pull recent messages from the target chat:
    ```bash
-   python3 /sandbox/telegram_helpers.py read-messages \
+   python3 .deepagents/skills/telegram-automation/scripts/telegram_helpers.py read-messages \
      --chat "<chat name>" --limit 30
    ```
    For `reply`, also pull the specific message you're responding to (the
    CTO should pass its text or link in the task). For `proactive`, the
    last 10-15 messages set the tone — match the chat's vibe.
 
-3. **Draft.** Write 1-3 distinct drafts to `/sandbox/workspace/data/draft.md`.
+3. **Draft.** Write 1-3 distinct drafts to `data/draft.md`.
    Each draft:
    - Matches the chat's tone (formal channel vs casual DM vs Saved
      Messages note-to-self).
@@ -110,4 +110,4 @@ The CTO's task string carries:
 
 Your final message: the draft file path + a one-line summary
 (`wrote N drafts for <chat> (action), tones: ...`). The CTO reads
-`/sandbox/workspace/data/draft.md` for the drafts.
+`data/draft.md` for the drafts.

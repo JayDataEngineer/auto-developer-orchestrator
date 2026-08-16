@@ -4,10 +4,10 @@ How to scrape Twitter/X using the injected cookie session.
 
 ## Session Bootstrap (one-time)
 
-If `/sandbox/.twitter-session.json` does NOT exist, pull cookies from the host browser:
+If `data/.twitter-session.json` does NOT exist, pull cookies from the host browser:
 
 ```bash
-python3 /sandbox/twitter_session.py --cookies-from-browser chrome
+python3 .deepagents/skills/twitter-automation/scripts/twitter_session.py --cookies-from-browser chrome
 # or: --cookies-from-browser brave, firefox, firefox:Personal
 ```
 
@@ -17,13 +17,13 @@ This uses the yt-dlp pattern (`browser_cookie3` lib) to extract x.com cookies.
 
 ```python
 import json
-with open("/sandbox/.twitter-session.json") as f:
+with open("data/.twitter-session.json") as f:
     cookies = json.load(f)
 
 # Then via browser tools:
 # 1. browse_to({url: "https://x.com"})
 # 2. For each cookie: set_cookie({name: ..., value: ..., domain: ".x.com", ...})
-# Or use restore_session({path: "/sandbox/.twitter-session.json"})
+# Or use restore_session({path: "data/.twitter-session.json"})
 ```
 
 ## Verify Auth Worked
@@ -59,7 +59,7 @@ When a tweet has an image:
 
 ## Helper Library
 
-`sandbox/twitter_helpers.py` provides:
+`.deepagents/skills/twitter-automation/scripts/twitter_helpers.py` provides:
 - `twitter_session()` — context manager with pre-injected cookies
 - `read_tweets(limit=20)` — read timeline tweets
 - `is_logged_in()` — boolean check
@@ -67,4 +67,4 @@ When a tweet has an image:
 
 ## Output Format
 
-Always write to `/sandbox/workspace/research/twitter.json` (bind-mounted to host for review). See twitter-researcher role prompt for the schema.
+Always write to `research/twitter.json` (bind-mounted to host for review). See twitter-researcher role prompt for the schema.

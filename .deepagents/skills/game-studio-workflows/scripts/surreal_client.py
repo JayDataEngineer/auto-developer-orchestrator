@@ -56,7 +56,7 @@ try:
     import requests
 except ImportError:
     print(json.dumps({
-        "error": "requests not installed. Add 'requests' to pux.yaml pip_packages.",
+        "error": "requests not installed. pip install requests.",
     }))
     sys.exit(3)
 
@@ -429,20 +429,15 @@ def _load_schema_sql() -> str:
     """Prefer org's prompts/surreal_schema.sql over the inline fallback.
 
     Resolution order:
-      1. $PUX_ORG_PATH/prompts/surreal_schema.sql  (if --org was used)
-      2. ../profiles/deep-research-engine/prompts/surreal_schema.sql  (dev install)
-      3. Inline SCHEMA_SQL constant (always available)
+      1. $SCHEMA_SQL_PATH (explicit override)
+      2. Inline SCHEMA_SQL constant (always available)
     """
     from pathlib import Path
 
     candidates = []
-    env_org = os.environ.get("PUX_ORG_PATH")
-    if env_org:
-        candidates.append(Path(env_org) / "prompts" / "surreal_schema.sql")
-    try:
-        candidates.append(Path(__file__).resolve().parents[2] / "profiles" / "deep-research-engine" / "prompts" / "surreal_schema.sql")
-    except IndexError:
-        pass
+    env_schema = os.environ.get("SCHEMA_SQL_PATH")
+    if env_schema:
+        candidates.append(Path(env_schema))
 
     for p in candidates:
         if p.is_file():
