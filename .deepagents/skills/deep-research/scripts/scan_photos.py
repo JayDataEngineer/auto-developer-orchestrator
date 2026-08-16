@@ -6,7 +6,7 @@ descriptions for any people visible, and saves results incrementally. Designed
 to be resumable — if interrupted, re-run picks up where it left off.
 
 Usage:
-    python3 scripts/scan_photos.py [--batch-size 1] [--rate-limit 0.5]
+    python3 .deepagents/skills/deep-research/scripts/scan_photos.py [--batch-size 1] [--rate-limit 0.5]
 
 Output:
     artifacts/run-2026-07-23/photo_scan_results.jsonl   (incremental)
@@ -24,7 +24,7 @@ from pathlib import Path
 from openai import OpenAI
 
 # ── Config ──────────────────────────────────────────────────────────────────
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[4]
 PHOTO_DIR = REPO / "data/telegram-dump/ChatExport_2026-03-13/photos"
 OUTPUT_JSONL = REPO / "artifacts/run-2026-07-23/photo_scan_results.jsonl"
 OUTPUT_REPORT = REPO / "artifacts/run-2026-07-23/photo_scan_report.md"
@@ -268,7 +268,7 @@ def main():
             time.sleep(args.rate_limit)
 
     print(f"\nDone. Results: {OUTPUT_JSONL}")
-    print(f"Run `python3 scripts/photo_scan_report.py` to generate the summary.")
+    print(f"Run `python3 .deepagents/skills/deep-research/scripts/photo_scan_report.py` to generate the summary.")
 
 
 if __name__ == "__main__":

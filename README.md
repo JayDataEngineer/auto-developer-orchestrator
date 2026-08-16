@@ -47,8 +47,7 @@ MCP servers and scripts consume.
 | Path | What |
 |------|------|
 | `.deepagents/` | the authored dcode surface (agents, skills, workspace instructions) |
-| `.mcp.json` | MCP servers (env placeholders like `${PUX_MCP_WEB_RESEARCH_URL}` resolve from the environment) |
-| `scripts/` | one-off host utilities (e.g. `preprocess_pipeline.py`, referenced by the deep-research skill) |
+| `.mcp.json` | MCP servers (env placeholders like `${MCP_WEB_RESEARCH_URL}` resolve from the environment) |
 | `infra/` | MCP-server infrastructure (media-mcp, nitter) + compose files |
 | `docs/` | engineering history (thin-architecture mandate, retired prod list) |
 

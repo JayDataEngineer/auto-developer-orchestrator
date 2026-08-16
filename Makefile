@@ -59,7 +59,7 @@ infra-destroy: ## Stop infra AND wipe data volumes (irreversible)
 # ── Misc ────────────────────────────────────────────────────────────────────
 
 hooks: ## Install pre-commit hooks (gitleaks secret scan)
-	bash scripts/setup-hooks.sh
+	bash .github/hooks/install.sh
 
 clean: ## Remove Python caches + .pyc files
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

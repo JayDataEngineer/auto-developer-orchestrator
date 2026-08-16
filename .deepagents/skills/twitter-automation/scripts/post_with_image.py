@@ -11,6 +11,10 @@ IMAGE_PATH = str(Path(__file__).resolve().parent.parent / "data" / "staged" / "n
 CAPTION = "To live is to suffer, to survive is to find some meaning in the suffering."
 
 
+def _ensure_dbgdir():
+    Path("/tmp/twitter-debug").mkdir(parents=True, exist_ok=True)
+
+
 def main():
     if not os.path.exists(IMAGE_PATH):
         print(json.dumps({"error": f"Image not found at {IMAGE_PATH}"}))
@@ -67,7 +71,7 @@ def main():
         print("  Compose page loaded")
 
         # Take screenshot for debug
-        sb.save_screenshot("scripts/debug_compose.png")
+        sb.save_screenshot("/tmp/twitter-debug/debug_compose.png")
         print("  Debug screenshot saved")
 
         print("Step 5: Uploading image...")
@@ -95,14 +99,14 @@ def main():
                 print("  Uploaded via media button!")
             except Exception as e2:
                 print(f"  Media button also failed: {e2}")
-                sb.save_screenshot("scripts/upload_fail.png")
+                sb.save_screenshot("/tmp/twitter-debug/upload_fail.png")
                 sys.exit(1)
 
         print("  Waiting for upload to complete...")
         time.sleep(5)
 
         # Take screenshot to see if image uploaded
-        sb.save_screenshot("scripts/after_image_upload.png")
+        sb.save_screenshot("/tmp/twitter-debug/after_image_upload.png")
         print("  Post-upload screenshot saved")
 
         print("Step 6: Typing caption...")
@@ -122,7 +126,7 @@ def main():
                 print(f"  Typed {len(CAPTION)} chars via role=textbox")
             except Exception as e2:
                 print(f"  ERROR: {e2}")
-                sb.save_screenshot("scripts/type_fail.png")
+                sb.save_screenshot("/tmp/twitter-debug/type_fail.png")
                 sys.exit(1)
 
         time.sleep(2)
@@ -141,7 +145,7 @@ def main():
 
         if not posted:
             print("  ERROR: Could not find Post button")
-            sb.save_screenshot("scripts/post_btn_fail.png")
+            sb.save_screenshot("/tmp/twitter-debug/post_btn_fail.png")
             sys.exit(1)
 
         print("  Waiting for post to process...")

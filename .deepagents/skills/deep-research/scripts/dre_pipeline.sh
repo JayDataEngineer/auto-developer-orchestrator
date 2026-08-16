@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# scripts/dre_pipeline.sh — THE ONE COMMAND.
+# deep-research dre_pipeline.sh — THE ONE COMMAND.
 #
 # Full DRE pipeline: raw Telegram export → intelligence report + audit.
 # Deterministic (code) + LLM (agent) stages chained into a single invocation.
 #
 # Usage:
-#   scripts/dre_pipeline.sh data/telegram-dump/ChatExport_2026-03-13
-#   scripts/dre_pipeline.sh                          # uses $DATA_DIR env
-#   scripts/dre_pipeline.sh --skip-preprocess <dir>  # DB already ingested
+#   .deepagents/skills/deep-research/scripts/dre_pipeline.sh data/telegram-dump/ChatExport_2026-03-13
+#   dre_pipeline.sh                                   # uses $DATA_DIR env
+#   dre_pipeline.sh --skip-preprocess <dir>           # DB already ingested
 #
 # Output: artifacts/run-YYYY-MM-DD/{brief.md, audit_report.md, entities/}
 set -euo pipefail
@@ -59,7 +59,7 @@ echo "[infra] SurrealDB OK"
 if [[ "$SKIP_PREPROCESS" -eq 0 ]]; then
     echo ""
     echo "══ Step 0: Deterministic preprocessing ══════════════════════"
-    python3 scripts/preprocess_pipeline.py --data "$DATA_DIR" --run-dir "$RUN_DIR"
+    python3 "$(dirname "$0")/preprocess_pipeline.py" --data "$DATA_DIR" --run-dir "$RUN_DIR"
 else
     echo "[step 0] SKIPPED (--skip-preprocess)"
 fi

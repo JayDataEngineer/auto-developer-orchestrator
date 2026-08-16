@@ -77,5 +77,6 @@ specialist could do; Path 3 for everything.
 
 - Domain scripts (research pipeline, investing, game studio, telegram/twitter
   sessions, media clients) — inside the owning skill's `scripts/` dir.
-- One-off host-side utilities — `scripts/` at the repo root.
+- One-off host utilities — co-located in the owning skill's `scripts/` dir
+  (e.g. the photo/face scan one-offs sit with deep-research).
 - MCP server infrastructure (media-mcp and friends) — `infra/`.

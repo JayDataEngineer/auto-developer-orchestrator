@@ -58,19 +58,6 @@ artifacts/
 **/walkthrough_progress.json
 **/INVEST-TRACKER.md
 
-# Test artifacts
-playwright-report/
-test-results/
-
-# Reference repos (cloned, not tracked)
-reference/
-
-# Sandbox / projects
-projects/
-
-# Browser-test cruft (one-off artifacts from Selenium/xdotool runs)
-downloaded_files/
-form.html
 
 # Orphan venvs (root .venv/ is covered above; this catches siblings)
 .venv-*/

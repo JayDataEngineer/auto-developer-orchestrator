@@ -1,8 +1,7 @@
 # pre-commit hooks for Auto-Developer Orchestrator
 #
-# Install:    task hooks   (or: pre-commit install)
-# Run manual: task scan-secrets
-# Baseline:   task scan-secrets-baseline   (regenerate after intentional additions)
+# Install:    make hooks   (or: pre-commit install)
+# Manual run: pre-commit run --all-files
 #
 # First run of pre-commit will compile gitleaks from source (language: golang).
 # Cached afterwards. To skip on a specific commit: git commit --no-verify
@@ -15,5 +14,4 @@ repos:
       - id: gitleaks
         args:
           - --config=.gitleaks.toml
-          - --baseline-path=.gitleaks-baseline.json
           - --redact

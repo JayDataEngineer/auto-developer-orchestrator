@@ -12,7 +12,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history — baseline lookup needs commit SHAs
 
       - name: Install gitleaks
         run: |
@@ -32,12 +31,11 @@ jobs:
             --redact \
             --no-banner
 
-      - name: Scan pushed commits (with baseline) for new secrets
+      - name: Scan pushed commits for new secrets
         if: github.event_name != 'pull_request'
         run: |
           gitleaks detect \
             --source . \
             --config .gitleaks.toml \
-            --baseline-path .gitleaks-baseline.json \
             --redact \
             --no-banner

@@ -408,7 +408,7 @@ def step_parse(data_dir: Path, run_dir: Path):
             progress(f"  parse: items.json exists ({existing['stats']['total']} items), skip")
             return
 
-    parser = Path(__file__).parent.parent / ".deepagents/skills/deep-research/scripts/telegram_parser.py"
+    parser = Path(__file__).resolve().parent / "telegram_parser.py"
     if not parser.exists():
         progress(f"  parse: parser not found at {parser}, skipping")
         return

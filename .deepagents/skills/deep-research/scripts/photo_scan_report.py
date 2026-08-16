@@ -5,14 +5,14 @@ Cross-references detected faces against known physical descriptions and
 produces a sorted, ranked identification sheet.
 
 Usage:
-    python3 scripts/photo_scan_report.py
+    python3 .deepagents/skills/deep-research/scripts/photo_scan_report.py
 """
 import json
 import re
 from collections import defaultdict
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[4]
 INPUT = REPO / "artifacts/run-2026-07-23/photo_scan_results.jsonl"
 OUTPUT = REPO / "artifacts/run-2026-07-23/photo_scan_report.md"
 
