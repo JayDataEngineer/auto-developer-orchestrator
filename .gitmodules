@@ -1,0 +1,3 @@
+[submodule "infra/media-mcp"]
+	path = infra/media-mcp
+	url = https://github.com/JayDataEngineer/media-mcp.git
