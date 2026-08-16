@@ -132,14 +132,26 @@ on, by design:
 |------|------|-----|-----|
 | heavy/untrusted tools | **remote AP + OpenSandbox** (Aegra async subagent, browser in a container) | browser-specialist | 42 tool schemas never enter a session; Chrome/captcha stack runs in a sandbox with no credentials and no host reach |
 | repo work | **standard dcode subagent** (in-process) | coder, reviewer, explorer, all `.deepagents/agents/*` | millisecond file I/O, local git state, direct rg/AST loops — an RPC boundary would add a file-sync tax to every edit |
-| code execution | **sandboxed** (`dcode --sandbox opensandbox`) | any agent's execute/read/write | arbitrary commands run inside the OpenSandbox container, not on the host |
+| code execution | **sandboxed** (`dcode --sandbox opensandbox`) | every agent's execute/read/write — subagents included (proved: they share the session's sandboxed backend) | arbitrary commands run inside the OpenSandbox container, not on the host |
 
 Editing is direct; only *execution* is sandboxed; only *heavy tools* are
 remote — and when they are, their execution is sandboxed too (tier one
 stacks both). A new specialist joins the remote tier only when its tool
-schemas or attack surface justify paying the delegation round-trip; dcode's
-lack of a per-subagent `tools:`/`skills:` allowlist is the open upstream gap
-that would let the remaining tiers scope their toolsets too.
+schemas or attack surface justify paying the delegation round-trip.
+
+**The full placement rules live in
+[`docs/isolation-patterns.md`](docs/isolation-patterns.md)** — the pattern
+catalog: three sandbox tiers (S1 session / S2 on-demand via MCP / S3
+workload container), the MCP segmentation ladder (L0 workspace → L1 profile
+→ L2 server trim → L3 per-subagent `tools:` frontmatter → L4 spatial), the
+measured audit behind them (MCP inheritance is uniform: game = 50 schemas
+in all 11 subagents, docs-writer included), and the per-profile target
+state we author the day the upstream L3 PR ships. That PR — per-subagent
+`tools:`/`skills:` frontmatter for dcode — is prepared on
+`feat/subagent-tools-skills-frontmatter` in the deepagents checkout
+(E2E-proven, 12.6k tests green, not pushed); until it lands, segmentation
+below the profile level is inexpressible in dcode, and the catalog says so
+instead of pretending the persona prompts scope anything.
 
 
 ## Host-side infrastructure
