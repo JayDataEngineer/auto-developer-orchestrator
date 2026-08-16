@@ -1,23 +1,4 @@
 {
-  "agent_servers": {
-    "Pux (coder)": {
-      "type": "custom",
-      "command": "pux",
-      "args": ["acp", "--org", "coder"],
-      "env": {}
-    },
-    "Pux (general)": {
-      "type": "custom",
-      "command": "pux",
-      "args": ["acp", "--org", "general"],
-      "env": {}
-    }
-  },
-  "mcp_servers": {
-    "pux": {
-      "command": "pux",
-      "args": ["mcp", "--transport", "stdio"],
-      "env": {}
-    }
-  }
+  "agent_servers": {},
+  "mcp_servers": {}
 }

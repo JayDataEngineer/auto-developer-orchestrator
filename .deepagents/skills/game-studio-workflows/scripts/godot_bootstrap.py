@@ -2,7 +2,7 @@
 """Download headless Godot from GitHub releases into the sandbox.
 
 Resolution order: (1) ``godot`` on PATH → use it, zero download; (2) cached
-binary at /sandbox/.bin/godot → use it; (3) download the latest stable 4.x
+cached binary → use it; (3) download the latest stable 4.x
 Linux x86_64 release zip from godotengine/godot-builds, extract, chmod +x.
 
 The Godot 4.x binary is a single executable — the SAME binary runs headless
@@ -15,7 +15,7 @@ Usage:
 
 Env:
   GODOT_BOOTSTRAP_VERSION  # pin a version (default: latest stable 4.x)
-  GODOT_BOOTSTRAP_DIR      # install dir (default: /sandbox/.bin)
+  GODOT_BOOTSTRAP_DIR      # install dir (default: <repo>/.cache/godot)
 """
 from __future__ import annotations
 
@@ -132,7 +132,7 @@ def _download_and_extract(tag: str, dest_dir: Path) -> Path | None:
 def ensure_godot() -> str | None:
     """Return the path to a usable godot binary, downloading if necessary.
 
-    Resolution: PATH → cache (/sandbox/.bin) → GitHub release download.
+    Resolution: PATH → cache ($GODOT_BOOTSTRAP_DIR or <repo>/.cache/godot) → GitHub release download.
     Returns None on total failure (never raises — the caller decides what
     to do).
     """
@@ -143,7 +143,7 @@ def ensure_godot() -> str | None:
 
     dest_dir = Path(os.environ.get(
         "GODOT_BOOTSTRAP_DIR",
-        str(Path(__file__).resolve().parent.parent.parent.parent.parent / ".pux" / "godot"),
+        str(Path(__file__).resolve().parent.parent.parent.parent.parent / ".cache" / "godot"),
     ))
 
     # (2) cache hit — any Godot executable in dest_dir from a prior run

@@ -39,58 +39,17 @@ backend/orch-dev
 backend/server
 backend/tmp/
 
-# Runtime data
-# Workspace outputs (artifacts/, memos/, .pux/sessions/) are runtime state —
-# never source. The canonical way to retrieve one run's worth of work is
-# `pux bundle <thread_id>` → ./<thread_id>.tgz. The bundle output is itself
-# ignored (see Archives / backups below) so it isn't committed by accident.
+# Runtime data — sessions, credentials, caches (written by skill scripts;
+# see .deepagents/skills/*/scripts/paths.py)
 data/
-**/.pux/
+.cache/
+# Dead pux runtime state (6.8G thread-store sqlite + logs from the deleted
+# server lane). Kept on disk for the operator to reclaim manually; safe to
+# `rm -rf .pux` once nothing needs the old thread history.
+.pux/
 
-# Org runtime data (5G+ of model weights, venvs, parsed dumps, memos).
-# Org *templates* ship as AGENTS.md + agents/<slug>.md + skills/ + sandbox/ —
-# those ARE source. Use profiles/* (not profiles/) so per-org negations can win, then
-# exclude everything inside each org except the source files re-negated below.
-# General is the sole top-level org; all other orgs live under specialists/.
-profiles/*
-!profiles/general/
-# _shared is not an org (no AGENTS.md/CTO overlay; discover_orgs skips it) but
-# holds cross-org SOURCE: agents/ (e.g. researcher) + skills/ + sandbox/ +
-# clients/. Must un-ignore the parent or git won't descend into it.
-!profiles/_shared/
-# Specialists subfolder — nested orgs live here.
-!profiles/specialists/
-# Ignore everything at depth 2 inside top-level orgs (general, _shared).
-profiles/*/*
-# Un-ignore org directories inside specialists/ so git can descend into them.
-# (They were caught by profiles/*/* above.)
-!profiles/specialists/*/
-# Re-include source files/dirs at depth 2 for top-level orgs.
-!profiles/*/AGENTS.md
-!profiles/*/policy.yaml
-!profiles/*/org.yaml
-!profiles/*/profile.yaml
-!profiles/*/tool_servers.yaml
-!profiles/*/skills/
-!profiles/*/sandbox/
-!profiles/*/agents/
-!profiles/*/upstream_skills/
-# Ignore everything at depth 3 inside specialists/<org>/ (runtime data
-# directories, build outputs, etc.).
-profiles/specialists/*/*
-# Re-include source files/dirs at depth 3 for nested orgs.
-!profiles/specialists/*/AGENTS.md
-!profiles/specialists/*/policy.yaml
-!profiles/specialists/*/org.yaml
-!profiles/specialists/*/profile.yaml
-!profiles/specialists/*/Dockerfile
-!profiles/specialists/*/skills/
-!profiles/specialists/*/sandbox/
-!profiles/specialists/*/scripts/
-!profiles/specialists/*/agents/
-
-# Org-scoped runtime artifacts (article bodies, backtest outputs, parsed
-# chat dumps, memos, etc.) — written by the agent during runs, not source.
+# Run-scoped artifacts (article bodies, backtest outputs, parsed chat dumps,
+# memos, etc.) — written by agents during runs, not source.
 artifacts/
 **/artifacts/
 **/workspace/

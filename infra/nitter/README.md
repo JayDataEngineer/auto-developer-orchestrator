@@ -76,7 +76,7 @@ tailscale serve --set-path /nitter http://127.0.0.1:41730
 # Client URL: https://<node>.ts.net:10000/nitter/mcp
 ```
 
-Set `PUX_MCP_NITTER_URL=https://<node>.ts.net:10000/nitter/mcp` in the
+Set `MCP_NITTER_URL=https://<node>.ts.net:10000/nitter/mcp` in the
 orchestrator's `.env` so the `twitter-agent` org can reach it from a remote
 sandbox.
 

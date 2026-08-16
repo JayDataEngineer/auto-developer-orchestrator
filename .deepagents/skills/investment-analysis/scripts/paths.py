@@ -1,10 +1,10 @@
-"""Path discovery for invest org sandbox scripts.
+"""Path discovery for the investment-analysis skill scripts.
 
 Auto-discovers all paths relative to this file's location, so scripts work:
   - From the workspace root: `python3 .deepagents/skills/investment-analysis/scripts/X.py`
 
 Env overrides (all optional):
-  INVEST_PROJECT_DIR  default = parent of sandbox/ dir
+  INVEST_PROJECT_DIR  default = the workspace (repo) root
   INVEST_DATA_DIR     default = $PROJECT_DIR/data
   INVEST_CONFIG_DIR   default = $PROJECT_DIR/config
   INVEST_CACHE_DIR    default = $PROJECT_DIR/.cache
@@ -28,11 +28,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_FROM_SCRIPT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(SCRIPT_DIR))))
 
 # Project dir: env override wins, else derived from script location.
-# Special case: if running inside /sandbox/ (Docker mount), PROJECT_DIR is /workspace.
-if os.path.basename(SCRIPT_DIR) == "sandbox" and SCRIPT_DIR == "/sandbox":
-    _DEFAULT_PROJECT = "/workspace"
-else:
-    _DEFAULT_PROJECT = _PROJECT_FROM_SCRIPT
+_DEFAULT_PROJECT = _PROJECT_FROM_SCRIPT
 
 PROJECT_DIR = os.environ.get("INVEST_PROJECT_DIR", _DEFAULT_PROJECT)
 
@@ -84,7 +80,7 @@ DEFAULT_WATCHLIST_CRYPTO = ["BTC", "ETH", "SOL"]
 
 
 def sibling(name: str) -> str:
-    """Return absolute path to a sibling script in the same sandbox/ dir."""
+    """Return absolute path to a sibling script in the same scripts/ dir."""
     return os.path.join(SCRIPT_DIR, name)
 
 

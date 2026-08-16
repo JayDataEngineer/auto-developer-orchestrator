@@ -72,7 +72,7 @@ from pathlib import Path
 def get_mcp_url():
     # Local media-mcp container is the default. For deployments that host the
     # MCP elsewhere (cloud, tailnet, separate host), set MEDIA_MCP_URL in the
-    # sandbox env via pux.yaml or the org's sandbox.env block. Do NOT hardcode
+    # the run environment (.env / exported vars). Do NOT hardcode
     # deployment-specific URLs here — this file is public.
     return os.environ.get(
         "MEDIA_MCP_URL",

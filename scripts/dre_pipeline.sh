@@ -35,7 +35,7 @@ DATA_DIR="$(cd "$DATA_DIR" && pwd)"
 export DATA_DIR
 
 RUN_DIR="artifacts/run-$(date +%Y-%m-%d)"
-SB="profiles/specialists/deep-research-engine/sandbox"
+SB=".deepagents/skills/deep-research/scripts"
 mkdir -p "$RUN_DIR"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
@@ -92,11 +92,7 @@ Your ONLY job now:
 This is deep research — take as many steps as needed. Do NOT write files
 anywhere except ${RUN_DIR}/."
 
-bin/pux direct \
-    --org deep-research-engine \
-    --task "$TASK" \
-    --data "$DATA_DIR" \
-    --recursion-limit 200
+dcode -n "$TASK"
 
 # --- Verify ---------------------------------------------------------------
 echo ""

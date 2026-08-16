@@ -14,20 +14,10 @@ if [ "$current_branch" = "main" ]; then
     exit 1
 fi
 
-echo "Running tests before push..."
-
-# Run the orchestrator integration suite (deepagents pivot; the TS vitest suite
-# is gone). Runs at the repo root — the workspace IS the project: folded src/,
-# profiles/ tree, and tests/ all live in this repo.
-uv run pytest -q
-TEST_RESULT=$?
-
-if [ $TEST_RESULT -ne 0 ]; then
-    echo "❌ Tests failed. Please fix them before pushing."
-    exit 1
-fi
-
-echo "✅ All tests passed. Push allowed."
+# No repo test suite — the repo is a plain dcode workspace (authored
+# .deepagents/ surface + skills; no harness code). Secret scanning runs via
+# the gitleaks pre-commit hook on commit.
+echo "✅ Pre-push checks passed. Push allowed."
 exit 0
 HOOK
 

@@ -360,8 +360,8 @@ SCHEMA_SQL = """
 -- ============================================================================
 -- Deep Research Org — SurrealDB Context Engine Schema (v2)
 -- ============================================================================
--- Canonical source: profiles/deep-research-engine/prompts/surreal_schema.sql
--- Loaded by init_schema() via _load_schema_sql() with this as fallback.
+-- This inline copy IS the canonical schema (loaded by init_schema(); an
+-- external file can override via $SCHEMA_SQL_PATH).
 -- ============================================================================
 
 -- --- Entities -----------------------------------------------------------
@@ -426,7 +426,7 @@ DEFINE INDEX IF NOT EXISTS idx_task_run_status ON task_run FIELDS status;
 
 
 def _load_schema_sql() -> str:
-    """Prefer org's prompts/surreal_schema.sql over the inline fallback.
+    """Prefer $SCHEMA_SQL_PATH over the inline schema.
 
     Resolution order:
       1. $SCHEMA_SQL_PATH (explicit override)

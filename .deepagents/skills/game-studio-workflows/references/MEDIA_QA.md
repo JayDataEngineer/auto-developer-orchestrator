@@ -2,7 +2,7 @@
 
 How to use the media MCP server (media-mcp) to vibe-check gameplay screenshots, QA generated art, and batch-process playtest captures.
 
-The `media` server comes from the shared catalog (`profiles/_shared/tool_servers.yaml`) and is NOT armed by default — the org must declare `{kind: mcp, ref: media}` in its org.yaml. Its tools surface as `media_*` (analyze_image, detect_objects, tag_image, classify_nsfw, etc.).
+The `media` server is NOT armed by default — add it to `.mcp.json` (HTTP, `http://localhost:8101/mcp`) to arm it. Its tools surface as `media_*` (analyze_image, detect_objects, tag_image, classify_nsfw, etc.).
 
 ## Vibe Report Format
 

@@ -1,5 +1,0 @@
-# No subagents. The CTO uses the web_research MCP tools directly:
-# search, fetch, research.
-agents: []
-capabilities:
-  - {kind: mcp, ref: web_research}

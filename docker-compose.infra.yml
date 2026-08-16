@@ -153,7 +153,7 @@ services:
     ports:
       # 127.0.0.1-only by default. Operators expose via Tailscale Serve
       # (`tailscale serve --set-path /nitter http://127.0.0.1:41730`) and
-      # point sandbox clients at PUX_MCP_NITTER_URL. Don't put authenticated
+      # point sandbox clients at MCP_NITTER_URL. Don't put authenticated
       # Twitter read access on a public interface by default.
       - "127.0.0.1:41730:41730"
     volumes:

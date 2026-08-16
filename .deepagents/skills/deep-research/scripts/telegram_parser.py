@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Telegram export parser for Pux sandbox workers.
+"""Telegram export parser (standalone CLI).
 
 Standalone CLI — parses Telegram JSON and HTML exports into unified items.
 No DRE engine dependencies.

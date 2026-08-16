@@ -35,7 +35,7 @@ except ImportError:
 def load_cookies() -> list[dict]:
     """Load saved Twitter cookies. Returns [] if no session file.
 
-    Run `python3 /sandbox/session.py --cookies-from-browser brave` first
+    Run `python3 .deepagents/skills/twitter-automation/scripts/twitter_session.py --cookies-from-browser brave` first
     if this returns empty — that pulls fresh cookies from the host browser.
     """
     if _cookies_path is None:
@@ -89,7 +89,7 @@ def twitter_session(headless: bool = True, wait_seconds: int = 3) -> Generator:
         cookies_file = _cookies_path() if _cookies_path else "unknown"
         raise RuntimeError(
             f"No Twitter session at {cookies_file}. "
-            f"Run: python3 /sandbox/session.py --cookies-from-browser brave"
+            f"Run: python3 .deepagents/skills/twitter-automation/scripts/twitter_session.py --cookies-from-browser brave"
         )
 
     with SB(uc=True, headless=headless) as sb:
@@ -115,7 +115,7 @@ def twitter_session(headless: bool = True, wait_seconds: int = 3) -> Generator:
         if not any(c["name"] == "auth_token" for c in cookies if c.get("name") == "auth_token"):
             raise RuntimeError(
                 "auth_token missing from saved cookies — session is invalid. "
-                "Re-run: python3 /sandbox/session.py --cookies-from-browser brave"
+                "Re-run: python3 .deepagents/skills/twitter-automation/scripts/twitter_session.py --cookies-from-browser brave"
             )
 
         yield sb

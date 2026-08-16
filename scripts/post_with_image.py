@@ -3,10 +3,11 @@
 import json
 import os
 import sys
+from pathlib import Path
 import time
 
-COOKIE_PATH = "/sandbox/workspace/data/.twitter-session.json"
-IMAGE_PATH = "/sandbox/workspace/data/staged/nietzsche.jpg"
+COOKIE_PATH = str(Path(__file__).resolve().parent.parent / "data" / ".twitter-session.json")
+IMAGE_PATH = str(Path(__file__).resolve().parent.parent / "data" / "staged" / "nietzsche.jpg")
 CAPTION = "To live is to suffer, to survive is to find some meaning in the suffering."
 
 
@@ -66,7 +67,7 @@ def main():
         print("  Compose page loaded")
 
         # Take screenshot for debug
-        sb.save_screenshot("/sandbox/workspace/scripts/debug_compose.png")
+        sb.save_screenshot("scripts/debug_compose.png")
         print("  Debug screenshot saved")
 
         print("Step 5: Uploading image...")
@@ -94,14 +95,14 @@ def main():
                 print("  Uploaded via media button!")
             except Exception as e2:
                 print(f"  Media button also failed: {e2}")
-                sb.save_screenshot("/sandbox/workspace/scripts/upload_fail.png")
+                sb.save_screenshot("scripts/upload_fail.png")
                 sys.exit(1)
 
         print("  Waiting for upload to complete...")
         time.sleep(5)
 
         # Take screenshot to see if image uploaded
-        sb.save_screenshot("/sandbox/workspace/scripts/after_image_upload.png")
+        sb.save_screenshot("scripts/after_image_upload.png")
         print("  Post-upload screenshot saved")
 
         print("Step 6: Typing caption...")
@@ -121,7 +122,7 @@ def main():
                 print(f"  Typed {len(CAPTION)} chars via role=textbox")
             except Exception as e2:
                 print(f"  ERROR: {e2}")
-                sb.save_screenshot("/sandbox/workspace/scripts/type_fail.png")
+                sb.save_screenshot("scripts/type_fail.png")
                 sys.exit(1)
 
         time.sleep(2)
@@ -140,7 +141,7 @@ def main():
 
         if not posted:
             print("  ERROR: Could not find Post button")
-            sb.save_screenshot("/sandbox/workspace/scripts/post_btn_fail.png")
+            sb.save_screenshot("scripts/post_btn_fail.png")
             sys.exit(1)
 
         print("  Waiting for post to process...")

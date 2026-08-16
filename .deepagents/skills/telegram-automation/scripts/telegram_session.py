@@ -119,7 +119,7 @@ def _get_client():
         from telethon import TelegramClient
     except ImportError:
         print(json.dumps({
-            "error": "telethon not installed. Add 'telethon' to pux.yaml pip_packages.",
+            "error": "telethon not installed. pip install telethon in this environment.",
         }))
         sys.exit(3)
 

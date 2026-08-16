@@ -33,7 +33,7 @@ Embeddings are L2-normalized 512-d vectors. Cosine similarity > 0.5 typically me
 
 For URLs the sandbox can't directly serve (local files), upload via the `upload` tool or run a tiny HTTP server in the sandbox:
 ```bash
-cd /sandbox/workspace && python3 -m http.server 9876 &
+python3 -m http.server 9876 &
 # Then reference files as http://localhost:9876/path/to/photo.jpg
 ```
 

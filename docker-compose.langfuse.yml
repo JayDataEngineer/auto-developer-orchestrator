@@ -191,10 +191,10 @@ services:
       # --- Bootstrap admin + project (created on first boot) ---
       LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_EMAIL:-admin@example.com}
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_PASSWORD:-admin123}
-      LANGFUSE_INIT_ORG_ID: pux
+      LANGFUSE_INIT_ORG_ID: orchestrator
       LANGFUSE_INIT_ORG_NAME: "Pux"
-      LANGFUSE_INIT_PROJECT_ID: pux-threads
-      LANGFUSE_INIT_PROJECT_NAME: "pux-threads"
+      LANGFUSE_INIT_PROJECT_ID: orchestrator-threads
+      LANGFUSE_INIT_PROJECT_NAME: "orchestrator-threads"
       LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-init-public}
       LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-init-secret}
     healthcheck:

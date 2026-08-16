@@ -4,7 +4,7 @@ The pdf-ingestor's checklist. A skill reference — read it when ingesting PDFs.
 
 ## Tool reference
 
-PDFs are extracted via shell tools (`pdftotext`, `pdfinfo`, `pdftoppm`) + Python (`pypdf`, `pymupdf`) + media-mcp for OCR. media-mcp tools surface as `media_*` only when the org declares the media server (`{kind: mcp, ref: media}` in org.yaml) — check your tool list for the exact names. The OCR-flavored tool is what you want for scanned pages; the caption/tagging-flavored tools are for figures and charts.
+PDFs are extracted via shell tools (`pdftotext`, `pdfinfo`, `pdftoppm`) + Python (`pypdf`, `pymupdf`) + media-mcp for OCR. media-mcp tools surface as `media_*` only when the media server is armed in `.mcp.json` (HTTP, http://localhost:8101/mcp; started by `make infra`) — check your tool list for the exact names. The OCR-flavored tool is what you want for scanned pages; the caption/tagging-flavored tools are for figures and charts.
 
 | Tool | When | Install |
 |---|---|---|

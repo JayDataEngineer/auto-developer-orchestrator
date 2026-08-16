@@ -22,8 +22,8 @@ import urllib.request
 from pathlib import Path
 
 MCP_URL = os.environ.get("MEDIA_MCP_URL", "http://host.docker.internal:8101").rstrip("/")
-PHOTOS_DIR = Path(os.environ.get("PHOTOS_DIR", "/sandbox/workspace/data/telegram-dump/ChatExport_2026-03-13/photos"))
-RUN_DIR = Path(os.environ.get("RUN_DIR", "/sandbox/workspace/profiles/specialists/deep-research-engine/artifacts/run-2026-07-12"))
+PHOTOS_DIR = Path(os.environ.get("PHOTOS_DIR", str(Path(__file__).resolve().parent.parent / "data" / "telegram-dump" / "ChatExport_2026-03-13" / "photos")))
+RUN_DIR = Path(os.environ.get("RUN_DIR", "artifacts/run-2026-07-12"))
 RUN_DIR.mkdir(parents=True, exist_ok=True)
 
 EMB_OUT = RUN_DIR / "face_embeddings.json"

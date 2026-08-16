@@ -2,7 +2,7 @@
   "mcpServers": {
     "web_research": {
       "type": "http",
-      "url": "${PUX_MCP_WEB_RESEARCH_URL}",
+      "url": "${MCP_WEB_RESEARCH_URL}",
       "allowedTools": [
         "search",
         "fetch",
@@ -14,7 +14,7 @@
       "args": [
         "exec",
         "-i",
-        "${PUX_SANDBOX_CONTAINER}",
+        "${SANDBOX_CONTAINER}",
         "mc_browser.py"
       ]
     },
@@ -29,11 +29,11 @@
     },
     "surreal": {
       "type": "http",
-      "url": "${PUX_MCP_SURREAL_URL}",
+      "url": "${MCP_SURREAL_URL}",
       "headers": {
         "surreal-ns": "research",
         "surreal-db": "main",
-        "Authorization": "Basic ${PUX_MCP_SURREAL_AUTH}"
+        "Authorization": "Basic ${MCP_SURREAL_AUTH}"
       }
     },
     "godot-mcp-runtime": {
@@ -48,7 +48,7 @@
     },
     "ray_inference": {
       "type": "http",
-      "url": "${PUX_MCP_RAY_URL}",
+      "url": "${MCP_RAY_URL}",
       "allowedTools": [
         "list_models",
         "describe_model",
@@ -65,11 +65,11 @@
     },
     "equibles": {
       "type": "http",
-      "url": "${PUX_MCP_EQUIBLES_URL}"
+      "url": "${MCP_EQUIBLES_URL}"
     },
     "nitter": {
       "type": "http",
-      "url": "${PUX_MCP_NITTER_URL}"
+      "url": "${MCP_NITTER_URL}"
     }
   }
 }

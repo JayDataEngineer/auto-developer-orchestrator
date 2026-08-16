@@ -103,7 +103,7 @@ def build_output(labels, metadata, model_name):
 
 def main():
     run_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(
-        "profiles/specialists/deep-research-engine/artifacts/run-2026-07-23")
+        "artifacts/run-2026-07-23")
     face_threshold = float(sys.argv[2]) if len(sys.argv) > 2 else 0.50
     voice_threshold = float(sys.argv[3]) if len(sys.argv) > 3 else 0.30
 

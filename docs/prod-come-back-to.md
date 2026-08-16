@@ -28,10 +28,11 @@ there is no cutover because there is no hand-rolled app.
 
 ## P4 — Rework the Export lane → MDA project structure (task #16) — SUPERSEDED
 
-The export lane died with the harness. The surviving packaging story is
-**marketplace emission**: `pux compile --marketplace` (`src/plugins/marketplace.py`)
-emits each org as an installable dcode plugin plus the marketplace catalog —
-portable orgs are *installed*, not exported to a Managed Deep Agents project.
+The export lane died with the harness, and the interim marketplace-emission
+successor (`pux compile --marketplace`, `src/plugins/marketplace.py`) died in
+turn with the 2026-08-16 strip — plugin packaging was machinery too. If
+portability is ever needed again, the dcode-native answer is shipping the
+authored `.deepagents/` skills/agents directories themselves.
 The MDA shape (`agent.py` + `instructions.md` + `tools/` + `middleware/` +
 `connectors/mcp.*`), the `mda dev`/`mda deploy` consumer path, and the level (c)
 dynamic-tools half (agent-authored `lib/`, `oras` OCI, gitleaks/ruff/uv,
@@ -56,9 +57,7 @@ streamed a proper `TEXT_MESSAGE_START`→`CONTENT`→`END` lifecycle. The
 
 The langgraph-api/k3s deployment lane retired with the server lane: no
 `langgraph build` OCI image, no multi-org `langgraph.json` deployment, no
-sqlite→Postgres cutover. Model configuration is now dcode's own
-`_get_default_model_spec()` (`src/run.py`) reading the operator's deepagents
-config — the old multi-provider k8s Secrets wiring (ZAI `glm-5.2` / OpenRouter
+sqlite→Postgres cutover. Model configuration is dcode's own (`~/.deepagents/config.toml`) — the old multi-provider k8s Secrets wiring (ZAI `glm-5.2` / OpenRouter
 `mimo`) is historical.
 
 ---

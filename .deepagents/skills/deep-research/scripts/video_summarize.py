@@ -27,7 +27,7 @@ MEDIA_URL = os.environ.get("MEDIA_MCP_URL", "http://localhost:8101/mcp").rstrip(
 VIDEO_DIR = Path(os.environ.get("VIDEO_DIR",
     "data/telegram-dump/Raw_ChatExport_2026-03-13/video_files"))
 RUN_DIR = Path(os.environ.get("RUN_DIR",
-    "profiles/specialists/deep-research-engine/artifacts/run-2026-07-12"))
+    "artifacts/run-2026-07-12"))
 SURREALDB_URL = os.environ.get("SURREALDB_URL", "")
 SURREALDB_NS = os.environ.get("SURREALDB_NS", "research")
 SURREALDB_DB = os.environ.get("SURREALDB_DB", "main")

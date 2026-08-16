@@ -5,7 +5,7 @@ Does NOT post, like, or follow anything.
 import json
 import sys
 
-sys.path.insert(0, "/sandbox/workspace/profiles/_shared/sandbox")
+sys.path.insert(0, ".deepagents/skills/twitter-automation/scripts")
 
 from twitter_helpers import twitter_session, is_logged_in  # noqa: E402
 

@@ -1,11 +1,13 @@
 # Thin Architecture — The Simplification Mandate
 
-> **Status:** ACTIVE DECISION (2026-08-03) — **EXECUTED by the 2026-08 fold.**
-> The workspace is now a dcode workspace: the graph builder is deepagents'
-> `create_deep_agent` (`src/run.py`), the TUI is dcode's `run_textual_app`, the
-> compiler is `src/` (`src/compiler/`, `src/profiles/`, `src/plugins/`), and
-> every bespoke engine layer is gone. The principles below are the governing
-> philosophy; post-fold verdicts are annotated where the decision changed.
+> **Status:** ACTIVE DECISION (2026-08-03) — **SUPERSEDED AND COMPLETED by the
+> 2026-08-16 strip.** The repo now contains *zero* harness code: `src/`
+> (compiler, launcher, middlewares, tool registry), `profiles/`, and `tests/`
+> are deleted. dcode — the globally installed CLI — IS the harness: it loads
+> the authored `.deepagents/` surface (agents, skills) and `.mcp.json` itself.
+> The launch command is `dcode`, nothing else. The principles below are the
+> governing philosophy; post-strip verdicts are annotated where the decision
+> changed again after the fold.
 
 ## The Decision
 
@@ -70,41 +72,42 @@ making a game with AI assistance.
 
 | Component | Why It Stays | Post-fold (2026-08) |
 |-----------|-------------|---------------------|
-| Docker sandbox | Isolated execution — upstream doesn't provide this | **RETIRED** — the backend is deepagents' `LocalShellBackend` (`src/sandbox/local.py`), host fs, no container |
+| Docker sandbox | Isolated execution — upstream doesn't provide this | **RETIRED** — host fs via dcode's own backend; the repo carries no backend code |
 | SurrealDB integration | Shared state across agents and sessions | unchanged (external — game infra, not repo code) |
 | godot-mcp bridge | Godot editor control — game-specific, no upstream equivalent | survives as an MCP server the game-studio org declares |
 | ACP (Agent Client Protocol) | UI-to-runtime separation — enables CopilotKit | **moved upstream** — the repo serves no ACP of its own; the surface is `deepagents-acp` |
 | CopilotKit export | Web UI for visual creative work — text interfaces can't do game dev | **RETIRED** with the server lane; the TUI is dcode's own `run_textual_app` |
-| Pux harness | The deepagents graph builder + CLI — this IS the thin wrapper | `src/` — the compiler (`src/compiler/`) + launch (`src/run.py`); CLI `pux` = exactly `sync`/`check`/`compile` (`src/compiler/cli.py`) |
+| Pux harness | The deepagents graph builder + CLI — this IS the thin wrapper | **DELETED** — even the thin wrapper was machinery dcode already ships; the repo authors `.deepagents/` + `.mcp.json`, dcode runs them |
 
 ## What Gets Stripped (Bloat Replaced by Upstream or Deleted) — all done
 
 | Component | Replacement | Status |
 |-----------|-------------|--------|
-| Custom agent orchestration | deepagents graphs (the upstream pattern) | done — `src/run.py` `build_org_agent` → `create_deep_agent` |
-| 200-line CTO overlay prompts | 20-line thin agent definitions | done — the profiles tree IS the definitions (`profiles/`) |
+| Custom agent orchestration | deepagents graphs (the upstream pattern) | done — dcode's own graph builder; no `src/` remains |
+| 200-line CTO overlay prompts | 20-line thin agent definitions | done — the authored `.deepagents/agents/<name>/AGENTS.md` files ARE the definitions |
 | Preloaded skill system | On-demand skill loading by task type | done — deepagents `SkillsMiddleware` (name+description only; body via `read_file`) |
 | Custom TUI (TOAD) | CopilotKit web UI | **changed** — the TUI is dcode's `run_textual_app` (upstream, not bespoke) |
 | Bespoke delegation protocol | deepagents task() delegation | done |
 | Accumulated "improvements" from 8 months | Deletion. The model doesn't need them. | done — the 2026-08 fold |
 | Forge API client | Ray's `/v1/run` via MCP tool wrapper | done — Ray MCP server |
-| Hardcoded model knowledge | Ray's `/v1/form-spec` — schema discovery | done; model config for the launch itself is dcode's `_get_default_model_spec()` |
+| Hardcoded model knowledge | Ray's `/v1/form-spec` — schema discovery | done; model config lives in `~/.deepagents/config.toml` (dcode's own) |
 
 ## The Target Stack — post-fold reality
 
 ```
-dcode TUI (run_textual_app) — the editor surface
-  └── deepagents graph (create_deep_agent — src/run.py build_org_agent)
-      ├── Supervisor (org CTO — profiles/<org>/AGENTS.md chain)
-      ├── Subagents (profiles/<org>/agents/*.md — native SubAgent dicts)
-      └── Middleware: [rubric] (src/middlewares/rubric.py)
+dcode (globally installed CLI — the harness, the TUI, the graph)
+  └── deepagents graph (dcode's own create_deep_agent)
+      ├── Main agent (root AGENTS.md + .deepagents/AGENTS.md appended)
+      ├── Subagents (.deepagents/agents/<name>/AGENTS.md — 30 specialists)
+      ├── Skills (.deepagents/skills/ — on-demand, name+description index)
+      └── Rubrics (folded into agent files as "## Quality bar" sections)
           │
           ▼
 MCP Tools (self-describing — schema from Ray form-spec)
-  ├── Ray MCP (generate_image / audio / video / 3D → /v1/run)
-  ├── godot-mcp (scenes, GDScript)
-  ├── sandbox_browser (in-container SeleniumBase — browser/eval)
-  └── web-research (search/fetch)
+  ├── ray_inference (generate_image / audio / video / 3D → /v1/run)
+  ├── godot-mcp-runtime (scenes, GDScript)
+  ├── sandbox_browser (in-container mc_browser.py — browser/eval)
+  └── web_research (search/fetch/research)
       │
       ▼
 Ray (inference engine — localhost:33080)
@@ -174,7 +177,7 @@ loops are what turn "static assets flying everywhere" into a polished game.
 
 ### Phase 1: Build Thin (alongside Pux — no stripping yet) ✅ EXECUTED
 - [x] MCP wrapper: Ray form-spec → MCP tool
-- [x] Thin agent definitions: deepagents graphs from `profiles/` (loaders → native `SubAgent`s)
+- [x] Thin agent definitions: `.deepagents/agents/<name>/AGENTS.md` (dcode loads them natively)
 - [x] Skill index: on-demand loading by task type
 - [x] CopilotKit components → **changed**: the TUI is dcode's `run_textual_app`
 
@@ -188,6 +191,9 @@ loops are what turn "static assets flying everywhere" into a polished game.
 - [x] Delete bloated agent prompts (replace with 20-line defs) — the profiles tree
 - [x] Delete preloaded skill system — deepagents `SkillsMiddleware` on-demand
 - [x] Keep: godot-mcp, sandbox_browser — MCP servers; Docker sandbox/SurrealDB/ACP/CopilotKit per the What-Stays verdicts above
+- [x] **The 2026-08-16 strip (final)**: `src/`, `profiles/`, `tests/`, the
+      `pux` CLI, and every emitted-surface indirection deleted — the repo
+      authors `.deepagents/` + `.mcp.json` directly; dcode is the only runtime
 
 ## The Bet
 
@@ -202,7 +208,8 @@ Stop building platform. Start making the game.
 
 ## Related Documents
 
-- `profiles/specialists/game-studio/AGENTS.md` — the thin org definition (post-fold)
-- `profiles/specialists/game-studio/skills/` — on-demand skills
+- `.deepagents/AGENTS.md` — the workspace instructions (the distilled org overlay)
+- `.deepagents/agents/` — the 30 thin specialist definitions
+- `.deepagents/skills/game-studio-workflows/` — on-demand game-studio skills
 - Ray repo `game-assets/PLAN.md` — the inference + pipeline layer (proven)
 - Ray repo `game-assets/skills/` — skill docs that agents consume on-demand

@@ -1,3 +1,0 @@
-# Read-only filesystem explorer. No sandbox deps, no browser, no network.
-# Subagent-only (invoked by the supervisor) — no client surface of its own.
-jobs: []

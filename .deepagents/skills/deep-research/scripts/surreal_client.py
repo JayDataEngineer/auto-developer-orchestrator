@@ -22,7 +22,7 @@ graph operation the DRE pipeline needs:
   relate        — create a graph edge between two records (idempotent)
 
 The agent NEVER calls this script directly. The declared tools in tools.yaml
-(pux_sandbox_surreal_query, pux_sandbox_surreal_save_items, etc.) exec this
+(the surreal_query / surreal_save_items tool wrappers) exec this
 script in-container with typed args. The agent calls the tool by name.
 
 ENV (injected by harness policy.yaml sandbox.env):

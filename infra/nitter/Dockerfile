@@ -2,7 +2,7 @@
 # Nitter MCP — read-only Twitter via direct GraphQL (twscrape).
 #
 # Single-service, stateless_http=True. Pairs with the orchestrator's MCP
-# tool catalog (profiles/_shared/tool_servers.yaml → nitter entry).
+# tool catalog (.mcp.json → nitter entry).
 #
 # Build:
 #   docker build -t orchestrator-nitter-mcp:latest infra/nitter/

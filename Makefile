@@ -1,23 +1,16 @@
-# auto-developer-orchestrator — developer commands.
+# auto-developer-orchestrator — a plain dcode workspace.
 #
-# The repo IS a dcode workspace: profiles/ projects onto dcode's native surface
-# via src/ (the compiler + src/run.py). First time setup:
-#   uv sync              # deepagents 0.7.5 + deepagents-code 0.1.55 (dcode's own pins)
-#   make infra           # start SurrealDB + media-mcp (host-side services)
-#
-# After that, any org works:
-#   uv run python src/run.py --org deep-research-engine --dry-run
-#   uv run pux compile --org coder --out /tmp/staging
+# The runtime IS dcode: run `dcode` in the repo. Host-side services:
+#   make infra           # SurrealDB (:8000) + media-mcp (:8101)
+#   make infra-core      # SurrealDB only (lighter)
 #
 # GPU media-mcp (optional, faster ASR/vision):
 #   MEDIA_DEVICE=cuda TORCH_VARIANT=cu124 make infra
 #
-# Remote infra (NOT managed here — game-studio only, bring your own GPU box):
+# Remote infra (NOT managed here — bring your own GPU box):
 #   Ray cluster on Tailscale — LLM, TTS, 3D, music, ComfyUI.
 
-.PHONY: help infra infra-core infra-embeddings \
-        infra-status infra-down infra-destroy infra-logs \
-        test clean
+.PHONY: help infra infra-core infra-status infra-down infra-destroy infra-logs hooks clean
 
 INFRA_COMPOSE := docker compose -f docker-compose.infra.yml
 
@@ -36,7 +29,7 @@ infra: ## Start SurrealDB + media-mcp (host-side services)
 	@echo "SurrealDB at http://localhost:8000 (root:root, MCP at /mcp)"
 	@echo "media-mcp at http://localhost:8101"
 	@echo ""
-	@echo "Infra is up. Run any org: uv run python src/run.py --org deep-research-engine --dry-run"
+	@echo "Infra is up. Run: dcode"
 
 infra-core: ## Start SurrealDB only (lighter — skip media-mcp)
 	$(INFRA_COMPOSE) up -d surrealdb
@@ -59,14 +52,11 @@ infra-destroy: ## Stop infra AND wipe data volumes (irreversible)
 	$(INFRA_COMPOSE) down -v
 	@echo "Data volumes wiped. Next 'make infra' starts fresh."
 
-# ── Tests ───────────────────────────────────────────────────────────────────
-
-test: ## Run the full test suite (no live/E2E tests)
-	uv run pytest -q
-
 # ── Misc ────────────────────────────────────────────────────────────────────
+
+hooks: ## Install pre-commit hooks (gitleaks secret scan)
+	bash scripts/setup-hooks.sh
 
 clean: ## Remove Python caches + .pyc files
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -name "*.pyc" -delete 2>/dev/null || true
-	rm -rf .pytest_cache .mypy_cache 2>/dev/null || true

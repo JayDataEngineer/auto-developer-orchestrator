@@ -12,7 +12,7 @@ management, autoloads, and more. This is the SINGLE Godot surface.
 finds Godot via `GODOT_PATH` (env var). The resolution is:
 
 1. Godot on PATH → use it, zero download.
-2. Cached binary at `.pux/godot/` → use it.
+2. Cached binary at `.cache/godot/` → use it.
 3. Download latest stable 4.x from `godotengine/godot-builds` GitHub releases.
 
 The `godot_bootstrap.py` script (run by the `host_setup` hook in
