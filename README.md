@@ -162,6 +162,7 @@ make infra                  # SurrealDB (:8000) + media-mcp (:8101)
 make infra-core             # SurrealDB only
 make infra-nitter           # nitter-mcp (:41730, read-only Twitter)
 make infra-equibles         # Equibles financial terminal (:43181, self-hosted from vendor/mcp/equibles-mcp)
+make qwen                   # local Qwen3.8-27B server (:8388, llama.cpp on the 4090 — see qwen/)
 make aegra-sandbox-image    # browser-specialist workload image (once)
 make aegra                  # browser-specialist deployment (Aegra :2026)
 ```
@@ -173,6 +174,7 @@ make aegra                  # browser-specialist deployment (Aegra :2026)
 | **nitter-mcp** | `localhost:41730` | twitter reads (opt-in: `make infra-nitter`; needs accounts in `infra/nitter/.env`) — built from `infra/nitter/` |
 | **Equibles** | `localhost:43181` | invest/research financial data (SEC, 13F, insiders, congress, FRED, prices) — self-hosted upstream stack (`make infra-equibles`, from `~/Documents/programs/vendor/mcp/equibles-mcp`); the whole deployment — URLs, ports, the meta-mcp catalog of sibling servers — lives in that folder |
 | **Aegra** | `localhost:2026` | the isolated browser-specialist subagent (own Postgres on 5433; browser itself in an OpenSandbox container) — see below |
+| **Local Qwen** | `localhost:8388` | any session as `-M local-qwen:qwen3.8-27b` — llama.cpp on the 4090, isolated handle in `qwen/` (needs `make qwen`) |
 
 Remote services (Ray cluster, Forge, ComfyUI, CompreFace) are bring-your-own;
 the skills name the env vars they read. `.env.example` documents the keys the

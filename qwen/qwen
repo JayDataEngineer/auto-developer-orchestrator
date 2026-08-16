@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# qwen — this repo's isolated handle on the local Qwen3.8-27B server.
+#
+# Reuses the manager from ~/.claude/setup/qwen/qwen-server.sh verbatim (one
+# source of truth — no fork); isolation comes entirely from the env contract:
+#   QWEN_PORT       8388 (8080 belongs to the OpenSandbox server here)
+#   QWEN_CACHE_DIR  qwen/state/ (gitignored) — clients, locks, state.json,
+#                   server.log live HERE, never in ~/.cache/claude-qwen
+#   QWEN_LLAMA_BIN  the existing shared build (never rebuilt for this repo)
+# The 20 GB GGUF stays at /mnt/data/models — nothing is duplicated.
+#
+# Subcommands pass straight through to the manager:
+#   ensure | status | stop [--force] | stop-if-idle | client-add <pid> |
+#   client-remove <pid> | prune | live-clients | download-model |
+#   install-llama | fit
+#
+# GPU contract (the manager's, unchanged): ComfyUI weights are freed via
+# POST /free (server stays alive); if that is not enough the mode stops the
+# ComfyUI container and ALWAYS restarts it; if still not enough it fails
+# loud naming the holding PIDs — it never kills anything but its own
+# llama-server. One llama-server fits the 4090: do not run claude-qwen
+# (port 8080) and this (8388) at the same time.
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+export QWEN_PORT="${QWEN_PORT:-8388}"
+export QWEN_CACHE_DIR="${QWEN_CACHE_DIR:-$HERE/state}"
+export QWEN_LLAMA_BIN="${QWEN_LLAMA_BIN:-$HOME/.cache/claude-qwen/llama.cpp/build/bin/llama-server}"
+exec bash "$HOME/.claude/setup/qwen/qwen-server.sh" "$@"

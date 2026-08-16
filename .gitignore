@@ -112,3 +112,6 @@ deployments/*/.venv/
 
 # browser-specialist: the persisted OpenSandbox workload id
 deployments/browser-specialist/.sandbox_id
+
+# qwen/: local-model runtime state (clients, locks, state.json, server.log)
+qwen/state/

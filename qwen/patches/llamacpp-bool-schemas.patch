@@ -1,0 +1,22 @@
+diff --git a/common/json-schema-to-grammar.cpp b/common/json-schema-to-grammar.cpp
+index b18607c..c698ab3 100644
+--- a/common/json-schema-to-grammar.cpp
++++ b/common/json-schema-to-grammar.cpp
+@@ -841,6 +841,17 @@ public:
+         std::string schema_format = schema.contains("format") ? schema["format"].get<std::string>() : "";
+         std::string rule_name = is_reserved_name(name) ? name + "-" : name.empty() ? "root" : name;
+ 
++        if (schema.is_boolean()) {
++            if (schema.get<bool>()) {
++                // Boolean schema `true` accepts any value (equivalent to {}).
++                return _add_rule(rule_name, _add_primitive("value", PRIMITIVE_RULES.at("value")));
++            }
++            // Boolean schema `false` accepts nothing; GBNF has no unsatisfiable
++            // production, so fail loudly rather than emit a wrong grammar.
++            _errors.push_back("Boolean schema `false` accepts no value: " + schema.dump());
++            return "";
++        }
++
+         if (schema.contains("$ref")) {
+             return _add_rule(rule_name, _resolve_ref(schema["$ref"]));
+         }
