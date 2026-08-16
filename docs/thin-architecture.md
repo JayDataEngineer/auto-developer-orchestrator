@@ -106,7 +106,7 @@ dcode (globally installed CLI — the harness, the TUI, the graph)
 MCP Tools (self-describing — schema from Ray form-spec)
   ├── ray_inference (generate_image / audio / video / 3D → /v1/run)
   ├── godot-mcp-runtime (scenes, GDScript)
-  ├── sandbox_browser (in-container mc_browser.py — browser/eval)
+  ├── opensandbox (upstream sandbox platform MCP — command/filesystem/code-interpreter, browser/desktop)
   └── web_research (search/fetch/research)
       │
       ▼
@@ -190,7 +190,7 @@ loops are what turn "static assets flying everywhere" into a polished game.
 - [x] Delete bespoke orchestration — gone at the 2026-08 fold
 - [x] Delete bloated agent prompts (replace with 20-line defs) — the profiles tree
 - [x] Delete preloaded skill system — deepagents `SkillsMiddleware` on-demand
-- [x] Keep: godot-mcp, sandbox_browser — MCP servers; Docker sandbox/SurrealDB/ACP/CopilotKit per the What-Stays verdicts above
+- [x] Keep: godot-mcp, opensandbox — MCP servers; OpenSandbox platform/SurrealDB/ACP/CopilotKit per the What-Stays verdicts above
 - [x] **The 2026-08-16 strip (final)**: `src/`, `profiles/`, `tests/`, the
       `pux` CLI, and every emitted-surface indirection deleted — the repo
       authors `.deepagents/` + `.mcp.json` directly; dcode is the only runtime

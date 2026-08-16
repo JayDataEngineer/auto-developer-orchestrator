@@ -9,6 +9,15 @@
         "research"
       ]
     },
+    "opensandbox": {
+      "command": "opensandbox-mcp",
+      "args": [
+        "--domain",
+        "localhost:8080",
+        "--protocol",
+        "http"
+      ]
+    },
     "github": {
       "command": "github-mcp-server",
       "args": [

@@ -12,10 +12,10 @@ no Redis dep, faster than HTML scraping.
 | Path | Tool | Used for |
 |---|---|---|
 | **Read (this server)** | `mcp__nitter__*` | bulk reads: search, list tweets, replies, following lists |
-| **Write (browser MCP)** | `mcp__sandbox_browser__*` | post tweet, like, RT, follow, reply |
+| **Write (browser MCP)** | `mcp__opensandbox__*` | post tweet, like, RT, follow, reply (sandbox with a browser environment) |
 
 The CTO at the `twitter-agent` org has both armed. Typical flow: pull
-engagement candidates with `nitter` tools, act on them with `sandbox_browser`.
+engagement candidates with `nitter` tools, act on them with `opensandbox`.
 
 ## Tool surface (10 tools)
 

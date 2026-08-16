@@ -10,7 +10,7 @@
 # Remote infra (NOT managed here — bring your own GPU box):
 #   Ray cluster on Tailscale — LLM, TTS, 3D, music, ComfyUI.
 
-.PHONY: help infra infra-core infra-nitter infra-status infra-down infra-destroy infra-logs hooks clean
+.PHONY: help infra infra-core infra-nitter infra-status infra-down infra-destroy infra-logs hooks clean sandbox-config sandbox sandbox-status sandbox-stop
 
 INFRA_COMPOSE := docker compose -f docker-compose.infra.yml
 
@@ -55,6 +55,42 @@ infra-down: ## Stop infra (data volumes preserved)
 infra-destroy: ## Stop infra AND wipe data volumes (irreversible)
 	$(INFRA_COMPOSE) down -v
 	@echo "Data volumes wiped. Next 'make infra' starts fresh."
+
+# ── Sandbox (upstream OpenSandbox platform) ───────────────────────────────────
+# No handrolled container. The OpenSandbox server (uv tool opensandbox-server)
+# runs the Docker runtime on localhost:8080; dcode reaches it via the
+# opensandbox MCP server (uv tool opensandbox-mcp, pinned mcp<2 — upstream
+# 0.1.1 imports mcp.server.fastmcp, which mcp 2.x moved out). Insecure mode
+# (no API key) is intentional for the local single-user box.
+#   osb sandbox create --image python:3.12   # the upstream CLI, if you want it
+
+SANDBOX_CONFIG ?= $(HOME)/.sandbox.toml
+SANDBOX_PIDFILE ?= $(HOME)/.opensandbox/server.pid
+SANDBOX_LOGFILE ?= $(HOME)/.opensandbox/server.log
+
+sandbox-config: ## Generate ~/.sandbox.toml from the docker-runtime example (once)
+	opensandbox-server init-config $(SANDBOX_CONFIG) --example docker
+
+sandbox: ## Start the OpenSandbox server (docker runtime, http://localhost:8080)
+	@if python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/openapi.json', timeout=2)" 2>/dev/null; then \
+		echo "OpenSandbox server already running (localhost:8080)"; \
+	else \
+		mkdir -p $(HOME)/.opensandbox; \
+		OPENSANDBOX_INSECURE_SERVER=YES nohup opensandbox-server --config $(SANDBOX_CONFIG) \
+			>> $(SANDBOX_LOGFILE) 2>&1 & echo $$! > $(SANDBOX_PIDFILE); \
+		sleep 1; echo "OpenSandbox server started (pid $$(cat $(SANDBOX_PIDFILE))), log: $(SANDBOX_LOGFILE)"; \
+	fi
+
+sandbox-status: ## Health-check the OpenSandbox server (:8080)
+	@python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/openapi.json', timeout=3); print('OpenSandbox server UP (localhost:8080)')" \
+		|| (echo "OpenSandbox server DOWN — run: make sandbox"; exit 1)
+
+sandbox-stop: ## Stop the OpenSandbox server
+	@if [ -f $(SANDBOX_PIDFILE) ] && kill -0 $$(cat $(SANDBOX_PIDFILE)) 2>/dev/null; then \
+		kill $$(cat $(SANDBOX_PIDFILE)) && rm -f $(SANDBOX_PIDFILE) && echo "OpenSandbox server stopped"; \
+	else \
+		echo "No OpenSandbox server running (nothing to stop)"; rm -f $(SANDBOX_PIDFILE); \
+	fi
 
 # ── Misc ────────────────────────────────────────────────────────────────────
 
