@@ -27,13 +27,24 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
-from deepagents import HarnessProfileConfig, register_harness_profile
+from deepagents import (
+    HarnessProfileConfig,
+    ProviderProfile,
+    register_harness_profile,
+    register_provider_profile,
+)
 
 _PROFILES_DIR = Path(__file__).parent / "profiles"
 
 
 def register() -> None:
     """Register every shipped YAML profile (entry-point target, zero-arg).
+
+    Each file registers a harness profile (``excluded_tools``) under its
+    ``key`` and, optionally, a provider profile for the same key
+    (``provider.init_kwargs``) — used here to override deepagents' built-in
+    OpenAI Responses-API default for models served by chat-completions-only
+    gateways.
 
     Raises on malformed files — the caller (deepagents' profile bootstrap)
     isolates the failure per-plugin, and ``make scoping-check`` fails loudly
@@ -45,4 +56,7 @@ def register() -> None:
             msg = f"{yaml_path.name}: expected 'key' and 'excluded_tools' fields"
             raise ValueError(msg)
         key = data.pop("key")
+        provider = data.pop("provider", None)
+        if isinstance(provider, dict) and isinstance(provider.get("init_kwargs"), dict):
+            register_provider_profile(key, ProviderProfile(init_kwargs=provider["init_kwargs"]))
         register_harness_profile(key, HarnessProfileConfig.from_dict(data))

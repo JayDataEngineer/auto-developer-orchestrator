@@ -17,6 +17,12 @@
 # enumeration source: live resolve, .mcp.json trims, in-repo source,
 # the Equibles C# checkout, or the official github docker image.
 key: openai:glm-5-turbo
+# Provider override for this exact model key (deepagents' built-in openai
+# provider profile would default use_responses_api=True; the z.ai gateway
+# serves chat completions only — /v4/responses 404s).
+provider:
+  init_kwargs:
+    use_responses_api: false
 excluded_tools:
   # equibles (62) — live dcode resolve
   - equibles_CompareFinancialFact

@@ -281,10 +281,14 @@ dcode plugin list                         # shows enabled state
   profile registered by `plugins/tool-scoping` strips every MCP tool from
   exactly those subagents (see docs/isolation-patterns.md, L2.5). The
   `openai:` prefix resolves against the same z.ai gateway as the main
-  model via `OPENAI_BASE_URL`/`OPENAI_API_KEY` in `.env`; after a dcode
+  model via `OPENAI_BASE_URL`/`OPENAI_API_KEY` in `.env` (the plugin also
+  pins the gateway's chat-completions-only behavior for that exact model
+  key, overriding the built-in Responses-API default); after a dcode
   upgrade, reinstall both plugins:
   `uv pip install --python "$(uv tool dir)/deepagents-code/bin/python" ./plugins/opensandbox ./plugins/tool-scoping`
-  and run `make scoping-check`.
+  and run `make scoping-check` (structural tripwire) or
+  `make scoping-e2e` (behavioral — real turns + a live MCP round trip,
+  spends tokens).
 
 ## History
 

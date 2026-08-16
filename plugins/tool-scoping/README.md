@@ -16,6 +16,13 @@ before the upstream `tools:` frontmatter PR lands.
   asserts each scoped agent's effective MCP set is empty, that unscoped
   agents carry no exclusion middleware, and warns on declared-but-empty
   servers.
+- The same registration also pins a **provider profile** for the exact key:
+  deepagents' built-in `openai` provider profile defaults
+  `use_responses_api=True`, but the z.ai gateway serves chat completions
+  only (`/v4/responses` 404s) — the exact-model registration wins the
+  merge and forces chat completions for `openai:glm-5-turbo` alone, leaving
+  every other `openai:*` spec untouched. The override lives in the YAML
+  (`provider.init_kwargs`), declared next to the exclusion list it serves.
 
 Install (this is a Python entry-point plugin, not a `dcode plugin install`
 marketplace item — the marketplace carries skills, this needs the tool
@@ -43,6 +50,13 @@ rostered**: `game-studio-docs-writer`, `task-planner` (game + coding),
 `web-agent` (coding; its browser work rides the browser-specialist async
 subagent, which is middleware, not MCP). `web-search` deliberately stays
 unscoped — research needs its web_research tools.
+
+`make scoping-e2e` (`profiles/scoping_e2e.py`) is the behavioral proof —
+real model turns with hostile prompts (scoped agents answer
+`NO-MCP-TOOLS`, a `bind_tools` spy shows zero MCP names ever bound to the
+scoped model), plus the unscoped control: the same session's main agent
+executes a live MCP round trip. It spends real tokens; run it when the
+bridge changes.
 
 Full mechanics, limits (fail-open, model-keyed, `general-purpose` hole,
 `equibles` uncovered) and the retirement plan live in

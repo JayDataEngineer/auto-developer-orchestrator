@@ -93,6 +93,13 @@ addressable *today* through frontmatter — no patches:
   web_research 3, ray 11, nitter 10 — captured live, from `.mcp.json`
   trims, from in-repo source, from the Equibles C# checkout, or via a
   docker stdio handshake).
+- The same registration pins a **provider profile** for the exact model
+  key: deepagents' built-in `openai` provider profile defaults
+  `use_responses_api=True`, and the z.ai gateway serves chat completions
+  only (the Responses-API path 404s — caught by the E2E's first run).
+  Exact-model registration wins deepagents' merge (documented override
+  seam), so `openai:glm-5-turbo` alone gets chat completions while other
+  `openai:*` specs keep the built-in default.
 - Scoped agents keep the built-ins (`execute`/`read`/`write`/`task`,
   async-task middleware) and lose **every** MCP tool. Scoped today:
   `game-studio-docs-writer`, `task-planner` (game + coding),
@@ -132,6 +139,18 @@ addressable *today* through frontmatter — no patches:
   placeholder in any `.mcp.json` (that is exactly how nitter sat at
   0 tools for days **behind a healthy container** — the URL variable was
   never set). The placeholder sweep is a hard failure, not a warn.
+- `scoping-check` proves the bridge **structurally** (specs, middleware,
+  effective sets — no model calls). `make scoping-e2e`
+  (`profiles/scoping_e2e.py`) proves it **behaviorally**, spending real
+  tokens: scoped subagents run hostile prompts ("call
+  godot-mcp-runtime_take_screenshot") and answer `NO-MCP-TOOLS`, a
+  `bind_tools` spy shows the scoped model was never offered a single MCP
+  name, and the same session's main agent executes a live MCP round trip
+  (github_get_me) as the unscoped control — so emptiness on one side and
+  63 bound names on the other is attributable to the bridge, not to a
+  broken session. A credential-rejected round trip still proves the
+  transport but WARNs loudly (it also means `GITHUB_TOKEN` needs
+  rotation).
 
 **Retirement:** when the upstream L3 PR lands, replace each `model:` line
 with an explicit `tools:` allowlist, delete the plugin, the `.env`
@@ -236,4 +255,5 @@ the PR's non-goals.
   server change, regenerate with
   `plugins/tool-scoping/regenerate.py` and **reinstall** (the venv holds a
   copy, not a link — editing the repo YAML alone changes nothing at
-  runtime).
+  runtime). `make scoping-e2e` for the behavioral proof when the bridge
+  itself changes (real model turns + a live MCP round trip; spends tokens).
