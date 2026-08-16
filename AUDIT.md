@@ -30,7 +30,7 @@
   `@assistant-ui/react-pi`); **rewritten** to the real CopilotKit + AG-UI wiring
   (Node BFF on :3001 → harness AG-UI on :9988/agui/<org>; browser-direct Agent
   Protocol CRUD), and the main `README.md` got a new "Web UI (`site/`)" section.
-  The 5.4 GB `orgs/specialists/video-production/.venv` (root-owned — created by
+  The 5.4 GB `profiles/specialists/video-production/.venv` (root-owned — created by
   uv-as-root inside the container, so a userland `rm` hit `Permission denied`)
   was **reclaimed via `sudo rm -rf`** (gitignored, regenerable via the policy
   `host_setup` hook; the 21 MB twitter-agent venv was left). **Bonus find from
@@ -57,7 +57,7 @@ Re-verified green after every edit batch: `uv run pytest -q` (578/6) +
    bespoke pux contract documenting deleted Go code was redundant. Recoverable via
    `git show HEAD~:CONTRACT.md` if master's frozen copy is ever needed.
 3. **"`_demo` org has an agent-resolution violation"** — FALSE. `_demo`'s
-   `researcher`/`browser` resolve via `orgs/_shared/agents/`, which the contract allows.
+   `researcher`/`browser` resolve via `profiles/_shared/agents/`, which the contract allows.
 4. **"Committed multi-GB `.venv` under orgs"** — FALSE. `git ls-files` = 0 for both;
    gitignored local cruft only (video-production's is 5.4 GB on disk — §E).
 
@@ -76,7 +76,7 @@ User chose **keep + fix + document** for `site/` and **reclaim** for the `.venv`
   (files / sandbox / `node-pty` terminal / VNC reverse-proxy), while thread/run/agent
   CRUD goes browser-direct to the Agent Protocol. The main `README.md` got a new
   "Web UI (`site/`)" section so the frontend is discoverable from the top-level docs.
-- **`orgs/specialists/video-production/.venv/`** — was 5.4 GB on disk (21 MB for
+- **`profiles/specialists/video-production/.venv/`** — was 5.4 GB on disk (21 MB for
   twitter-agent's). Gitignored, NOT shipped, regenerable via the policy `host_setup`
   uv hook. **Reclaimed via `sudo rm -rf`** — a userland `rm` hit `Permission denied`
   because the venv was created by `uv` running as root *inside* the container, so the

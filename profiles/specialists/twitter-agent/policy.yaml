@@ -1,0 +1,53 @@
+# Declarative sandbox policy for org twitter-agent.
+# Drops host networking in favor of bridge + egress allowlist for x.com.
+#
+# Cookies are extracted from Brave on the remote desktop (BRAVE_SSH_HOST in
+# .env) via brave_cookie_bridge.py — SSH to desktop, extract from flatpak
+# Brave, save session JSON. twitter_post.py injects them via SeleniumBase UC.
+# The saved session at profiles/specialists/twitter-agent/data/.twitter-session.json
+# is the fallback when the desktop is unreachable.
+
+sandbox:
+  tier: isolated
+
+# Note: scripts (twitter_post.py, paths.py, etc.) and saved session are
+# deployed to /sandbox/ via the deploy_twitter_scripts job below.
+
+egress:
+  allow:
+    # Twitter main + image CDN + API endpoints all resolve under x.com / twitter.com
+    - host: x.com
+      port: 443
+    - host: twitter.com
+      port: 443
+    - host: api.x.com
+      port: 443
+    - host: abs.twimg.com
+      port: 443
+    - host: pbs.twimg.com
+      port: 443
+
+browser:
+  cookies_env: TWITTER_COOKIES_B64
+
+# OPT-IN specialist surface for the supervisor. twitter-agent drives the
+# browser directly from the supervisor (navigate, screenshot) to draft + post
+# tweets, so it carries the browser group + media (describe_image for
+# screenshot inspection). Without this declaration the opt-in default would
+# leave the supervisor with NO specialist tools.
+tool_surface:
+  groups: [media]
+
+# Pre-run: warm the in-container SeleniumBase Chrome so the first browser tool
+# call doesn't pay the SeleniumBase CDP-attach cold start. sb_server runs in the
+# base sandbox image (supervisord priority 70); this job polls /status then hits
+# /warmup. Warn-and-continue: an unreachable sb_server is logged, not fatal.
+jobs:
+  - name: deploy_twitter_scripts
+    script: profiles/_shared/sandbox/deploy_twitter_scripts.sh
+    timeout: 15
+    description: "Deploy twitter_post.py, paths.py, and saved session to /sandbox/ so posting works without live cookie extraction"
+  - name: warmup_browser
+    script: profiles/_shared/sandbox/warmup_browser.py
+    timeout: 90
+    description: "Pre-warm the in-container SeleniumBase Chrome (sb_server /warmup) so the first browser tool call skips cold-start latency"

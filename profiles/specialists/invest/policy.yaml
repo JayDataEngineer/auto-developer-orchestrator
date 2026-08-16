@@ -1,0 +1,34 @@
+# Declarative sandbox policy for org invest.
+# Tightens prod egress to just Alpaca + FRED; injects API keys via env only.
+#
+# CU-4: foreign MCP servers (equibles, web_research) moved to org.yaml
+# ``capabilities:`` — policy ``tool_servers:`` is now a permanent contract
+# failure (no-legacy-tool-servers). Egress below unchanged.
+egress:
+  allow:
+    - host: api.alpaca.markets
+      port: 443
+    - host: data.alpaca.markets
+      port: 443
+    # FRED is hosted on fred.stlouisfed.org but the API lives on a separate host
+    # depending on which series you query. Allow the canonical API host.
+    - host: fred.stlouisfed.org
+      port: 443
+
+credentials:
+  required:
+    - ALPACA_API_KEY
+    - ALPACA_SECRET_KEY
+  optional:
+    - FRED_API_KEY
+
+# Level (c) dynamic tools — opt the agent into authoring + calling persistent
+# Python under profiles/specialists/invest/lib/ (the four pux_dyn_* tools). The rung
+# that compounds: after the org "learns" a function, later turns see only a
+# bounded result + an index entry, never the function body. See
+# docs/dynamic-tools-and-packaging.md Part 1. lib/ is gitignored (agent-authored,
+# not source); pack-inclusion is P3.
+sandbox:
+  dynamic_tools: true
+
+jobs:

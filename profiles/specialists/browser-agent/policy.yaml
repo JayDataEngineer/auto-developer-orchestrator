@@ -1,0 +1,53 @@
+# Declarative sandbox policy for org browser-agent.
+#
+# A single-browser-agent org for general web tasks. The sandbox runs an
+# in-container SeleniumBase Chrome (sb_server) that the browser agent drives
+# via the pux_sandbox_browser_* tool surface.
+#
+# Cookies:
+#   Optional pre-seed via BROWSER_COOKIES_B64 env var. The operator exports
+#   base64-encoded cookie JSON (typically from extract_browser_cookies.py):
+#
+#     export BROWSER_COOKIES_B64=$(python3 profiles/_shared/sandbox/extract_browser_cookies.py \
+#         --browser brave --domain example.com --b64)
+#
+#   The seed-cookies supervisor decodes + injects them at boot. Cookies are
+#   NOT required — the org works without them (the browser agent handles
+#   cookie consent banners on its own). Set the env var only when you need
+#   authenticated sessions.
+#
+# Egress: open (no allowlist) — a general-purpose browser org must reach any
+# site. The sandbox runs on the default isolated Docker bridge.
+
+sandbox:
+  tier: isolated
+  # Chrome + SeleniumBase + sb_server cold-start spikes well above the harness
+  # default (2 GiB). Under 2 GiB the OOM killer reaps Chrome and sb_server
+  # before they ever bind (SIGKILL, exit 137 — supervisord logs "Exited too
+  # quickly"). 4 GiB / 4 cores covers the cold-start spike with headroom;
+  # steady-state settles back under 1 GiB. Coding orgs that don't mount a
+  # browser leave this unset and inherit the lean default.
+  memory_mb: 4096
+  cpu_cores: 4.0
+
+browser:
+  cookies_env: BROWSER_COOKIES_B64
+
+# OPT-IN specialist surface for the supervisor. browser-agent's supervisor IS
+# the browser agent (agents: [] — no subagents), so it carries the browser
+# group + media (describe_image for screenshot inspection) directly. Without
+# this declaration the opt-in default would leave the supervisor with NO
+# specialist tools.
+tool_surface:
+  groups: [media]
+
+protocols:
+  - agui
+
+# Pre-run: warm the in-container SeleniumBase Chrome so the first browser tool
+# call doesn't pay the SeleniumBase CDP-attach cold start.
+jobs:
+  - name: warmup_browser
+    script: profiles/_shared/sandbox/warmup_browser.py
+    timeout: 90
+    description: "Pre-warm the in-container SeleniumBase Chrome (sb_server /warmup) so the first browser tool call skips cold-start latency"

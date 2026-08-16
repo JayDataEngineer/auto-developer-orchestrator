@@ -1,0 +1,24 @@
+extends: general
+# The base PROMPT flows from general (extends:), but coder's roster is
+# authoritative — it deliberately refuses the inherited base roster (a generic
+# researcher/browser would let the CTO delegate the thinking itself, the exact
+# anti-pattern its AGENTS.md forbids). Roster-only opt-out (D4).
+inherit_roster: false
+agents: [coder-explorer, code-worker, web-agent]
+# Roster deny-list — the contract checker enforces NO slug here appears in the
+# effective (chain-inherited) roster, AND (when ``general-purpose`` / ``general``
+# is listed) that the profile declares ``general_purpose_subagent: {enabled:
+# false}`` so deepagents' auto-add is also neutered. Data, not a hard-coded
+# ``if name == "coder"`` branch in the checker — any org can declare the same
+# focus-CTO shape by populating this field. See contract rule
+# ``roster-deny-enforced`` + ``roster-deny-disables-general-purpose``.
+roster_deny: [general, general-purpose, researcher]
+
+# CU-4: foreign MCP tool server (was policy.yaml ``tool_servers:`` — now a
+# permanent contract failure). Bare catalog ref into
+# profiles/_shared/tool_servers.yaml.
+capabilities:
+  - {kind: mcp, ref: github}
+  # web-agent e2e verification surface (migrated off the deleted browser
+  # specialist group — same capability via the native MCP path).
+  - {kind: mcp, ref: sandbox_browser}

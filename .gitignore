@@ -50,45 +50,45 @@ data/
 
 # Org runtime data (5G+ of model weights, venvs, parsed dumps, memos).
 # Org *templates* ship as AGENTS.md + agents/<slug>.md + skills/ + sandbox/ —
-# those ARE source. Use orgs/* (not orgs/) so per-org negations can win, then
+# those ARE source. Use profiles/* (not profiles/) so per-org negations can win, then
 # exclude everything inside each org except the source files re-negated below.
 # General is the sole top-level org; all other orgs live under specialists/.
-orgs/*
-!orgs/general/
+profiles/*
+!profiles/general/
 # _shared is not an org (no AGENTS.md/CTO overlay; discover_orgs skips it) but
 # holds cross-org SOURCE: agents/ (e.g. researcher) + skills/ + sandbox/ +
 # clients/. Must un-ignore the parent or git won't descend into it.
-!orgs/_shared/
+!profiles/_shared/
 # Specialists subfolder — nested orgs live here.
-!orgs/specialists/
+!profiles/specialists/
 # Ignore everything at depth 2 inside top-level orgs (general, _shared).
-orgs/*/*
+profiles/*/*
 # Un-ignore org directories inside specialists/ so git can descend into them.
-# (They were caught by orgs/*/* above.)
-!orgs/specialists/*/
+# (They were caught by profiles/*/* above.)
+!profiles/specialists/*/
 # Re-include source files/dirs at depth 2 for top-level orgs.
-!orgs/*/AGENTS.md
-!orgs/*/policy.yaml
-!orgs/*/org.yaml
-!orgs/*/profile.yaml
-!orgs/*/tool_servers.yaml
-!orgs/*/skills/
-!orgs/*/sandbox/
-!orgs/*/agents/
-!orgs/*/upstream_skills/
+!profiles/*/AGENTS.md
+!profiles/*/policy.yaml
+!profiles/*/org.yaml
+!profiles/*/profile.yaml
+!profiles/*/tool_servers.yaml
+!profiles/*/skills/
+!profiles/*/sandbox/
+!profiles/*/agents/
+!profiles/*/upstream_skills/
 # Ignore everything at depth 3 inside specialists/<org>/ (runtime data
 # directories, build outputs, etc.).
-orgs/specialists/*/*
+profiles/specialists/*/*
 # Re-include source files/dirs at depth 3 for nested orgs.
-!orgs/specialists/*/AGENTS.md
-!orgs/specialists/*/policy.yaml
-!orgs/specialists/*/org.yaml
-!orgs/specialists/*/profile.yaml
-!orgs/specialists/*/Dockerfile
-!orgs/specialists/*/skills/
-!orgs/specialists/*/sandbox/
-!orgs/specialists/*/scripts/
-!orgs/specialists/*/agents/
+!profiles/specialists/*/AGENTS.md
+!profiles/specialists/*/policy.yaml
+!profiles/specialists/*/org.yaml
+!profiles/specialists/*/profile.yaml
+!profiles/specialists/*/Dockerfile
+!profiles/specialists/*/skills/
+!profiles/specialists/*/sandbox/
+!profiles/specialists/*/scripts/
+!profiles/specialists/*/agents/
 
 # Org-scoped runtime artifacts (article bodies, backtest outputs, parsed
 # chat dumps, memos, etc.) — written by the agent during runs, not source.

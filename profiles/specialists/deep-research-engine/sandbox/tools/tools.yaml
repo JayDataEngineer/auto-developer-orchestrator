@@ -1,0 +1,512 @@
+# Declared sandbox tools for the deep-research-engine org.
+#
+# Each entry is auto-translated (pux_harness/sandbox/tools/declared.py) into a
+# typed langchain StructuredTool whose func `docker exec`s the script
+# IN-CONTAINER. The model calls `pux_sandbox_<name>(typed args)` directly
+# instead of emitting untyped `python3 sandbox/<script>.py ...` shell.
+#
+# Type vocab: string / integer / number / boolean.
+# invoke: flags (default, robust) -> --name value (boolean -> --name store_true).
+# invoke: positional -> values in declared order.
+# subcommand: optional leading positional word before args.
+# returns: text (default) | json (parse stdout as JSON).
+tools:
+  # --- entity_extract.py ----------------------------------------------------
+  - name: extract_entities
+    description: >-
+      Extract named entities (people, organizations, topics, locations,
+      dates) from text using LLM. Pass text directly with `--text` or
+      point to a file with `--input`. Returns structured JSON.
+    script: entity_extract.py
+    subcommand: extract
+    invoke: flags
+    returns: json
+    timeout: 120
+    args:
+      - name: text
+        type: string
+        required: false
+        default: ""
+        description: "Text to extract entities from"
+      - name: input
+        type: string
+        required: false
+        default: ""
+        description: "Input file path (.txt or .json)"
+      - name: field
+        type: string
+        required: false
+        default: ""
+        description: "Field name for JSON input (default: content)"
+
+  - name: batch_extract_entities
+    description: >-
+      Extract entities from a JSON array of text items. Input is a JSON
+      file path; output is written to the specified path or printed to
+      stdout.
+    script: entity_extract.py
+    subcommand: batch
+    invoke: flags
+    returns: json
+    timeout: 300
+    args:
+      - name: input
+        type: string
+        required: true
+        description: "JSON file with array of text items"
+      - name: output
+        type: string
+        required: false
+        default: ""
+        description: "Output JSON file path (default: stdout)"
+
+  # --- face_client.py -------------------------------------------------------
+  - name: recognize_face
+    description: >-
+      Recognize faces in an image using CompreFace REST API. Returns
+      matched subjects from the database with similarity scores.
+      Requires COMPREFACE_API_KEY and COMPREFACE_BASE_URL env vars.
+    script: face_client.py
+    subcommand: recognize
+    invoke: flags
+    returns: json
+    timeout: 60
+    args:
+      - name: image
+        type: string
+        required: true
+        description: "Path to image file"
+      - name: min_similarity
+        type: number
+        required: false
+        default: 0.8
+        description: "Minimum similarity threshold (default 0.8)"
+
+  - name: list_face_subjects
+    description: >-
+      List all known face subjects in the CompreFace database. Returns
+      subject names with metadata.
+    script: face_client.py
+    subcommand: list-subjects
+    invoke: flags
+    returns: json
+
+  - name: add_face_subject
+    description: >-
+      Add a known face to the CompreFace database under a subject name.
+      The subject name is used as the label for future recognitions.
+    script: face_client.py
+    subcommand: add-subject
+    invoke: flags
+    returns: json
+    args:
+      - name: name
+        type: string
+        required: true
+        description: "Person's name for the subject"
+      - name: image
+        type: string
+        required: true
+        description: "Path to face image file"
+
+  - name: delete_face_subject
+    description: >-
+      Delete a subject from the CompreFace face database. Use list
+      subjects first to find the name.
+    script: face_client.py
+    subcommand: delete-subject
+    invoke: flags
+    returns: json
+    args:
+      - name: name
+        type: string
+        required: true
+        description: "Subject name to delete"
+
+  - name: batch_recognize_faces
+    description: >-
+      Recognize faces in multiple images from a JSON file list. Returns
+      recognition results for each image.
+    script: face_client.py
+    subcommand: batch-recognize
+    invoke: flags
+    returns: json
+    timeout: 300
+    args:
+      - name: input
+        type: string
+        required: true
+        description: "JSON file with array of image paths"
+      - name: output
+        type: string
+        required: false
+        default: ""
+        description: "Output JSON file path (default: stdout)"
+      - name: min_similarity
+        type: number
+        required: false
+        default: 0.8
+        description: "Minimum similarity threshold"
+
+  - name: cluster_face_embeddings
+    description: >-
+      Cluster face embeddings into identity groups using HDBSCAN. Input
+      is a JSON file with face data (from recognize output). Returns
+      cluster assignments.
+    script: face_client.py
+    subcommand: cluster
+    invoke: flags
+    returns: json
+    timeout: 120
+    args:
+      - name: input
+        type: string
+        required: true
+        description: "JSON file with face embedding data"
+      - name: output
+        type: string
+        required: false
+        default: ""
+        description: "Output JSON file path (default: stdout)"
+      - name: min_cluster_size
+        type: integer
+        required: false
+        default: 2
+        description: "Minimum cluster size for HDBSCAN (default 2)"
+
+  # --- audio_client.py ------------------------------------------------------
+  - name: process_audio
+    description: >-
+      Full audio pipeline: transcribe (Parakeet TDT v3) + diarize (Pyannote
+      3.1) + align speaker turns. Returns transcript, speaker labels,
+      timestamps, and duration. The 'process' subcommand auto-serves the
+      audio file to the media MCP.
+    script: audio_client.py
+    subcommand: process
+    invoke: flags
+    returns: json
+    timeout: 900
+    args:
+      - name: audio
+        type: string
+        required: true
+        description: "Path to audio file (.ogg, .mp3, .wav, .flac, .m4a)"
+      - name: output
+        type: string
+        required: false
+        default: ""
+        description: "Write JSON to this path (default: stdout)"
+      - name: num_speakers
+        type: integer
+        required: false
+        default: -1
+        description: "Number of speakers (omit for auto-detect)"
+      - name: timeout
+        type: integer
+        required: false
+        default: 900
+        description: "Timeout in seconds (default 900)"
+
+  - name: transcribe_audio
+    description: >-
+      Transcribe audio only (Parakeet TDT v3) without speaker diarization.
+      Returns word-level timestamps and punctuation. Use process_audio for
+      the full pipeline with speaker labels.
+    script: audio_client.py
+    subcommand: transcribe
+    invoke: flags
+    returns: json
+    timeout: 600
+    args:
+      - name: audio
+        type: string
+        required: true
+        description: "Path to audio file"
+      - name: output
+        type: string
+        required: false
+        default: ""
+        description: "Output JSON path (default: stdout)"
+      - name: timeout
+        type: integer
+        required: false
+        default: 600
+        description: "Timeout in seconds"
+
+  - name: diarize_audio
+    description: >-
+      Speaker diarization only (Pyannote 3.1) without transcription.
+      Returns speaker segments with start/end timestamps. Use
+      process_audio for aligned transcript + speaker labels.
+    script: audio_client.py
+    subcommand: diarize
+    invoke: flags
+    returns: json
+    timeout: 600
+    args:
+      - name: audio
+        type: string
+        required: true
+        description: "Path to audio file"
+      - name: output
+        type: string
+        required: false
+        default: ""
+        description: "Output JSON path (default: stdout)"
+      - name: num_speakers
+        type: integer
+        required: false
+        default: -1
+        description: "Number of speakers (omit for auto-detect)"
+      - name: timeout
+        type: integer
+        required: false
+        default: 600
+        description: "Timeout in seconds"
+
+  - name: batch_process_audio
+    description: >-
+      Batch-process every audio file in a directory through the full
+      transcribe + diarize + align pipeline. Results written as per-file
+      JSON with a _summary.json. Requires AUDIO_HTTP_BASE to serve files.
+    script: audio_client.py
+    subcommand: batch
+    invoke: flags
+    returns: json
+    timeout: 3600
+    args:
+      - name: input
+        type: string
+        required: true
+        description: "Directory of audio files"
+      - name: output
+        type: string
+        required: true
+        description: "Output directory for per-file JSON results"
+      - name: num_speakers
+        type: integer
+        required: false
+        default: -1
+        description: "Number of speakers (omit for auto-detect)"
+      - name: timeout
+        type: integer
+        required: false
+        default: 900
+        description: "Per-file timeout in seconds"
+
+  # --- content_cluster.py ---------------------------------------------------
+  - name: cluster_content
+    description: >-
+      Group text items into thematic clusters using LLM. Input is a JSON
+      file with text items. Returns clusters with names, summaries, item
+      indices, suggested labels, and key entities.
+    script: content_cluster.py
+    subcommand: cluster
+    invoke: flags
+    returns: json
+    timeout: 300
+    args:
+      - name: input
+        type: string
+        required: true
+        description: "JSON file with text items to cluster"
+      - name: output
+        type: string
+        required: false
+        default: ""
+        description: "Output JSON file path (default: stdout)"
+      - name: existing_topics
+        type: boolean
+        required: false
+        default: false
+        description: "Query SurrealDB for existing topic names to reuse"
+
+  # --- telegram_parser.py ---------------------------------------------------
+  - name: parse_telegram_export
+    description: >-
+      Parse a Telegram JSON or HTML export directory into a unified
+      items JSON array with text content, media references, timestamps,
+      senders, and forward status.
+    script: telegram_parser.py
+    subcommand: parse
+    invoke: flags
+    returns: json
+    timeout: 120
+    args:
+      - name: input
+        type: string
+        required: true
+        description: "Path to Telegram export directory"
+      - name: output
+        type: string
+        required: false
+        default: ""
+        description: "Output JSON file path (default: stdout)"
+      - name: format
+        type: string
+        required: false
+        default: ""
+        description: "Force format: 'json' or 'html' (default: auto-detect)"
+
+  - name: telegram_export_stats
+    description: >-
+      Show statistics from a parsed Telegram export: total items, media
+      count, unique senders, orphan media files, and item type breakdown.
+    script: telegram_parser.py
+    subcommand: stats
+    invoke: flags
+    returns: json
+    args:
+      - name: input
+        type: string
+        required: true
+        description: "JSON file with parsed Telegram items"
+
+  # --- video_frames.py ------------------------------------------------------
+  - name: process_video
+    description: >-
+      Full video keyframe pipeline: ffmpeg scene-detection, face embedding
+      via media-mcp into SurrealDB, and VLM narrative. All three stages
+      in one call. Returns frame counts, face records, and narrative text.
+    script: video_frames.py
+    subcommand: process
+    invoke: flags
+    returns: json
+    timeout: 600
+    args:
+      - name: video
+        type: string
+        required: true
+        description: "Path to video file (.mp4, .webm, .avi, .mov)"
+      - name: output
+        type: string
+        required: true
+        description: "Working directory for keyframes + metadata"
+      - name: source_id
+        type: string
+        required: true
+        description: "Source identifier for SurrealDB (e.g. source:abc)"
+      - name: item_id
+        type: string
+        required: true
+        description: "Item identifier for SurrealDB (e.g. item:xyz)"
+      - name: threshold
+        type: number
+        required: false
+        default: 0.3
+        description: "Scene-change score threshold (default 0.3)"
+      - name: skip_narrate
+        type: boolean
+        required: false
+        default: false
+        description: "Skip VLM narrative stage (saves MCP calls)"
+
+  - name: extract_video_scenes
+    description: >-
+      Stage 1 of video pipeline: ffmpeg scene-detection with temporal
+      fallback. Extracts keyframe PNGs and writes parsed metadata.
+      Independent and resumable.
+    script: video_frames.py
+    subcommand: extract-scenes
+    invoke: flags
+    returns: json
+    timeout: 300
+    args:
+      - name: video
+        type: string
+        required: true
+        description: "Path to video file"
+      - name: output
+        type: string
+        required: true
+        description: "Working directory for keyframes + metadata"
+      - name: threshold
+        type: number
+        required: false
+        default: 0.3
+        description: "Scene-change score threshold (default 0.3)"
+
+  - name: analyze_video_frames
+    description: >-
+      Stage 2 of video pipeline: embed faces from extracted keyframes
+      via media-mcp and write face_appearance records to SurrealDB.
+      Requires extract-scenes to have run first.
+    script: video_frames.py
+    subcommand: analyze-frames
+    invoke: flags
+    returns: json
+    timeout: 300
+    args:
+      - name: work
+        type: string
+        required: true
+        description: "Working dir from extract-scenes stage"
+      - name: source_id
+        type: string
+        required: true
+        description: "Source identifier for SurrealDB"
+      - name: item_id
+        type: string
+        required: true
+        description: "Item identifier for SurrealDB"
+
+  - name: narrate_video
+    description: >-
+      Stage 3 of video pipeline: batched VLM call on sorted keyframes
+      to produce a single cohesive narrative description of the video
+      content. Requires extract-scenes to have run first.
+    script: video_frames.py
+    subcommand: narrate
+    invoke: flags
+    returns: text
+    timeout: 300
+    args:
+      - name: work
+        type: string
+        required: true
+        description: "Working dir from extract-scenes stage"
+      - name: prompt
+        type: string
+        required: false
+        default: ""
+        description: "Override the default VLM prompt"
+
+  # --- context_engine.py ----------------------------------------------------
+  - name: run_context_engine
+    description: >-
+      Run the full context engine pipeline: parse Telegram export,
+      transcribe/diarize audio, extract entities, write to SurrealDB
+      knowledge graph, and synthesize an intelligence report. Outputs
+      artifacts include items.json, transcripts/, entities.json, and
+      intelligence_report.md.
+    script: context_engine.py
+    subcommand: run
+    invoke: flags
+    returns: text
+    timeout: 3600
+    args:
+      - name: input
+        type: string
+        required: true
+        description: "Telegram export directory path"
+      - name: work_dir
+        type: string
+        required: true
+        description: "Working directory for all output artifacts"
+      - name: skip_audio
+        type: boolean
+        required: false
+        default: false
+        description: "Skip audio transcription/diarization"
+      - name: skip_entities
+        type: boolean
+        required: false
+        default: false
+        description: "Skip entity extraction stage"
+
+  # NOTE: SurrealDB operations are handled by the built-in MCP server (3.1+).
+  # The agent uses mcp__surreal__query, mcp__surreal__insert, mcp__surreal__upsert,
+  # mcp__surreal__relate, mcp__surreal__select, mcp__surreal__run, etc.
+  # No CLI script tools needed — the harness holds a persistent MCP connection
+  # to SurrealDB's /mcp endpoint. See profiles/_shared/tool_servers.yaml → surreal.
+

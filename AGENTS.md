@@ -2,7 +2,7 @@
 
 > **This is a developer guide for the pux repo (also the Claude Code instruction
 > file). It is NOT a runtime prompt.** The agent base prompt lives at
-> `orgs/general/AGENTS.md` and flows to every org CTO via `extends:` (orgs layer
+> `profiles/general/AGENTS.md` and flows to every org CTO via `extends:` (orgs layer
 > their specialization on top — prompts are additive). Nothing in the runtime
 > reads this file.
 
@@ -64,7 +64,7 @@ or `GET /jobs/{org}/status`.
 
 ## Per-org harness profile
 
-An OPTIONAL `orgs/<name>/profile.yaml` applies small org-wide overrides to the
+An OPTIONAL `profiles/<name>/profile.yaml` applies small org-wide overrides to the
 deepagents stack the harness compiles for that org — the CTO system prompt AND
 every specialist subagent (so the shared `browser` agent inherits it too). It is
 NOT a policy file (no egress/sandbox effect); it shapes the agent graph itself:
@@ -105,7 +105,7 @@ Two more blocks ride on the same file:
   CTO revises, up to `max_iterations`. Per-org opt-in + `enabled: true`; orgs
   without the block are byte-identical to today. The default rubric
   (`rubric.default`) is injected at invoke time by `server._execute` /
-  `main._run`; an operator `--rubric` override wins. `orgs/specialists/dev-bot/profile.yaml`
+  `main._run`; an operator `--rubric` override wins. `profiles/specialists/dev-bot/profile.yaml`
   is the shipped sample (dev-bot is the Claude-Code-equivalent coding org).
 - `middleware:` — add/remove named deepagents middleware per scope
   (`supervisor` / `subagent`). A base set (context + routing + session_guide,
@@ -125,7 +125,7 @@ The loader (`pux-harness/pux_harness/agent/profile.py`) uses deepagents'
 call site rather than the global model-keyed `_HARNESS_PROFILES` registry —
 that registry has no per-org namespace, so two orgs sharing a model would
 collide and the long-lived server path would leak across orgs. Most orgs ship
-no profile; absence is a no-op (byte-identical stack). `orgs/specialists/twitter-agent/
+no profile; absence is a no-op (byte-identical stack). `profiles/specialists/twitter-agent/
 profile.yaml` is the shipped sample.
 
 ## Testing harness rules

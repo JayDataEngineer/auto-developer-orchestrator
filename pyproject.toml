@@ -29,8 +29,7 @@ dev = ["pytest", "pytest-asyncio", "ruff", "mypy"]
 # suite still runs inside the submodule until it is removed (commit 3).
 testpaths = ["tests"]
 pythonpath = ["src", "."]
-# Mirrors pux-harness/pyproject.toml — async tests (e.g. tests/model/
-# test_astream_idle_retry.py for the ReasoningChatOpenAI idle-watchdog) use
+# Async tests (src/profiles + tools exercise asyncio paths) use
 # @pytest.mark.asyncio. Without ``asyncio_mode = auto`` the marker is unknown
 # (PytestUnknownMarkWarning) and the coroutine is never awaited → false fail.
 asyncio_mode = "auto"
