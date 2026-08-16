@@ -15,7 +15,7 @@ place; there is no build step.
   them from the workspace root.
 - **MCP servers** — `.mcp.json` at the repo root (project-level; dcode gates
   it behind workspace trust on first run). Tools arrive server-prefixed, e.g.
-  `web_research_search`, `sandbox_browser_browser_navigate`, `surreal_query`.
+  `web_research_search`, `surreal_query`, `github_get_issue`.
   Each tool's own description says when and how to use it — read it; don't
   re-derive behavior from here.
 

@@ -10,7 +10,7 @@
 # Remote infra (NOT managed here — bring your own GPU box):
 #   Ray cluster on Tailscale — LLM, TTS, 3D, music, ComfyUI.
 
-.PHONY: help infra infra-core infra-status infra-down infra-destroy infra-logs hooks clean
+.PHONY: help infra infra-core infra-nitter infra-status infra-down infra-destroy infra-logs hooks clean
 
 INFRA_COMPOSE := docker compose -f docker-compose.infra.yml
 
@@ -38,6 +38,10 @@ infra-core: ## Start SurrealDB only (lighter — skip media-mcp)
 	@timeout 30 sh -c 'until curl -sf http://localhost:8000/health >/dev/null 2>&1; do sleep 1; done' \
 		&& echo "SurrealDB healthy" || echo "WARNING: SurrealDB not healthy — check: make infra-logs"
 	@echo "SurrealDB at http://localhost:8000 (root:root)"
+
+infra-nitter: ## Start nitter-mcp (opt-in — needs Twitter accounts in infra/nitter/.env)
+	$(INFRA_COMPOSE) up -d nitter-mcp
+	@echo "nitter-mcp at http://127.0.0.1:41730/mcp (READ-ONLY Twitter GraphQL)"
 
 infra-status: ## Show infra container status
 	$(INFRA_COMPOSE) ps

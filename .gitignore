@@ -91,7 +91,6 @@ INSIGHTS-*.md
 /video-productions/
 
 # Internal planning docs
-GAPS-*.md
 
 # Archives / backups (never track tarballs)
 *.tar.gz

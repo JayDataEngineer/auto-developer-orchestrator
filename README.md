@@ -36,6 +36,7 @@ make infra-core             # SurrealDB only
 |---------|------|---------|
 | **SurrealDB** | `localhost:8000` | deep-research, game-studio, social-media (the shared knowledge graph) |
 | **media-mcp** | `localhost:8101` | deep-research (ASR + diarization + vision) — built from the `infra/media-mcp` submodule |
+| **nitter-mcp** | `localhost:41730` | twitter reads (opt-in: `make infra-nitter`; needs accounts in `infra/nitter/.env`) — built from `infra/nitter/` |
 
 Remote services (Ray cluster, Forge, ComfyUI, CompreFace) are bring-your-own;
 the skills name the env vars they read. `.env.example` documents the keys the

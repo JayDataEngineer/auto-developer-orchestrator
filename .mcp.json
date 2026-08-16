@@ -9,15 +9,6 @@
         "research"
       ]
     },
-    "sandbox_browser": {
-      "command": "docker",
-      "args": [
-        "exec",
-        "-i",
-        "${SANDBOX_CONTAINER}",
-        "mc_browser.py"
-      ]
-    },
     "github": {
       "command": "github-mcp-server",
       "args": [

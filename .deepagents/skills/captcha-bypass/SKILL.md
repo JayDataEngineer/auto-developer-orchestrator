@@ -10,6 +10,10 @@ description: >-
 
 # Captcha & Anti-Bot Bypass — The Ladder
 
+> **Provider note:** the `browser_*` tools this skill drives are armed
+> operator-side (browser MCP or a `dcode --sandbox` provider), not in this
+> repo's `.mcp.json`.
+
 When a page shows a Cloudflare "Just a moment…", "Verify you are human", a
 Turnstile/hCaptcha/reCAPTCHA challenge, or any "checking your browser" wall,
 climb this ladder in order.

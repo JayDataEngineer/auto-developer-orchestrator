@@ -170,11 +170,6 @@ services:
       retries: 10
       start_period: 30s
 
-# No TEI service. Embeddings (microsoft/harrier-oss-v1-0.6b) load in-process
-# via sentence-transformers inside the sandbox (sandbox/embed.py). The model
-# card's canonical path is `SentenceTransformer("microsoft/harrier-oss-v1-0.6b")`,
-# not an HTTP server. First use downloads weights to $HF_HOME=/data/hf-cache.
-
 volumes:
   surrealdb-data:
   media-models:
