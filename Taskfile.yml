@@ -14,17 +14,27 @@ tasks:
   test:
     desc: Run the pytest suite (no Docker, no tokens)
     cmds:
-      - uv run pytest -q
+      - uv run --no-sync pytest -q
 
   lint:
     desc: Run ruff linter
     cmds:
-      - uv run ruff check .
+      - uv run --no-sync ruff check .
 
   typecheck:
     desc: Run mypy type checker
     cmds:
-      - uv run mypy .
+      - uv run --no-sync mypy .
+
+  emit:
+    desc: Emit the union dcode surface (.deepagents/ + .mcp.json) at the project root
+    cmds:
+      - uv run --no-sync python -m compiler.cli sync
+
+  check:
+    desc: Drift-check the checked-in dcode surface (exit 1 on drift)
+    cmds:
+      - uv run --no-sync python -m compiler.cli check
 
   contract:
     desc: Validate the declarative org contract (all 10 orgs green; no server)

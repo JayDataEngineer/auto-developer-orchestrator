@@ -24,21 +24,39 @@ pux-harness = { path = "pux-harness", editable = true }
 dev = ["pytest", "pytest-asyncio", "ruff", "mypy"]
 
 [tool.pytest.ini_options]
-# The orchestrator's suite is the INTEGRATION layer: it builds real orgs/
-# (org contract, delegation, export, stack/graph/acp against the installed
-# pux-harness) + the container-side sandbox scripts (sb_server.py JS). The
-# pux-harness library's OWN org-agnostic suite (kit, registry, model resolver)
-# lives in the submodule at pux-harness/tests/.
+# The workspace suite: src/ IS the kit (compiler, profiles, tools, sandbox),
+# imported via ``pythonpath = ["src", "."]``. The pux-harness submodule's own
+# suite still runs inside the submodule until it is removed (commit 3).
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src", "."]
 # Mirrors pux-harness/pyproject.toml — async tests (e.g. tests/model/
 # test_astream_idle_retry.py for the ReasoningChatOpenAI idle-watchdog) use
 # @pytest.mark.asyncio. Without ``asyncio_mode = auto`` the marker is unknown
 # (PytestUnknownMarkWarning) and the coroutine is never awaited → false fail.
 asyncio_mode = "auto"
+markers = [
+    "guards: optional repo-wide AST regression tripwires (tests/guards/) — skip with -m 'not guards'",
+]
 
 [tool.ruff]
 line-length = 100
 
 [tool.mypy]
 python_version = "3.12"
+# src/ is the package root (pytest mirrors this via pythonpath above) —
+# without mypy_path, mypy can't resolve profiles.*/tools.*/sandbox.* imports.
+# explicit_package_bases maps src/compiler/x.py → compiler.x (no src. prefix
+# duplicate) — the same package-base semantics pytest gets from pythonpath.
+mypy_path = ["src"]
+explicit_package_bases = true
+
+# Scoped stubs — all three resolve at the commit-3 uv sync, none are checked
+# today because the current venv can't provision them:
+#   yaml                    — types-PyYAML not installed in the no-sync venv
+#   deepagents_code.*       — the venv's deepagents-code is the 0.0.1 stub
+#                             (no app.py); the real SDK lands at commit 3
+#   openshell*              — the opt-in sandbox arm; its langchain adapter
+#                             pins deepagents<0.6 so it is deliberately absent
+[[tool.mypy.overrides]]
+module = ["yaml", "deepagents_code.*", "openshell", "langchain_nvidia_openshell"]
+ignore_missing_imports = true
