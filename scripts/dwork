@@ -13,4 +13,9 @@ REPO="/home/user/Documents/programs/vendor/dev/auto-developer-orchestrator"
 PY="$HOME/.local/share/uv/tools/deepagents-code/bin/python"
 
 cwd="${1:-$(pwd)}"
+
+# The local provider just needs a key present (llama.cpp accepts any bearer
+# token). The repo .env carries it; this fallback makes dwork unconditional.
+export QWEN_API_KEY="${QWEN_API_KEY:-local-no-key}"
+
 exec "$PY" "$REPO/profiles/run.py" coding -M local-qwen:qwen3.8-27b --cwd "$cwd"

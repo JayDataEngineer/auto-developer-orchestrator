@@ -6,6 +6,12 @@ roster (`.deepagents/agents/`, symlinked to the authored union), a persona
 (`.deepagents/AGENTS.md`), skills (`.deepagents/skills/`) and a scoped MCP
 set (`.mcp.json`). This launcher:
 
+  0. loads the workspace `.env` through dcode's own dotenv loader
+     (`config._load_dotenv` — the same function the CLI's bootstrap runs),
+     anchored to the repo rather than the launch folder, so a session
+     started from anywhere (dwork in any folder, make in the repo) still
+     gets the workspace credentials (QWEN_API_KEY, the OPENAI_* bridge,
+     GITHUB_*). Shell exports always win; `~/.deepagents/.env` fills gaps;
   1. builds a ProjectContext(user_cwd=--cwd or repo, project_root=profiles/<name>)
      — the explicit constructor, because git-root discovery would otherwise
      scope the session to the whole repo; --cwd moves where the session
@@ -172,6 +178,15 @@ def _dry_run(profile: str, ctx, model: str, mcp_tools, server_infos) -> None:
 
 
 async def main() -> int:
+    # Workspace .env first, before anything touches dcode's `settings`
+    # (whose lazy bootstrap would anchor dotenv discovery to the process
+    # CWD — the launch folder — and miss the repo when dwork runs elsewhere).
+    # Same loader the CLI's bootstrap runs; override=False keeps shell
+    # exports on top; missing file is a no-op.
+    from deepagents_code.config import _load_dotenv as _load_workspace_dotenv
+
+    _load_workspace_dotenv(start_path=REPO)
+
     args = _build_parser().parse_args()
 
     profile_root = PROFILES_DIR / args.profile
