@@ -6,9 +6,11 @@ roster (`.deepagents/agents/`, symlinked to the authored union), a persona
 (`.deepagents/AGENTS.md`), skills (`.deepagents/skills/`) and a scoped MCP
 set (`.mcp.json`). This launcher:
 
-  1. builds a ProjectContext(user_cwd=repo, project_root=profiles/<name>)
+  1. builds a ProjectContext(user_cwd=--cwd or repo, project_root=profiles/<name>)
      — the explicit constructor, because git-root discovery would otherwise
-     scope the session to the whole repo;
+     scope the session to the whole repo; --cwd moves where the session
+     starts and the shell runs, the workspace (roster/skills/MCP) stays the
+     profile;
   2. gates the profile's project MCP servers through dcode's native trust
      store (`load_mcp_server_trust_lists` / `add_enabled_project_mcp_servers`)
      with a terminal prompt on first launch;
@@ -54,6 +56,10 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="skip MCP server resolution for this session")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the resolved profile (roster, skills, MCP, model) and exit")
+    parser.add_argument("--cwd", default=None,
+                        help="session working directory (default: the repo). The profile's "
+                             "workspace — roster, skills, MCP scoping — stays the repo; only "
+                             "where the session starts and the shell runs changes.")
     return parser
 
 
@@ -174,6 +180,13 @@ async def main() -> int:
               f"(available: {', '.join(_available_profiles())})", file=sys.stderr)
         return 2
 
+    user_cwd = REPO
+    if args.cwd:
+        user_cwd = Path(args.cwd).expanduser().resolve()
+        if not user_cwd.is_dir():
+            print(f"bad --cwd: {user_cwd} is not a directory", file=sys.stderr)
+            return 2
+
     # ── native imports (public seams only) ────────────────────────────────────
     from deepagents_code.agent import create_cli_agent
     from deepagents_code.app import run_textual_app
@@ -181,7 +194,7 @@ async def main() -> int:
     from deepagents_code.mcp_tools import resolve_and_load_mcp_tools
     from deepagents_code.project_utils import ProjectContext
 
-    ctx = ProjectContext(user_cwd=REPO, project_root=profile_root)
+    ctx = ProjectContext(user_cwd=user_cwd, project_root=profile_root)
     model_spec = args.model or _get_default_model_spec()
     # create_model resolves custom class_path providers from config.toml
     # (a raw 'provider:model' string would only cover langchain-known ones)
@@ -205,14 +218,14 @@ async def main() -> int:
         mcp_tools=mcp_tools,
         mcp_server_info=server_infos,
         project_context=ctx,
-        cwd=REPO,
+        cwd=user_cwd,
     )
 
     result = await run_textual_app(
         agent=agent,
         backend=backend,
         assistant_id=assistant_id,
-        cwd=REPO,
+        cwd=user_cwd,
         initial_prompt=args.message,
         title="dcode",
         sub_title=f"profile · {args.profile}",
