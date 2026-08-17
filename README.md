@@ -20,8 +20,9 @@ resolution). Everything dcode reads is **authored in place**:
   provider).
 - **`.deepagents/AGENTS.md`** — workspace instructions, appended to the main
   agent's system prompt every session.
-- **`profiles/<name>/`** — scoped dcode project roots (roster subset + persona
-  + lane-specific `.mcp.json`) launched by `profiles/run.py` — see Profiles.
+- **`profiles/<name>/`** — the MCP lanes: each profile's `.mcp.json` rides
+  into a session via dcode's native `--mcp-config` seam (coding's declares
+  ZERO) — see Profiles.
 - **`.mcp.json`** — EMPTY by design: MCP is opt-in per lane (context is too
   expensive to spend by default). Servers live in `profiles/<name>/.mcp.json`;
   a bare `dcode` loads none.
@@ -34,36 +35,46 @@ dcode                       # the TUI, the full 30-agent roster, all skills
 dcode -n "task..."          # non-interactive
 ```
 
-## Profiles (scoped sessions, 100% native)
+## Profiles (MCP lanes on a native session)
 
-Every session seeing the whole 30-agent roster and 8 MCP servers is the
-default — **profiles scope it**. A profile is a dcode *project root* under
-`profiles/<name>`: a subagent roster (`.deepagents/agents/`, symlinked to the
-authored union — one source of truth), a persona `AGENTS.md`, skills, and its
-own `.mcp.json`, so only that lane's servers ever load.
+dcode's project context — roster, skills, AGENTS.md, `.mcp.json` — comes
+from the launch folder via **git-root discovery**; any session in this repo
+sees the full union surface by construction. **Profiles scope the MCP lane**:
+`profiles/run.py` opens a native dcode session in a folder with the profile's
+`.mcp.json` attached through dcode's own `--mcp-config` seam, so only that
+lane's servers load (coding declares ZERO — git/github via `execute` + `gh`).
 
 ```bash
-make coding                 # 6 agents  · github + opensandbox (browser via the async subagent)
-make research               # 6 agents  · web_research, surreal, equibles, nitter
-make invest                 # 3 agents  · equibles, web_research, surreal
-make game                   # 10 agents · godot-mcp-runtime, ray_inference, surreal
-make media                  # 5 agents  · ray_inference, surreal
-make social                 # 3 agents  · nitter, surreal (browser via the async subagent)
-make profiles-check         # dry-run every profile (roster + skills + MCP counts)
+make coding                 # union roster · ZERO MCP
+make research               # union roster · web_research, surreal, equibles, nitter
+make invest                 # union roster · equibles, web_research, surreal
+make game                   # union roster · godot-mcp-runtime, ray_inference, surreal
+make media                  # union roster · ray_inference, surreal
+make social                 # union roster · nitter, surreal (browser via the async subagent)
+make profiles-check         # dry-run every profile (roster + skills + MCP lane)
 ```
 
 `profiles/run.py` is the whole launcher — dcode's own seams and nothing else:
-`ProjectContext(user_cwd=repo, project_root=profiles/<name>)` (the explicit
-constructor, since git-root discovery would scope to the repo),
-`resolve_and_load_mcp_tools`, `create_model` (resolves the `pux-openai`
-class_path provider), `create_cli_agent`, `run_textual_app`. Zero monkey
-patches; the TUI, graph, subagents and tools are dcode's, 1:1.
+`config._load_dotenv` anchored to the repo (workspace credentials from any
+launch folder), a single `chdir` into the session folder (the server's
+project context IS the process CWD — git-root discovery picks up roster,
+skills, AGENTS.md there), the native `mcp_config_path` seam for the lane's
+servers, then `run_textual_app` / `run_non_interactive` with `server_kwargs`
+— the app launches the graph server itself and the TUI talks to a
+server-backed `RemoteAgent` (the approval-mode Store lives on that server).
+Zero monkey patches, zero ProjectContext overrides.
 
-First launch of a profile asks once whether to trust its MCP servers
-(approved rows persist in `~/.deepagents/config.toml`, scoped to the profile
-root + server fingerprint — a committed `.mcp.json` can never self-approve;
-change a server definition and it re-prompts). Extra flags reach the launcher
-directly: `profiles/run.py coding -M provider:model -m "task..."`.
+`dwork` (any folder) is the same launcher on the coding lane:
+`profiles/run.py coding -M local-qwen:qwen3.8-27b --cwd <folder>` — the
+folder IS the workspace, the zero-MCP lane and the local model ride along.
+The headless E2E seam is `-n "task..."` (dcode's `run_non_interactive`, the
+same server machinery).
+
+MCP trust is dcode's native flow: servers with a saved approval in
+`~/.deepagents/config.toml` load; new ones prompt once (interactive) or are
+skipped (headless) — a committed `.mcp.json` can never self-approve. Extra
+flags reach the launcher directly:
+`profiles/run.py coding -M provider:model -m "task..." -n "headless task"`.
 
 ## Subagent tool isolation (browser-specialist)
 

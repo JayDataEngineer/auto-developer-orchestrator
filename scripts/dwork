@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# dwork — the coding profile on the local qwen model, opened in any folder.
+# dwork — the coding lane on the local qwen model, opened in any folder.
 #
 #   dwork              # open in the current folder
 #   dwork ~/my/project # open in a specific folder
 #
-# The workspace (roster, skills, zero-MCP lane) is the orchestrator repo's
-# coding profile; only where the session starts and the shell runs changes.
-# The local model means no API keys, no rate limits — see qwen/README.md.
+# The folder IS the workspace: dcode's native git-root discovery applies
+# there (union roster inside the repo, the folder's own .deepagents and
+# .mcp.json otherwise). The coding lane's zero-MCP config and the local
+# model ride along — the local model means no API keys, no rate limits,
+# see qwen/README.md.
 set -euo pipefail
 
 REPO="/home/user/Documents/programs/vendor/dev/auto-developer-orchestrator"

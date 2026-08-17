@@ -107,32 +107,31 @@ sandbox-stop: ## Stop the OpenSandbox server
 # A profile is a dcode project root under profiles/<name>: scoped subagent
 # roster (symlinked to the authored union in .deepagents/agents/), persona
 # AGENTS.md, skills, and its own .mcp.json (only that lane's servers load).
-# profiles/run.py drives dcode's own seams — ProjectContext,
-# resolve_and_load_mcp_tools, create_cli_agent, run_textual_app — no patches.
-# First launch per profile asks once whether to trust its MCP servers
-# (persisted in ~/.deepagents/config.toml, scoped to the profile root).
+# profiles/run.py drives dcode's own seams — chdir (the server's project
+# context IS the process CWD), the --mcp-config lane, run_textual_app /
+# run_non_interactive — no patches. Trust is dcode's native flow.
 
 DCODE_PY := $(HOME)/.local/share/uv/tools/deepagents-code/bin/python
 
-coding: ## dcode · coding profile (6 agents; ZERO MCP — git/github via execute + gh CLI)
+coding: ## dcode · coding lane (union roster; ZERO MCP — git/github via execute + gh CLI)
 	$(DCODE_PY) profiles/run.py coding
 
-research: ## dcode · research profile (6 agents; research/surreal/browser MCP)
+research: ## dcode · research lane (union roster; web_research/surreal/equibles/nitter MCP)
 	$(DCODE_PY) profiles/run.py research
 
-invest: ## dcode · invest profile (3 agents; equibles/research/surreal MCP)
+invest: ## dcode · invest lane (union roster; equibles/web_research/surreal MCP)
 	$(DCODE_PY) profiles/run.py invest
 
-game: ## dcode · game profile (11 agents; godot/ray/surreal MCP)
+game: ## dcode · game lane (union roster; godot/ray/surreal MCP)
 	$(DCODE_PY) profiles/run.py game
 
-media: ## dcode · media profile (5 agents; ray/surreal MCP)
+media: ## dcode · media lane (union roster; ray/surreal MCP)
 	$(DCODE_PY) profiles/run.py media
 
-social: ## dcode · social profile (4 agents; nitter/browser/surreal MCP)
+social: ## dcode · social lane (union roster; nitter/surreal MCP)
 	$(DCODE_PY) profiles/run.py social
 
-profiles-check: ## Dry-run every profile (roster + skills + MCP scoping)
+profiles-check: ## Dry-run every profile (roster + skills + MCP lane)
 	@for p in coding research invest game media social; do \
 		echo "── $$p ──"; \
 		$(DCODE_PY) profiles/run.py $$p --dry-run 2>/dev/null | \
